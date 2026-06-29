@@ -1,33 +1,25 @@
-# TOTIME Web App / PWA v0.8
+# TOTIME Web App / PWA v0.9
 
-Database Edition con Supabase/PostgreSQL.
+Versione Database Edition con Supabase/PostgreSQL.
 
-## Novità v0.8
+## Novità v0.9
 
-- Login separato dalla registrazione.
-- Form di registrazione dedicato con Nome, Cognome, Azienda/Ragione sociale, P.IVA, Email e Password.
-- Nuova tabella `user_profiles` per salvare i dati profilo collegati all'utente Supabase.
-- Messaggi più chiari in fase di accesso/registrazione.
-- Dopo la registrazione, l’app torna automaticamente alla pagina di login.
-- L’utente deve poi accedere con le credenziali appena scelte.
-- Service worker/cache aggiornati a v0.8.
+- Nuova voce `+ Nuovo consuntivo > Consuntivo manuale` con importo libero.
+- Nuova voce `+ Nuovo consuntivo > Spesa di trasferta`.
+- Gestione voci spesa configurabili: Rimborso KM, Pranzo, Cena, Hotel, Autostrada, Parcheggio, Volo, Treno, Taxi, Carburante, Altro.
+- Configurazione template fattura / Fiscozen separata dai consuntivi.
+- Fatturazione con righe generate da template configurabili.
+- Le spese di trasferta sono dettagliate internamente ma fatturate come macro voce `Spese di trasferta`.
+- I consuntivi puntuali non richiedono selezione della voce fattura.
+- Mantenute tutte le funzioni v0.8: login Supabase, Sede e Luogo/Città separati, import CSV, riepiloghi e fatturazione per cliente.
 
-## Prima di pubblicare
+## Prerequisiti database
 
-Prima di caricare questa versione su GitHub/Netlify, eseguire in Supabase lo script:
+Prima di usare la v0.9, devono essere già state create su Supabase le tabelle:
 
-`supabase_migration_v0.7.1_user_profiles.sql`
+- expense_categories
+- travel_expenses
+- manual_entries
+- invoice_templates
 
-Il progetto continua a usare Supabase come database principale.
-
-
-## Aggiornamento v0.8
-
-Questa versione allinea il Timesheet al nuovo data model Supabase con campi separati:
-
-- `work_site` = Sede / modalità di lavoro, ad esempio Remoto, Casa, Ufficio, Sede cliente, Onsite cliente.
-- `work_city` = Luogo/Città, ad esempio Verona, Milano, Canicattì.
-
-L'import CSV legge le colonne `Sede` e `Luogo/Città` separatamente e le salva nel database.
-
-Prima di usare la v0.8, eseguire su Supabase la migration che aggiunge `work_site` e `work_city` a `timesheet_entries`.
+E devono essere caricate le configurazioni iniziali per voci spesa e template Fiscozen.
