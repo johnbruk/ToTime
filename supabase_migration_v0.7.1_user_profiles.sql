@@ -1,17 +1,48 @@
-:root{
-  --bg:#020916; --bg2:#06101E; --surface:#0A1525; --surface2:#101D31; --card:#0C192B; --card2:#10213A;
-  --text:#F5F7FB; --muted:#93A2B8; --soft:#C5CDDA; --line:rgba(148,166,196,.16);
-  --primary:#4F8DFF; --primary2:#76B7FF; --blue:#4F8DFF; --green:#5DDD93; --orange:#F7A647; --purple:#8A6DFF; --red:#FF6B6B;
-  --radius:22px; --radius2:16px; --shadow:0 18px 42px rgba(0,0,0,.28);
-  --font-sf:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","Segoe UI",sans-serif;
-  --font-ny:"New York",Georgia,"Times New Roman",serif;
-}
-:root[data-theme="light"]{
-  --bg:#F3F6FB; --bg2:#EAF0F8; --surface:#FFFFFF; --surface2:#F7FAFE; --card:#FFFFFF; --card2:#F4F8FF;
-  --text:#081528; --muted:#6A7587; --soft:#384760; --line:rgba(26,42,66,.12); --shadow:0 14px 30px rgba(15,31,56,.10);
-}
-*{box-sizing:border-box} html{background:var(--bg)}
-body{margin:0;min-height:100vh;color:var(--text);font-family:var(--font-sf);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;background:radial-gradient(circle at 18% -12%,rgba(79,141,255,.22),transparent 36%),radial-gradient(circle at 94% 4%,rgba(138,109,255,.12),transparent 28%),linear-gradient(180deg,var(--bg2),var(--bg));}
-button,input,select,textarea{font-family:var(--font-sf)} button{cursor:pointer;-webkit-tap-highlight-color:transparent} b,strong{font-weight:760}
-.app{width:min(720px,100%);margin:0 auto;min-height:100vh;padding:18px 16px 98px}.header{display:grid;grid-template-columns:46px 1fr 46px;align-items:center;gap:10px;margin:4px 0 18px}.brand{display:flex;align-items:center;gap:12px;min-width:0}.brandCenter{justify-content:center;text-align:center}.brandIcon{width:42px;height:42px;border-radius:14px;object-fit:cover;box-shadow:var(--shadow);border:1px solid var(--line)}.brandName{font-size:18px;font-weight:760;letter-spacing:6px;color:var(--text);line-height:1.1}.brandTagline{font-family:var(--font-ny);font-size:12px;letter-spacing:.25px;color:var(--muted);margin-top:4px}.headerIcon,.iconbtn{border:1px solid var(--line);background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,.015));color:var(--soft);border-radius:15px;width:42px;height:42px;display:grid;place-items:center;box-shadow:var(--shadow);font-size:16px}.screenTitle,h1{font-size:24px;line-height:1.18;margin:18px 0 10px;font-weight:760;letter-spacing:-.25px}.sub,.small{font-size:14px;line-height:1.42;color:var(--muted)}h2{font-size:18px;margin:22px 0 10px;letter-spacing:-.1px}.version{text-align:center;margin:22px 0 4px;color:var(--muted);font-size:12px}.toast{border:1px solid rgba(79,141,255,.28);background:rgba(79,141,255,.11);padding:12px 14px;border-radius:16px;margin:12px 0;color:var(--soft);font-size:14px}.homeTop{margin-top:-4px}.month{display:flex;align-items:center;justify-content:center;gap:16px;margin:10px 0 16px}.month button{border:1px solid var(--line);background:linear-gradient(180deg,var(--surface2),var(--surface));color:var(--soft);border-radius:15px;width:42px;height:42px;box-shadow:var(--shadow);font-size:22px}.month strong{font-size:17px;font-weight:700;letter-spacing:-.1px;min-width:152px;text-align:center}.card,.dashboardCard{background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,.018)),var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px;margin:14px 0}.heroCard{padding:18px 18px 16px;overflow:hidden;position:relative}.heroCard:after{content:"";position:absolute;right:-34px;top:-48px;width:150px;height:150px;border-radius:50%;background:radial-gradient(circle,rgba(79,141,255,.16),transparent 64%);pointer-events:none}.kpiGrid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.kpiGrid.three{grid-template-columns:1fr 1fr 1fr}.kpiGrid div{padding-right:12px;border-right:1px solid var(--line);min-width:0}.kpiGrid div:last-child{border-right:0}.kpiGrid span{display:block;font-size:12.5px;color:var(--muted);margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.kpiGrid strong{display:block;font-size:22px;line-height:1.08;font-weight:760;letter-spacing:-.35px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.kpiGrid small{display:block;font-size:12.5px;color:var(--muted);margin-top:6px}.chartWrap{margin-top:17px;border-top:1px solid var(--line);padding-top:12px}.chartTitle{display:flex;justify-content:space-between;gap:10px;color:var(--muted);font-size:12.5px;margin-bottom:6px}.lineChart{width:100%;height:92px;display:block}.lineChart line{stroke:rgba(148,166,196,.18);stroke-width:.65}.lineChart polyline{fill:none;stroke:url(#g);stroke:var(--primary2);stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;filter:drop-shadow(0 0 5px rgba(79,141,255,.32))}.miniChart{height:86px;margin-top:16px;border-top:1px solid var(--line);position:relative;display:flex;align-items:flex-end;gap:6px;padding:16px 4px 4px}.miniChart:before{content:"";position:absolute;left:0;right:0;top:44px;border-top:1px dashed var(--line)}.miniChart span{display:block;height:4px;border-radius:999px;background:linear-gradient(90deg,var(--primary),var(--primary2));box-shadow:0 0 18px rgba(79,141,255,.35)}.total .amount,.amount{font-size:26px;font-weight:760;letter-spacing:-.35px}.meta,.metricLine{display:flex;flex-wrap:wrap;gap:8px;align-items:center;color:var(--soft);font-weight:680;font-size:14px}.metricLine .dot{color:var(--primary);font-weight:900;margin:0 1px}.grid{display:grid;grid-template-columns:1fr;gap:12px;margin-top:14px}@media(min-width:720px){.grid{grid-template-columns:1fr 1fr}.wide{grid-column:span 2}}.primary,.secondary,.menuBtn{width:100%;border-radius:17px;padding:14px 16px;border:1px solid var(--line);font-size:15.5px;font-weight:720;display:flex;align-items:center;justify-content:center;gap:9px;box-shadow:var(--shadow)}.primary{background:linear-gradient(135deg,#347EFF,#185EE6);border-color:rgba(118,183,255,.42);color:white}.primary.cta{height:58px;margin:16px 0 14px;font-size:17px}.secondary,.menuBtn{background:linear-gradient(180deg,var(--surface2),var(--surface));color:var(--text)}.danger{color:var(--red)}.list{border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,.032),rgba(255,255,255,.014)),var(--card);box-shadow:var(--shadow);margin:14px 0}.row{display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:center;padding:15px 16px;border-bottom:1px solid var(--line);transition:background .16s ease}.row:last-child{border-bottom:0}.row:hover{background:rgba(127,160,210,.06)}.menuList{background:transparent;border:0;box-shadow:none;display:grid;gap:10px;overflow:visible}.menuList .row{border:1px solid var(--line);border-radius:18px;background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,.012)),var(--card);box-shadow:var(--shadow);min-height:76px}.date{font-weight:700;color:var(--muted);font-size:13px;min-width:46px}.title{font-weight:730;color:var(--text);font-size:16px;letter-spacing:-.1px}.desc{font-size:13.5px;line-height:1.36;color:var(--muted);margin-top:4px}.value{text-align:right;font-weight:720;color:var(--text);font-size:14.5px}.chev{font-size:24px;color:var(--muted);font-weight:380}.roundIcon{width:44px;height:44px;border-radius:16px;display:grid;place-items:center;color:#fff;font-weight:760;font-size:20px}.roundIcon.blue{background:linear-gradient(135deg,#2E63DE,#4F8DFF)}.roundIcon.purple{background:linear-gradient(135deg,#6949D8,#8A6DFF)}.roundIcon.green{background:linear-gradient(135deg,#2A985A,#5DDD93)}.roundIcon.orange{background:linear-gradient(135deg,#DA7B26,#F7A647)}.roundIcon.gray{background:linear-gradient(135deg,#334154,#50617A)}.tag{display:inline-block;border-radius:999px;padding:4px 9px;font-size:12px;font-weight:700;margin-top:7px}.tag.orange{background:rgba(247,166,71,.15);color:var(--orange)}.tag.blue{background:rgba(79,141,255,.16);color:var(--primary2)}.tag.green{background:rgba(93,221,147,.14);color:var(--green)}.tag.gray{background:rgba(147,162,184,.14);color:var(--muted)}.form{display:grid;gap:12px}.field label{display:block;color:var(--muted);font-size:13px;font-weight:700;margin-bottom:6px}.field input,.field select,.field textarea{width:100%;border:1px solid var(--line);border-radius:15px;background:linear-gradient(180deg,var(--surface2),var(--surface));color:var(--text);padding:13px 14px;font-size:15px}.field textarea{min-height:88px;resize:vertical}.field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:rgba(79,141,255,.66);box-shadow:0 0 0 3px rgba(79,141,255,.15)}.actions{display:grid;gap:10px;margin-top:14px}.tabs{display:flex;gap:8px;margin:12px 0;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:4px}.tabs button{flex:1;border:0;border-radius:12px;padding:10px;font-weight:700;background:transparent;color:var(--muted);font-size:14px}.tabs button.active{background:linear-gradient(135deg,#4F8DFF,#2067EA);color:white}.empty{text-align:center;color:var(--muted);padding:28px}.copybox{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:rgba(79,141,255,.08);border:1px dashed rgba(79,141,255,.34);border-radius:14px;padding:13px;font-size:12.5px;line-height:1.45;color:var(--soft);margin:8px 0}.calc{background:rgba(79,141,255,.07);border:1px solid var(--line);border-radius:16px;padding:14px}.themeChoice{display:grid;grid-template-columns:1fr;gap:10px}.themeChoice button{text-align:left;border:1px solid var(--line);border-radius:18px;background:var(--surface2);color:var(--text);padding:16px}.themeChoice button.active{border-color:rgba(79,141,255,.72);box-shadow:0 0 0 3px rgba(79,141,255,.13)}.themeChoice b{display:block;font-size:16px;margin-bottom:5px}.themeChoice span{display:block;color:var(--muted);font-size:13px}.nav{position:fixed;left:0;right:0;bottom:0;background:rgba(2,9,22,.82);backdrop-filter:blur(24px);border-top:1px solid var(--line);display:flex;justify-content:center;gap:4px;padding:8px max(8px,env(safe-area-inset-left)) calc(8px + env(safe-area-inset-bottom));z-index:10}.nav button{border:0;background:transparent;color:var(--muted);font-weight:650;font-size:11px;padding:8px 10px;border-radius:15px;min-width:62px;display:grid;gap:3px;place-items:center}.nav button span{font-size:20px;line-height:1}.nav button em{font-style:normal}.nav button.active{color:var(--primary2);background:rgba(79,141,255,.13)}:root[data-theme="light"] .nav{background:rgba(255,255,255,.86)}
-@media(max-width:430px){.app{padding:16px 12px 92px}.brandName{font-size:17px;letter-spacing:5px}.brandTagline{font-size:11px}.screenTitle,h1{font-size:23px}.kpiGrid.three{gap:10px}.kpiGrid strong{font-size:20px}.kpiGrid span,.kpiGrid small{font-size:12px}.title{font-size:15.5px}.desc{font-size:13px}.primary,.secondary,.menuBtn{font-size:15px}.metricLine{font-size:13px}.row{padding:14px 13px}.nav button{min-width:56px;padding:8px 7px}.month strong{min-width:136px}.roundIcon{width:42px;height:42px}.chartWrap{margin-top:15px}}
+-- TOTIME v0.7.1 - User profile registration data
+-- Eseguire in Supabase SQL Editor prima di pubblicare la v0.7.1.
+
+create table if not exists public.user_profiles (
+    id uuid primary key default gen_random_uuid(),
+    user_id uuid not null default auth.uid() unique,
+    first_name text not null default '',
+    last_name text not null default '',
+    company_name text not null default '',
+    vat_number text not null default '',
+    email text not null default '',
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+);
+
+alter table public.user_profiles enable row level security;
+
+create or replace function public.set_updated_at()
+returns trigger as $$
+begin
+    new.updated_at = now();
+    return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists set_user_profiles_updated_at on public.user_profiles;
+create trigger set_user_profiles_updated_at
+before update on public.user_profiles
+for each row execute function public.set_updated_at();
+
+create index if not exists idx_user_profiles_user_id on public.user_profiles(user_id);
+
+-- Policies: ogni utente vede e modifica solo il proprio profilo.
+drop policy if exists "user_profiles_select_own" on public.user_profiles;
+create policy "user_profiles_select_own" on public.user_profiles
+for select using (auth.uid() = user_id);
+
+drop policy if exists "user_profiles_insert_own" on public.user_profiles;
+create policy "user_profiles_insert_own" on public.user_profiles
+for insert with check (auth.uid() = user_id);
+
+drop policy if exists "user_profiles_update_own" on public.user_profiles;
+create policy "user_profiles_update_own" on public.user_profiles
+for update using (auth.uid() = user_id);
+
+drop policy if exists "user_profiles_delete_own" on public.user_profiles;
+create policy "user_profiles_delete_own" on public.user_profiles
+for delete using (auth.uid() = user_id);
