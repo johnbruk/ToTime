@@ -1,4 +1,4 @@
-const APP_VERSION='v0.7';
+const APP_VERSION='v0.7.2';
 const SUPABASE_URL='https://mdnttasmkgnaxzkxqaks.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY='sb_publishable_Ftv4e-vlXgWEs2aV7BFSTw_CcX1DVT9';
 const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);
@@ -10,9 +10,9 @@ const norm=s=>String(s||'').trim();
 const monthNames=['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const today=new Date();
 const ym=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-let state={view:'home',month:ym(today),edit:null,editType:null,loading:true,tab:'daily',message:''};
+let state={view:'home',month:ym(today),edit:null,editType:null,loading:true,tab:'daily',message:'',authMode:'login'};
 let session=null;
-let data={clients:[],projects:[],activities:[],entries:[],monthly:[],billingHeaders:[]};
+let data={clients:[],projects:[],activities:[],entries:[],monthly:[],billingHeaders:[],profiles:[]};
 
 function monthLabel(m){const [y,mo]=m.split('-').map(Number);return `${monthNames[mo-1]} ${y}`}
 function periodParts(m=state.month){const [year,month]=m.split('-').map(Number);return {year,month}}
@@ -50,13 +50,14 @@ async function init(){
   session=res.data.session;
   if(session) await fetchAll();
   state.loading=false; render();
-  sb.auth.onAuthStateChange(async(_event,newSession)=>{session=newSession; if(session){await fetchAll();state.view='home'} else {data={clients:[],projects:[],activities:[],entries:[],monthly:[],billingHeaders:[]};state.view='login'} render();});
+  sb.auth.onAuthStateChange(async(_event,newSession)=>{session=newSession; if(session){await fetchAll();state.view='home'} else {data={clients:[],projects:[],activities:[],entries:[],monthly:[],billingHeaders:[],profiles:[]};state.view='login';state.authMode='login'} render();});
 }
 async function fetchAll(){
   state.loading=true; render();
+  await ensureUserProfileFromMetadata();
   const tables=[
     ['clients','clients'],['projects','projects'],['activities','activities'],
-    ['timesheet_entries','entries'],['monthly_compensations','monthly'],['billing_headers','billingHeaders']
+    ['user_profiles','profiles'],['timesheet_entries','entries'],['monthly_compensations','monthly'],['billing_headers','billingHeaders']
   ];
   for(const [table,key] of tables){
     let q=sb.from(table).select('*');
@@ -70,13 +71,67 @@ async function fetchAll(){
 }
 async function reload(){await fetchAll();render()}
 
+async function ensureUserProfileFromMetadata(){
+  if(!session?.user) return;
+  try{
+    const {data:existing,error:selectError}=await sb.from('user_profiles').select('*').eq('user_id',session.user.id).maybeSingle();
+    if(selectError){console.warn('user_profiles select',selectError);return;}
+    if(existing) return;
+    const m=session.user.user_metadata||{};
+    const payload={
+      first_name:m.first_name||'',
+      last_name:m.last_name||'',
+      company_name:m.company_name||'',
+      vat_number:m.vat_number||'',
+      email:session.user.email||m.email||''
+    };
+    const {error}=await sb.from('user_profiles').insert(payload);
+    if(error) console.warn('user_profiles insert',error);
+  }catch(e){console.warn('ensureUserProfileFromMetadata',e)}
+}
+
+
 function appShell(content){return `<div class="app"><div class="header"><div class="brand"><img class="brandIcon" src="assets/totime-icon-dark.png" alt="TOTIME"><div><div class="brandName">TOTIME</div><div class="brandTagline">Il tuo tempo. Il tuo valore.</div></div></div><button class="iconbtn" onclick="go('settings')" title="Configurazione">⚙</button></div>${state.message?`<div class="card small">${esc(state.message)}</div>`:''}${content}<div class="small" style="text-align:center;margin:24px 0 4px">${APP_VERSION} · Database Edition</div></div>${nav()}`}
 function nav(){const items=[['home','Home'],['timesheet','Timesheet'],['summary','Riepilogo'],['billing','Fatture'],['settings','Config']];return `<div class="nav">${items.map(([v,l])=>`<button class="${state.view===v?'active':''}" onclick="go('${v}')">${l}</button>`).join('')}</div>`}
 function monthSelector(){return `<div class="month"><button onclick="changeMonth(-1)">‹</button><strong>${monthLabel(state.month)}</strong><button onclick="changeMonth(1)">›</button></div>`}
 function loadingView(){return `<div class="app"><div class="brand"><img class="brandIcon" src="assets/totime-icon-dark.png" alt="TOTIME"><div><div class="brandName">TOTIME</div><div class="brandTagline">Il tuo tempo. Il tuo valore.</div></div></div><div class="card"><h1>Caricamento...</h1><p class="sub">Connessione al database Supabase.</p></div></div>`}
-function loginView(){return `<div class="app"><div class="brand" style="margin-top:24px"><img class="brandIcon" src="assets/totime-icon-dark.png" alt="TOTIME"><div><div class="brandName">TOTIME</div><div class="brandTagline">Il tuo tempo. Il tuo valore.</div></div></div><div class="card"><h1>Accesso</h1><p class="sub">Accedi per salvare clienti, consuntivi, fatture e incassi nel database.</p>${state.message?`<p class="small">${esc(state.message)}</p>`:''}<form class="form" onsubmit="signIn(event)"><div class="field"><label>Email</label><input name="email" type="email" autocomplete="email" required></div><div class="field"><label>Password</label><input name="password" type="password" autocomplete="current-password" required></div><button class="primary">Accedi</button><button type="button" class="secondary" onclick="signUpFromForm(this.form)">Crea account</button></form></div></div>`}
-async function signIn(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const {error}=await sb.auth.signInWithPassword({email:f.email,password:f.password});if(error) setMsg(error.message);}
-async function signUpFromForm(form){const f=Object.fromEntries(new FormData(form));if(!f.email||!f.password) return setMsg('Inserisci email e password.');const {error}=await sb.auth.signUp({email:f.email,password:f.password});if(error) setMsg(error.message);else setMsg('Account creato. Se Supabase richiede conferma email, controlla la posta prima di accedere.');}
+function loginView(){return `<div class="app"><div class="brand" style="margin-top:24px"><img class="brandIcon" src="assets/totime-icon-dark.png" alt="TOTIME"><div><div class="brandName">TOTIME</div><div class="brandTagline">Il tuo tempo. Il tuo valore.</div></div></div><div class="card"><h1>Accesso</h1><p class="sub">Accedi per salvare clienti, consuntivi, fatture e incassi nel database.</p>${state.message?`<p class="small">${esc(state.message)}</p>`:''}<form class="form" onsubmit="signIn(event)"><div class="field"><label>Email</label><input name="email" type="email" autocomplete="email" required></div><div class="field"><label>Password</label><input name="password" type="password" autocomplete="current-password" required></div><button class="primary">Accedi</button><button type="button" class="secondary" onclick="state.view='register';state.message='';render()">Registrati</button></form></div></div>`}
+function registerView(){return `<div class="app"><div class="brand" style="margin-top:24px"><img class="brandIcon" src="assets/totime-icon-dark.png" alt="TOTIME"><div><div class="brandName">TOTIME</div><div class="brandTagline">Il tuo tempo. Il tuo valore.</div></div></div><div class="card"><h1>Crea account TOTIME</h1><p class="sub">Inserisci i dati del tuo profilo. Li useremo per collegare configurazioni, consuntivi e fatturazione al tuo account.</p>${state.message?`<p class="small">${esc(state.message)}</p>`:''}<form class="form" onsubmit="signUpDetailed(event)"><div class="field"><label>Nome</label><input name="first_name" autocomplete="given-name" required></div><div class="field"><label>Cognome</label><input name="last_name" autocomplete="family-name" required></div><div class="field"><label>Azienda / Ragione sociale</label><input name="company_name" autocomplete="organization" required></div><div class="field"><label>P.IVA</label><input name="vat_number" inputmode="numeric" autocomplete="off" required></div><div class="field"><label>Email</label><input name="email" type="email" autocomplete="email" required></div><div class="field"><label>Password</label><input name="password" type="password" autocomplete="new-password" minlength="6" required></div><button class="primary">Crea account</button><button type="button" class="secondary" onclick="state.view='login';state.message='';render()">Torna al login</button></form></div></div>`}
+async function signIn(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));state.message='Accesso in corso...';render();const {error}=await sb.auth.signInWithPassword({email:f.email,password:f.password});if(error) setMsg(error.message);}
+async function signUpDetailed(ev){
+  ev.preventDefault();
+  const f=Object.fromEntries(new FormData(ev.target));
+  if(!f.email||!f.password||!f.first_name||!f.last_name||!f.company_name||!f.vat_number) return setMsg('Compila tutti i campi.');
+  state.message='Creazione account in corso...';render();
+  const {data:authData,error}=await sb.auth.signUp({
+    email:f.email,
+    password:f.password,
+    options:{data:{first_name:f.first_name,last_name:f.last_name,company_name:f.company_name,vat_number:f.vat_number,email:f.email}}
+  });
+  if(error) return setMsg(error.message);
+  if(authData.user){
+    // Salva sempre il profilo utente appena l'account viene creato.
+    // Dopo la registrazione TOTIME torna al login: l'utente deve accedere con le credenziali scelte.
+    const {error:profileError}=await sb.from('user_profiles').upsert({
+      user_id:authData.user.id,
+      first_name:f.first_name,
+      last_name:f.last_name,
+      company_name:f.company_name,
+      vat_number:f.vat_number,
+      email:f.email
+    },{onConflict:'user_id'});
+    if(profileError) return setMsg('Account creato, ma profilo non salvato: '+profileError.message);
+  }
+  if(authData.session){
+    await sb.auth.signOut();
+  }
+  data={clients:[],projects:[],activities:[],entries:[],monthly:[],billingHeaders:[],profiles:[]};
+  session=null;
+  state.view='login';
+  state.message='Account creato correttamente. Ora accedi con email e password.';
+  render();
+}
+async function signUpFromForm(form){state.view='register';render()}
 async function logout(){await sb.auth.signOut()}
 
 function home(){const t=totals();return appShell(`<div class="hello">Ciao Giovanni</div>${monthSelector()}<div class="card total"><div class="sub">Totale mese</div><div class="amount">${fmtEUR(t.amount)}</div><div class="meta"><span>${fmtNum(t.hours,1)} h</span><span>${fmtNum(t.days,1)} gg/u</span></div></div><div class="grid"><button class="primary wide" onclick="newEntryChoice()">+ Nuovo consuntivo</button><button class="menuBtn" onclick="go('timesheet')">🗓 Timesheet <span>›</span></button><button class="menuBtn" onclick="go('summary')">📊 Riepilogo <span>›</span></button><button class="menuBtn" onclick="go('billing')">🧾 Fatturazione <span>›</span></button><button class="menuBtn" onclick="go('settings')">⚙️ Configurazione <span>›</span></button></div>`)}
@@ -141,6 +196,6 @@ function toMonth(v){const d=toDate(v);if(d)return d.slice(0,7);v=norm(v);if(/^\d
 async function importCsv(ev){const file=ev.target.files?.[0];if(!file)return;const reader=new FileReader();reader.onload=async()=>{try{const text=reader.result.replace(/^\uFEFF/,'').trim();if(!text)return setMsg('CSV vuoto.');const lines=text.split(/\r?\n/).filter(Boolean);const sep=(lines[0].match(/;/g)||[]).length>=(lines[0].match(/,/g)||[]).length?';':',';const headers=parseCsvLine(lines.shift(),sep).map(canonHeader);const get=(row,names)=>{for(const n of names.map(canonHeader)){const i=headers.indexOf(n);if(i>=0)return row[i]||''}return''};let count=0;for(const line of lines){const row=parseCsvLine(line,sep);if(!row.some(x=>norm(x)))continue;const tipoRaw=get(row,['tipo','type']);const tipo=(tipoRaw||'Tariffa giornaliera 8h').toLowerCase();const cliente=norm(get(row,['cliente','client']));if(!cliente)continue;const isMonthly=tipo.includes('mens')||tipo.includes('monthly')||tipo.includes('una tantum');const ore=parseAmount(get(row,['ore','hours']));const amount=parseAmount(get(row,['importo','amount']));let rowRate=amount>0&&ore>0?amount/ore*8:0;const client=await ensureClient(cliente,isMonthly?'monthly':'daily',rowRate);if(!client.daily_rate&&rowRate>0){await sb.from('clients').update({daily_rate:rowRate}).eq('id',client.id);client.daily_rate=rowRate}const progetto=norm(get(row,['cliente/progetto','progetto','cliente finale','project']));const project=await ensureProject(client.id,progetto);const att=norm(get(row,['attività','attivita','attivit','activity']));const activity=await ensureActivity(att);const descrizione=get(row,['descrizione','description']);const luogo=norm(get(row,['luogo/sede','luogo','sede','luogo di lavoro','work location','location']));const note=get(row,['note','notes']);if(isMonthly){const mese=norm(get(row,['mese','month']))||toMonth(get(row,['data','date']))||state.month;const [year,month]=mese.split('-').map(Number);const payload={year,month,client_id:client.id,project_id:project?.id||null,description:descrizione||null,notes:note||null,amount};const {error}=await sb.from('monthly_compensations').insert(payload);if(error)throw error;count++;}else{const date=toDate(get(row,['data','date']))||new Date().toISOString().slice(0,10);const rate=rowRate||Number(client.daily_rate||0);const payload={entry_date:date,client_id:client.id,project_id:project?.id||null,activity_id:activity?.id||null,work_location:luogo||null,description:descrizione||null,notes:note||null,hours:ore,daily_rate_snapshot:rate,standard_hours_snapshot:8};const {error}=await sb.from('timesheet_entries').insert(payload);if(error)throw error;count++;}}
 await fetchAll();state.view='timesheet';setMsg(`Import completato: ${count} righe salvate su Supabase.`);}catch(e){console.error(e);setMsg('Errore import CSV: '+(e.message||e));}};reader.readAsText(file,'windows-1252')}
 function exportData(){const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='totime-supabase-backup.json';a.click()}
-function render(){if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(!session){document.getElementById('app').innerHTML=loginView();return}let html='';if(state.view==='home')html=home();if(state.view==='newChoice')html=newChoice();if(state.view==='dailyForm')html=dailyForm();if(state.view==='dailyEdit')html=dailyEdit();if(state.view==='monthlyForm')html=monthlyForm();if(state.view==='monthlyEdit')html=monthlyEdit();if(state.view==='timesheet')html=timesheet();if(state.view==='summary')html=summary();if(state.view==='billing')html=billing();if(state.view==='billingDetail')html=billingDetailView();if(state.view==='settings')html=settings();if(state.view==='clients')html=clients();if(state.view==='projects')html=projects();if(state.view==='activities')html=activities();if(state.view==='clientEdit')html=clientEdit();if(state.view==='projectEdit')html=projectEdit();if(state.view==='activityEdit')html=activityEdit();document.getElementById('app').innerHTML=html||home()}
+function render(){if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(!session){document.getElementById('app').innerHTML=(state.view==='register'?registerView():loginView());return}let html='';if(state.view==='home')html=home();if(state.view==='newChoice')html=newChoice();if(state.view==='dailyForm')html=dailyForm();if(state.view==='dailyEdit')html=dailyEdit();if(state.view==='monthlyForm')html=monthlyForm();if(state.view==='monthlyEdit')html=monthlyEdit();if(state.view==='timesheet')html=timesheet();if(state.view==='summary')html=summary();if(state.view==='billing')html=billing();if(state.view==='billingDetail')html=billingDetailView();if(state.view==='settings')html=settings();if(state.view==='clients')html=clients();if(state.view==='projects')html=projects();if(state.view==='activities')html=activities();if(state.view==='clientEdit')html=clientEdit();if(state.view==='projectEdit')html=projectEdit();if(state.view==='activityEdit')html=activityEdit();document.getElementById('app').innerHTML=html||home()}
 if('serviceWorker' in navigator){navigator.serviceWorker.register('./sw.js').catch(()=>{})}
 init();

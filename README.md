@@ -1,27 +1,21 @@
-# TOTIME Web App / PWA v0.7 — Database Edition
+# TOTIME Web App / PWA v0.7.2
 
-Questa versione collega TOTIME a Supabase/PostgreSQL.
+Database Edition con Supabase/PostgreSQL.
 
-## Novità principali
+## Novità v0.7.2
 
-- Login utente con Supabase Auth.
-- Clienti, progetti, attività, timesheet, compensi mensili e stati fattura salvati su Supabase.
-- localStorage non è più lo storage principale dei dati.
-- Import CSV direttamente nel database.
-- Fatturazione organizzata come fattura mensile per cliente, con righe progetto/cliente finale copiabili singolarmente in Fiscozen.
-- Tema dark / colori invertiti e font Apple system stack.
+- Login separato dalla registrazione.
+- Form di registrazione dedicato con Nome, Cognome, Azienda/Ragione sociale, P.IVA, Email e Password.
+- Nuova tabella `user_profiles` per salvare i dati profilo collegati all'utente Supabase.
+- Messaggi più chiari in fase di accesso/registrazione.
+- Dopo la registrazione, l’app torna automaticamente alla pagina di login.
+- L’utente deve poi accedere con le credenziali appena scelte.
+- Service worker/cache aggiornati a v0.7.2.
 
-## Configurazione Supabase
+## Prima di pubblicare
 
-La configurazione è già impostata nel file `app.js`:
+Prima di caricare questa versione su GitHub/Netlify, eseguire in Supabase lo script:
 
-- `SUPABASE_URL`
-- `SUPABASE_PUBLISHABLE_KEY`
+`supabase_migration_v0.7.1_user_profiles.sql`
 
-Non inserire mai secret key o service role key nel frontend.
-
-## Deploy
-
-Carica il contenuto della cartella su GitHub e pubblica con Netlify/Vercel.
-
-Se hai già installato una versione precedente come PWA, dopo il deploy fai refresh forzato o rimuovi/reinstalla l'app dalla Home per evitare cache vecchie.
+Il progetto continua a usare Supabase come database principale.
