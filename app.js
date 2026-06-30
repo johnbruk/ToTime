@@ -1,17 +1,19 @@
-const APP_VERSION='v1.1.1';
-const SUPABASE_URL='https://mdnttasmkgnaxzkxqaks.supabase.co';
-const SUPABASE_PUBLISHABLE_KEY='sb_publishable_Ftv4e-vlXgWEs2aV7BFSTw_CcX1DVT9';
-const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);
+import {
+  APP_VERSION,
+  DEFAULT_DEFAULT_ACTIVITY_START_DATE,
+  SUPABASE_URL,
+  SUPABASE_PUBLISHABLE_KEY,
+  esc,
+  fmtEUR,
+  fmtNum,
+  monthNames,
+  norm,
+  today,
+  ym
+} from './src/app-utils.js';
 
-const fmtEUR=n=>new Intl.NumberFormat('it-IT',{style:'currency',currency:'EUR'}).format(Number(n||0));
-const fmtNum=(n,d=1)=>new Intl.NumberFormat('it-IT',{minimumFractionDigits:d,maximumFractionDigits:d}).format(Number(n||0));
-const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
-const norm=s=>String(s||'').trim();
-const monthNames=['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
-const today=new Date();
-const DEFAULT_DEFAULT_ACTIVITY_START_DATE='2026-01-02';
-const ym=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-let state={view:'home',month:ym(today),edit:null,editType:null,loading:true,message:'',theme:localStorage.getItem('totime-theme')||'dark'};
+const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);
+let state={view:'home',month:ym(today),edit:null,editType:null,loading:true,message:'',theme:localStorage.getItem('totime-theme')||'dark',menuOpen:false,history:[],dirty:false};
 let session=null;
 let data={clients:[],projects:[],activities:[],entries:[],monthly:[],billingHeaders:[],profiles:[],expenseCategories:[],travelExpenses:[],manualEntries:[],invoiceTemplates:[],appSettings:[],taxSettings:[],taxPayments:[]};
 applyTheme();
@@ -48,7 +50,15 @@ function totals(){let h=0,a=0;rowsForMonth().forEach(e=>{h+=Number(e.hours||0);a
 function metricLine(hours,amount){return `${fmtNum(hours,1)} h <span class="dot">·</span> ${fmtNum(Number(hours||0)/8,1)} gg/u <span class="dot">·</span> ${fmtEUR(amount)}`}
 function amountLine(label,amount){return `${esc(label)} <span class="dot">·</span> ${fmtEUR(amount)}`}
 function dateIT(v){if(!v)return'';const s=String(v);return `${s.slice(8,10)}/${s.slice(5,7)}`}
-function go(v){state.view=v;state.edit=null;state.editType=null;render()}
+function viewLabel(v){return ({home:'Home',timesheet:'Timesheet',summary:'Riepilogo',billing:'Fatture',billingDetail:'Dettaglio fattura',tax:'Fiscalità',settings:'Altro',clients:'Clienti',clientEdit:'Cliente',projects:'Progetti',projectEdit:'Progetto',activities:'Attività',activityEdit:'Attività',expenseCategories:'Voci spesa',expenseCategoryEdit:'Voce spesa',invoiceTemplates:'Template fattura',invoiceTemplateEdit:'Template fattura',appearance:'Aspetto',exportTimesheet:'Export timesheet',newChoice:'Nuovo consuntivo',dailyForm:'Consuntivo giornaliero',dailyEdit:'Consuntivo giornaliero',monthlyForm:'Compenso mensile',monthlyEdit:'Compenso mensile',manualForm:'Consuntivo manuale',manualEdit:'Consuntivo manuale',expenseForm:'Spesa trasferta',expenseEdit:'Spesa trasferta'})[v]||'schermata precedente'}
+function guardUnsavedChanges(){if(!state.dirty)return true;setMsg('Modifiche non salvate: salva prima di cambiare schermata.',6500);return false}
+function pushHistory(){const last=state.history[state.history.length-1];const cur={view:state.view,edit:state.edit,editType:state.editType};if(!last||last.view!==cur.view||last.edit!==cur.edit||last.editType!==cur.editType)state.history.push(cur);if(state.history.length>30)state.history.shift()}
+function navigateTo(v,{edit=null,editType=null,track=true,resetEdit=true}={}){if(!guardUnsavedChanges())return;if(track&&state.view!==v)pushHistory();state.view=v;state.edit=resetEdit?edit:state.edit;state.editType=resetEdit?editType:state.editType;state.menuOpen=false;render()}
+function go(v){navigateTo(v)}
+function back(){if(!guardUnsavedChanges())return;const prev=state.history.pop()||{view:'home',edit:null,editType:null};state.view=prev.view||'home';state.edit=prev.edit||null;state.editType=prev.editType||null;state.menuOpen=false;render()}
+function toggleMainMenu(){if(!guardUnsavedChanges())return;state.menuOpen=!state.menuOpen;render()}
+function menuDropdown(){if(!state.menuOpen)return'';const items=[['home','⌂','Home'],['timesheet','◷','Timesheet'],['summary','▥','Riepilogo'],['billing','▤','Fatture'],['tax','◌','Fiscalità'],['settings','•••','Altro']];return `<div class="topMenu" role="menu">${items.map(([v,ic,l])=>`<button class="${state.view===v?'active':''}" onclick="go('${v}')"><span>${ic}</span><b>${l}</b></button>`).join('')}</div>`}
+function backControl(){if(!state.history.length||state.view==='home')return'';const prev=state.history[state.history.length-1];return `<button class="backTalk" onclick="back()"><span>←</span><b>Torna a ${esc(viewLabel(prev.view))}</b></button>`}
 
 function groupSummary(){
   const map={};
@@ -138,6 +148,7 @@ async function fetchAll(){
     if(error){console.error(table,error); setMsg(`Errore caricamento ${table}: ${error.message}`,7000); data[key]=[];} else data[key]=rows||[];
   }
   loadThemeFromSettings();
+  state.dirty=false;
   state.loading=false;
 }
 async function reload(){await fetchAll();render()}
@@ -152,7 +163,7 @@ async function ensureUserProfileFromMetadata(){
   }catch(e){console.warn('ensureUserProfileFromMetadata',e)}
 }
 
-function appShell(content){return `<div class="app"><div class="header"><button class="headerIcon" onclick="go('settings')" title="Menu">☰</button><div class="brand brandCenter appBrand"><img class="brandIcon mini" src="${logoIcon()}" alt="TOTIME"><div><div class="brandName">TOTIME</div><div class="brandTagline">Tempo che crei valore.</div></div></div><button class="headerIcon" onclick="go('settings')" title="Configurazione">⚙</button></div>${state.message?`<div class="toast">${esc(state.message)}</div>`:''}${content}<div class="version">${APP_VERSION} · Database Edition</div></div>${nav()}`}
+function appShell(content){return `<div class="app"><div class="header"><div class="headerMenuWrap"><button class="headerIcon" onclick="toggleMainMenu()" title="Apri menu" aria-label="Apri menu">☰</button>${menuDropdown()}</div><div class="brand brandCenter appBrand"><img class="brandIcon mini" src="${logoIcon()}" alt="TOTIME"><div><div class="brandName">TOTIME</div><div class="brandTagline">Tempo che crei valore.</div></div></div><button class="headerIcon" onclick="go('settings')" title="Configurazione">⚙</button></div>${backControl()}${state.message?`<div class="toast">${esc(state.message)}</div>`:''}${content}<div class="version">${APP_VERSION} · Database Edition</div></div>${nav()}`}
 function nav(){const items=[['home','⌂','Home'],['timesheet','◷','Timesheet'],['summary','▥','Riepilogo'],['billing','▤','Fatture'],['tax','◌','Fiscalità'],['settings','•••','Altro']];return `<div class="nav">${items.map(([v,ic,l])=>`<button class="${state.view===v?'active':''}" onclick="go('${v}')"><span>${ic}</span><em>${l}</em></button>`).join('')}</div>`}
 function monthSelector(){return `<div class="month"><button onclick="changeMonth(-1)">‹</button><strong>${monthLabel(state.month)}</strong><button onclick="changeMonth(1)">›</button></div>`}
 function loadingView(){return `<div class="app"><div class="brand"><img class="brandIcon" src="${logoIcon()}" alt="TOTIME"><div><div class="brandName">TOTIME</div><div class="brandTagline">Tempo che crei valore.</div></div></div><div class="card"><h1>Caricamento...</h1><p class="sub">Connessione al database Supabase.</p></div></div>`}
@@ -185,8 +196,8 @@ function annualChartSvg(){
 }
 function monthChartSvg(){const series=monthSeries();const max=Math.max(...series,1);const pts=series.map((v,i)=>`${(i/(series.length-1||1))*100},${52-(v/max)*46}`).join(' ');return `<svg class="lineChart" viewBox="0 0 100 58" preserveAspectRatio="none"><line x1="0" y1="52" x2="100" y2="52"></line><line x1="0" y1="30" x2="100" y2="30"></line><polyline points="${pts}"></polyline></svg>`}
 function home(){const t=totals();const y=annualTotals(currentYear());return appShell(`<div class="homeTop">${monthSelector()}</div><div class="dashboardCard heroCard"><div class="kpiGrid three"><div><span>Ore consuntivate</span><strong>${fmtNum(t.hours,1)} h</strong><small>${fmtNum(t.days,1)} gg/u</small></div><div><span>Importo mese</span><strong>${fmtEUR(t.amount)}</strong><small>${monthLabel(state.month)}</small></div><div><span>Anno in corso</span><strong>${fmtEUR(y.consuntivato)}</strong><small>consuntivato</small></div></div><div class="chartWrap"><div class="chartTitle"><span>Andamento reale anno ${currentYear()}</span><span>linea fino al mese corrente</span></div>${annualChartSvg()}</div></div><button class="primary cta" onclick="newEntryChoice()">+ Nuovo consuntivo</button><div class="list menuList"><div class="row menuRow" onclick="go('timesheet')"><div class="roundIcon blue">◷</div><div><div class="title">Timesheet</div><div class="desc">Registra le tue ore</div></div><div class="chev">›</div></div><div class="row menuRow" onclick="go('summary')"><div class="roundIcon purple">▥</div><div><div class="title">Riepilogo</div><div class="desc">Analisi mensile e annuale</div></div><div class="chev">›</div></div><div class="row menuRow" onclick="go('billing')"><div class="roundIcon green">▤</div><div><div class="title">Fatturazione</div><div class="desc">Fatture, rivalsa e incassi</div></div><div class="chev">›</div></div><div class="row menuRow" onclick="go('tax')"><div class="roundIcon orange">%</div><div><div class="title">Fiscalità</div><div class="desc">Regime forfettario e tasse</div></div><div class="chev">›</div></div><div class="row menuRow" onclick="go('settings')"><div class="roundIcon blue">⚙</div><div><div class="title">Configurazione</div><div class="desc">Impostazioni e preferenze</div></div><div class="chev">›</div></div></div>`)}
-function newEntryChoice(){state.view='newChoice';render()}
-function newChoice(){return appShell(`<h1>Nuovo consuntivo</h1><p class="sub">Cosa vuoi registrare?</p><div class="grid"><button class="menuBtn" onclick="state.view='dailyForm';render()"><span><b>Consuntivo giornaliero</b><br><span class='sub'>Ore su tariffa giornaliera 8h</span></span><span>›</span></button><button class="menuBtn" onclick="state.view='monthlyForm';render()"><span><b>Compenso mensile</b><br><span class='sub'>Una tantum senza ore e giorni</span></span><span>›</span></button><button class="menuBtn" onclick="state.view='manualForm';render()"><span><b>Consuntivo manuale</b><br><span class='sub'>Importo libero, non legato a ore</span></span><span>›</span></button><button class="menuBtn" onclick="state.view='expenseForm';render()"><span><b>Spesa di trasferta</b><br><span class='sub'>Rimborso KM, hotel, pranzo, parcheggio...</span></span><span>›</span></button></div>`)}
+function newEntryChoice(){navigateTo('newChoice')}
+function newChoice(){return appShell(`<h1>Nuovo consuntivo</h1><p class="sub">Cosa vuoi registrare?</p><div class="grid"><button class="menuBtn" onclick="go('dailyForm')"><span><b>Consuntivo giornaliero</b><br><span class='sub'>Ore su tariffa giornaliera 8h</span></span><span>›</span></button><button class="menuBtn" onclick="go('monthlyForm')"><span><b>Compenso mensile</b><br><span class='sub'>Una tantum senza ore e giorni</span></span><span>›</span></button><button class="menuBtn" onclick="go('manualForm')"><span><b>Consuntivo manuale</b><br><span class='sub'>Importo libero, non legato a ore</span></span><span>›</span></button><button class="menuBtn" onclick="go('expenseForm')"><span><b>Spesa di trasferta</b><br><span class='sub'>Rimborso KM, hotel, pranzo, parcheggio...</span></span><span>›</span></button></div>`)}
 function sediOptions(selected=''){const sedi=['Remoto','Casa','Ufficio','Sede cliente','Onsite cliente','Altro'];return `<option></option>${sedi.map(x=>`<option value="${esc(x)}" ${x===selected?'selected':''}>${esc(x)}</option>`).join('')}`}
 function projectOptions(clientId,selected=''){return `<option value=""></option>${data.projects.filter(p=>p.active&&p.client_id===clientId).map(p=>`<option value="${p.id}" ${p.id===selected?'selected':''}>${esc(p.name)}</option>`).join('')}`}
 function activityOptions(selected=''){return `<option value=""></option>${data.activities.filter(a=>a.active).map(a=>`<option value="${a.id}" ${a.id===selected?'selected':''}>${esc(a.name)}</option>`).join('')}`}
@@ -225,7 +236,7 @@ async function saveExpenseEdit(ev){ev.preventDefault();const f=Object.fromEntrie
 async function duplicateExpense(idv){const e=data.travelExpenses.find(x=>x.id===idv);if(!e)return;const copy={expense_date:new Date().toISOString().slice(0,10),client_id:e.client_id,project_id:e.project_id,expense_category_id:e.expense_category_id,work_site:e.work_site,work_city:e.work_city,description:e.description,quantity:e.quantity,unit_rate:e.unit_rate,amount:e.amount,notes:e.notes};const {error}=await sb.from('travel_expenses').insert(copy);if(error)return setMsg(error.message,7000);await reload();state.view='timesheet';render()}
 async function deleteExpense(idv){if(!confirm('Eliminare questa spesa di trasferta?'))return;const {error}=await sb.from('travel_expenses').delete().eq('id',idv);if(error)return setMsg(error.message,7000);await reload();state.view='timesheet';render()}
 
-function editEntry(id,type){state.edit=id;state.view=type==='monthly'?'monthlyEdit':type==='manual'?'manualEdit':type==='expense'?'expenseEdit':'dailyEdit';render()}
+function editEntry(id,type){navigateTo(type==='monthly'?'monthlyEdit':type==='manual'?'manualEdit':type==='expense'?'expenseEdit':'dailyEdit',{edit:id})}
 function timesheet(){const rows=rowsForMonth().map(e=>({...e,kind:'daily',date:e.entry_date})).concat(monthlyRows().map(m=>({...m,kind:'monthly',date:`${m.year}-${String(m.month).padStart(2,'0')}-01`}))).concat(manualRows().map(e=>({...e,kind:'manual',date:e.entry_date}))).concat(expenseRows().map(e=>({...e,kind:'expense',date:e.expense_date}))).sort((a,b)=>String(b.date).localeCompare(String(a.date)));const t=totals();return appShell(`<h1>Timesheet</h1>${monthSelector()}<div class="card"><b>Totale operativo</b><div class="sub">${fmtNum(t.hours,1)} h · ${fmtNum(t.days,1)} gg/u</div></div><button class="primary" onclick="newEntryChoice()">+ Nuovo consuntivo</button><div class="list">${rows.map(r=>timesheetRow(r)).join('')||'<div class="empty">Nessun consuntivo nel mese.</div>'}</div>`)}
 function timesheetRow(r){if(r.kind==='daily')return `<div class="row" onclick="editEntry('${r.id}','daily')"><div class="date">${dateIT(r.entry_date)}</div><div><div class="title">${esc(clientName(r.client_id))}${projectName(r.project_id)?' / '+esc(projectName(r.project_id)):''}</div><div class="desc">${esc(activityName(r.activity_id)||'')} ${r.work_site||r.work_city?'· '+esc([r.work_site,r.work_city].filter(Boolean).join(' - ')):''}</div><div class="desc">${esc(r.description||'')}</div>${r.notes?`<div class="desc">Note: ${esc(r.notes)}</div>`:''}</div><div class="value">${fmtNum(r.hours,1)} h</div></div>`;
 if(r.kind==='monthly')return `<div class="row" onclick="editEntry('${r.id}','monthly')"><div class="date">${String(r.month).padStart(2,'0')}/${r.year}</div><div><div class="title">${esc(clientName(r.client_id))}${projectName(r.project_id)?' / '+esc(projectName(r.project_id)):''}</div><div class="desc">Una tantum mensile</div><div class="desc">${esc(r.description||'')}</div></div><div class="value">Mensile</div></div>`;
@@ -236,7 +247,7 @@ function annualSummaryCard(){const y=currentYear();const at=annualTotals(y);at.d
 function summary(){const groups=groupSummary();const t=totals();return appShell(`<h1>Riepilogo</h1>${monthSelector()}${annualSummaryCard()}<div class="card"><b>Totale mese</b><div class="metricLine">${metricLine(t.hours,t.amount)}</div><div class="chartWrap"><div class="chartTitle"><span>Andamento mese</span><span>1 → fine mese</span></div>${monthChartSvg()}</div></div><div class="list">${groups.map(r=>`<div class="row summaryRow"><div></div><div><div class="title">${esc(clientName(r.client_id))}</div><div class="desc">${esc(projectName(r.project_id)||'Senza progetto')} · ${esc(r.label)}</div><div class="metricLine">${r.type==='daily_rate_8h'?metricLine(r.hours,r.amount):amountLine(r.label,r.amount)}</div></div><div class="value"></div></div>`).join('')||'<div class="empty">Nessun riepilogo.</div>'}</div>`)}
 function billingGroupsByClient(){const lines=groupSummary();const by={};lines.forEach(l=>{if(!by[l.client_id])by[l.client_id]={client_id:l.client_id,lines:[],baseTotal:0,total:0,hours:0};by[l.client_id].lines.push(l);by[l.client_id].baseTotal+=Number(l.amount||0);by[l.client_id].hours+=Number(l.hours||0)});Object.values(by).forEach(g=>{const header=headerForClient(g.client_id)||{};g.calc=billingCalc(g,header);g.total=g.calc.total});return Object.values(by).sort((a,b)=>clientName(a.client_id).localeCompare(clientName(b.client_id)))}
 function billing(){const groups=billingGroupsByClient();const total=groups.reduce((s,g)=>s+g.total,0);return appShell(`<h1>Fatturazione</h1>${monthSelector()}<div class="card"><b>Totale fatturazione mese</b><div class="amount" style="font-size:30px;margin-top:8px">${fmtEUR(total)}</div><div class="sub">Include eventuale rivalsa INPS 4% e marca da bollo se attive.</div></div><div class="list">${groups.map(g=>{const st=headerStatus(g.client_id);return `<div class="row" onclick="openBillingClient('${g.client_id}')"><div></div><div><div class="title">${esc(clientName(g.client_id))}</div><div class="metricLine">${metricLine(g.hours,g.total)}</div><div class="desc">Base ${fmtEUR(g.calc.subtotal)} · Rivalsa ${fmtEUR(g.calc.inpsAmount)} · Bollo ${fmtEUR(g.calc.stampAmount)}</div><span class="tag ${statusClass(st)}">${statusLabel(st)}</span></div><div class="value">›</div></div>`}).join('')||'<div class="empty">Nessuna riga fatturabile.</div>'}</div>`)}
-function openBillingClient(clientId){state.edit=clientId;state.view='billingDetail';render()}
+function openBillingClient(clientId){navigateTo('billingDetail',{edit:clientId})}
 function billingDetailView(){const clientId=state.edit;const group=billingGroupsByClient().find(g=>g.client_id===clientId);if(!group)return billing();const header=headerForClient(clientId)||{};const st=header.status||'to_invoice';const calc=billingCalc(group,header);const inpsText=renderTemplate(invoiceTemplateByCode('RIVALSA_INPS_4'),{type:'manual_entry',client_id:clientId,project_id:null,amount:calc.inpsAmount,hours:0});const bolloText=renderTemplate(invoiceTemplateByCode('MARCA_BOLLO'),{type:'manual_entry',client_id:clientId,project_id:null,amount:calc.stampAmount,hours:0});return appShell(`<h1>${esc(clientName(clientId))}</h1><p class="sub">Fattura ${monthLabel(state.month)}</p><div class="card"><b>Totale cliente</b><div class="amount" style="font-size:32px;margin-top:8px">${fmtEUR(calc.total)}</div><div class="metricLine">Base ${fmtEUR(calc.subtotal)} <span class="dot">·</span> Rivalsa ${fmtEUR(calc.inpsAmount)} <span class="dot">·</span> Bollo ${fmtEUR(calc.stampAmount)}</div><span class="tag ${statusClass(st)}">${statusLabel(st)}</span></div><h2>Righe Fiscozen</h2><div class="list">${group.lines.map((l,i)=>`<div class="row"><div>${i+1}</div><div><div class="title">${esc(projectName(l.project_id)||'Senza progetto')}</div><div class="desc">${esc(l.label)}</div><div class="metricLine">${l.type==='daily_rate_8h'?metricLine(l.hours,l.amount):amountLine(l.label,l.amount)}</div><div class="copybox" id="copy-${i}">${esc(fiscoText(l))}</div><button class="secondary" onclick="copyText('${esc(fiscoText(l)).replace(/'/g,'&#39;')}')">Copia descrizione</button></div><div></div></div>`).join('')}${calc.inpsEnabled&&calc.inpsAmount>0?`<div class="row"><div>+</div><div><div class="title">Rivalsa INPS ${fmtNum(calc.inpsRate,2)}%</div><div class="metricLine">${fmtEUR(calc.inpsAmount)}</div><div class="copybox">${esc(inpsText)}</div><button class="secondary" onclick="copyText('${esc(inpsText).replace(/'/g,'&#39;')}')">Copia descrizione</button></div><div></div></div>`:''}${calc.stampEnabled&&calc.stampAmount>0?`<div class="row"><div>+</div><div><div class="title">Marca da bollo</div><div class="metricLine">${fmtEUR(calc.stampAmount)}</div><div class="copybox">${esc(bolloText)}</div><button class="secondary" onclick="copyText('${esc(bolloText).replace(/'/g,'&#39;')}')">Copia descrizione</button></div><div></div></div>`:''}</div><h2>Dati fattura / incasso</h2><form class="form" onsubmit="saveBillingHeader(event)"><div class="field"><label>Stato</label><select name="status"><option value="to_invoice" ${st==='to_invoice'?'selected':''}>Da fatturare</option><option value="invoice_issued" ${st==='invoice_issued'?'selected':''}>Fattura emessa</option><option value="collected" ${st==='collected'?'selected':''}>Incassato</option><option value="excluded" ${st==='excluded'?'selected':''}>Escluso</option></select></div><div class="field"><label>Rivalsa INPS</label><select name="inps_recharge_enabled"><option value="true" ${calc.inpsEnabled?'selected':''}>Sì</option><option value="false" ${!calc.inpsEnabled?'selected':''}>No</option></select></div><div class="field"><label>Percentuale rivalsa INPS</label><input name="inps_recharge_rate" type="number" step="0.01" value="${Number(calc.inpsRate||4)}"></div><div class="field"><label>Marca da bollo</label><select name="stamp_duty_enabled"><option value="true" ${calc.stampEnabled?'selected':''}>Sì</option><option value="false" ${!calc.stampEnabled?'selected':''}>No</option></select></div><div class="field"><label>Importo bollo</label><input name="stamp_duty_amount" type="number" step="0.01" value="${Number(calc.stampAmount||0)||Number(currentTaxSetting().stamp_duty_amount||2)}"></div><div class="field"><label>Numero fattura</label><input name="invoice_number" value="${esc(header.invoice_number||'')}"></div><div class="field"><label>Data fattura</label><input name="invoice_date" type="date" value="${esc(header.invoice_date||'')}"></div><div class="field"><label>Data incasso</label><input name="collection_date" type="date" value="${esc(header.collection_date||'')}"></div><div class="field"><label>Importo incassato</label><input name="collected_amount" type="number" step="0.01" value="${Number(header.collected_amount||0)}"></div><div class="field"><label>Note</label><textarea name="notes">${esc(header.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva stato fattura</button><button type="button" class="secondary" onclick="go('billing')">Indietro</button></div></form>`)}
 async function saveBillingHeader(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const clientId=state.edit;const group=billingGroupsByClient().find(g=>g.client_id===clientId);const {year,month}=periodParts();const tempCalc=billingCalc(group,{inps_recharge_enabled:f.inps_recharge_enabled==='true',inps_recharge_rate:Number(f.inps_recharge_rate||4),stamp_duty_enabled:f.stamp_duty_enabled==='true',stamp_duty_amount:Number(f.stamp_duty_amount||0)});const payload={year,month,client_id:clientId,total_amount:Number(tempCalc.subtotal||0),services_amount:tempCalc.services,expenses_amount:tempCalc.expenses,manual_amount:tempCalc.manual,taxable_base_amount:tempCalc.taxableBase,inps_recharge_enabled:tempCalc.inpsEnabled,inps_recharge_rate:tempCalc.inpsRate,inps_recharge_amount:tempCalc.inpsAmount,stamp_duty_enabled:tempCalc.stampEnabled,stamp_duty_amount:tempCalc.stampAmount,invoice_total_amount:tempCalc.total,status:f.status,invoice_number:norm(f.invoice_number)||null,invoice_date:f.invoice_date||null,collection_date:f.collection_date||null,collected_amount:Number(f.collected_amount||0)||null,notes:f.notes||null};const existing=headerForClient(clientId);let error;if(existing){({error}=await sb.from('billing_headers').update(payload).eq('id',existing.id));}else{({error}=await sb.from('billing_headers').insert(payload));}if(error)return setMsg(error.message,7000);await reload();state.view='billingDetail';state.edit=clientId;render()}
 function copyText(txt){const cleaned=document.createElement('textarea');cleaned.innerHTML=txt;const val=cleaned.value;navigator.clipboard?.writeText(val).then(()=>setMsg('Descrizione copiata.')).catch(()=>prompt('Copia descrizione:',val))}
@@ -306,33 +317,33 @@ function exportTimesheetViewOptions(){const clients=activeClients();const select
 function exportTimesheet(){return appShell(`<div class="screenTitle">Export Timesheet Excel</div><p class="sub">Scarica il dettaglio mensile da inviare al cliente.</p><form class="form" onsubmit="downloadTimesheetExcel(event)">${exportTimesheetViewOptions()}<div class="actions"><button class="primary">Scarica Excel</button><button type="button" class="secondary" onclick="go('settings')">Annulla</button></div></form>`)}
 
 function clients(){return appShell(`<h1>Clienti</h1><form class="form" onsubmit="addClient(event)"><div class="field"><label>Nome cliente</label><input name="name" required></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h">Tariffa giornaliera 8h</option><option value="monthly_flat">Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="0"></div><button class="primary">Aggiungi cliente</button></form><div class="list">${data.clients.map(c=>`<div class="row" onclick="editClient('${c.id}')"><div></div><div><div class="title">${esc(c.name)}</div><div class="desc">${c.compensation_type==='daily_rate_8h'?'Tariffa giornaliera 8h · '+fmtEUR(c.daily_rate||0):'Una tantum mensile'} · ${c.active?'Attivo':'Disattivo'}</div></div><div>›</div></div>`).join('')||'<div class="empty">Nessun cliente.</div>'}</div>`)}
-function editClient(id){state.edit=id;state.view='clientEdit';render()}
+function editClient(id){navigateTo('clientEdit',{edit:id})}
 function clientEdit(){const c=clientById(state.edit);if(!c)return clients();return appShell(`<h1>Modifica cliente</h1><form class="form" onsubmit="saveClient(event)"><div class="field"><label>Nome cliente</label><input name="name" value="${esc(c.name)}" required></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h" ${c.compensation_type==='daily_rate_8h'?'selected':''}>Tariffa giornaliera 8h</option><option value="monthly_flat" ${c.compensation_type==='monthly_flat'?'selected':''}>Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="${Number(c.daily_rate||0)}"></div><div class="field"><label>Ore standard giornata</label><input name="standard_hours" type="number" step="0.25" value="${Number(c.standard_hours||8)}"></div><div class="field"><label>Attivo</label><select name="active"><option value="true" ${c.active?'selected':''}>Sì</option><option value="false" ${!c.active?'selected':''}>No</option></select></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteClient('${c.id}')">Elimina cliente</button><button type="button" class="secondary" onclick="go('clients')">Annulla</button></div></form>`)}
 async function addClient(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const payload={name:norm(f.name),compensation_type:f.compensation_type,daily_rate:Number(f.daily_rate||0),standard_hours:8,active:true};const {error}=await sb.from('clients').insert(payload);if(error)return setMsg(error.message,7000);await reload();state.view='clients';render()}
 async function saveClient(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const payload={name:norm(f.name),compensation_type:f.compensation_type,daily_rate:Number(f.daily_rate||0),standard_hours:Number(f.standard_hours||8),active:f.active==='true'};const {error}=await sb.from('clients').update(payload).eq('id',state.edit);if(error)return setMsg(error.message,7000);await reload();state.view='clients';state.edit=null;render()}
 async function deleteClient(idv){if(!confirm('Eliminare il cliente? Se esistono consuntivi collegati, il database potrebbe bloccare la cancellazione. In quel caso usa Disattivo.'))return;const {error}=await sb.from('clients').delete().eq('id',idv);if(error)return setMsg(error.message,7000);await reload();state.view='clients';render()}
 function projects(){return appShell(`<h1>Progetti / Clienti finali</h1><form class="form" onsubmit="addProject(event)"><div class="field"><label>Cliente collegato</label><select name="client_id">${data.clients.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Nome progetto / cliente finale</label><input name="name" required></div><button class="primary">Aggiungi progetto</button></form><div class="list">${data.projects.map(p=>`<div class="row" onclick="editProject('${p.id}')"><div></div><div><div class="title">${esc(clientName(p.client_id))}</div><div class="desc">${esc(p.name)} · ${p.active?'Attivo':'Disattivo'}</div></div><div>›</div></div>`).join('')||'<div class="empty">Nessun progetto.</div>'}</div>`)}
-function editProject(id){state.edit=id;state.view='projectEdit';render()}
+function editProject(id){navigateTo('projectEdit',{edit:id})}
 function projectEdit(){const p=projectById(state.edit);if(!p)return projects();return appShell(`<h1>Modifica progetto</h1><form class="form" onsubmit="saveProject(event)"><div class="field"><label>Cliente collegato</label><select name="client_id">${data.clients.map(c=>`<option value="${c.id}" ${c.id===p.client_id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Nome progetto / cliente finale</label><input name="name" value="${esc(p.name)}" required></div><div class="field"><label>Attivo</label><select name="active"><option value="true" ${p.active?'selected':''}>Sì</option><option value="false" ${!p.active?'selected':''}>No</option></select></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteProject('${p.id}')">Elimina progetto</button><button type="button" class="secondary" onclick="go('projects')">Annulla</button></div></form>`)}
 async function addProject(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const {error}=await sb.from('projects').insert({client_id:f.client_id,name:norm(f.name),active:true});if(error)return setMsg(error.message,7000);await reload();state.view='projects';render()}
 async function saveProject(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const {error}=await sb.from('projects').update({client_id:f.client_id,name:norm(f.name),active:f.active==='true'}).eq('id',state.edit);if(error)return setMsg(error.message,7000);await reload();state.view='projects';state.edit=null;render()}
 async function deleteProject(idv){if(!confirm('Eliminare il progetto? Se esistono consuntivi collegati, il database potrebbe bloccare la cancellazione.'))return;const {error}=await sb.from('projects').delete().eq('id',idv);if(error)return setMsg(error.message,7000);await reload();state.view='projects';render()}
 function activities(){return appShell(`<h1>Attività</h1><form class="form" onsubmit="addActivity(event)"><div class="field"><label>Nome attività</label><input name="name" required></div><button class="primary">Aggiungi attività</button></form><div class="list">${data.activities.map(a=>`<div class="row" onclick="editActivity('${a.id}')"><div></div><div><div class="title">${esc(a.name)}</div><div class="desc">${a.active?'Attiva':'Disattiva'}</div></div><div>›</div></div>`).join('')||'<div class="empty">Nessuna attività.</div>'}</div>`)}
-function editActivity(id){state.edit=id;state.view='activityEdit';render()}
+function editActivity(id){navigateTo('activityEdit',{edit:id})}
 function activityEdit(){const a=activityById(state.edit);if(!a)return activities();return appShell(`<h1>Modifica attività</h1><form class="form" onsubmit="saveActivity(event)"><div class="field"><label>Nome attività</label><input name="name" value="${esc(a.name)}" required></div><div class="field"><label>Attiva</label><select name="active"><option value="true" ${a.active?'selected':''}>Sì</option><option value="false" ${!a.active?'selected':''}>No</option></select></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteActivity('${a.id}')">Elimina attività</button><button type="button" class="secondary" onclick="go('activities')">Annulla</button></div></form>`)}
 async function addActivity(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const {error}=await sb.from('activities').insert({name:norm(f.name),active:true});if(error)return setMsg(error.message,7000);await reload();state.view='activities';render()}
 async function saveActivity(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const {error}=await sb.from('activities').update({name:norm(f.name),active:f.active==='true'}).eq('id',state.edit);if(error)return setMsg(error.message,7000);await reload();state.view='activities';state.edit=null;render()}
 async function deleteActivity(idv){if(!confirm('Eliminare attività? Se usata nei consuntivi, il database potrebbe bloccare la cancellazione.'))return;const {error}=await sb.from('activities').delete().eq('id',idv);if(error)return setMsg(error.message,7000);await reload();state.view='activities';render()}
 
 function expenseCategories(){return appShell(`<h1>Voci spesa</h1><form class="form" onsubmit="addExpenseCategory(event)"><div class="field"><label>Nome voce</label><input name="name" required></div><div class="field"><label>Tipo calcolo</label><select name="calculation_type"><option value="manual_amount">Importo manuale</option><option value="quantity_rate">Quantità × tariffa</option></select></div><div class="field"><label>Unità</label><input name="unit_label" placeholder="km, notte, ticket..."></div><div class="field"><label>Tariffa default</label><input name="default_unit_rate" type="number" step="0.0001" value="0"></div><button class="primary">Aggiungi voce spesa</button></form><div class="list">${data.expenseCategories.map(c=>`<div class="row" onclick="editExpenseCategory('${c.id}')"><div></div><div><div class="title">${esc(c.name)}</div><div class="desc">${c.calculation_type==='quantity_rate'?'Quantità × tariffa':'Importo manuale'} · Macro: ${esc(c.invoice_macro||'Spese di trasferta')} · ${c.active?'Attiva':'Disattiva'}</div></div><div>›</div></div>`).join('')||'<div class="empty">Nessuna voce spesa.</div>'}</div>`)}
-function editExpenseCategory(id){state.edit=id;state.view='expenseCategoryEdit';render()}
+function editExpenseCategory(id){navigateTo('expenseCategoryEdit',{edit:id})}
 function expenseCategoryEdit(){const c=expenseCategoryById(state.edit);if(!c)return expenseCategories();return appShell(`<h1>Modifica voce spesa</h1><form class="form" onsubmit="saveExpenseCategory(event)"><div class="field"><label>Nome voce</label><input name="name" value="${esc(c.name)}" required></div><div class="field"><label>Tipo calcolo</label><select name="calculation_type"><option value="manual_amount" ${c.calculation_type==='manual_amount'?'selected':''}>Importo manuale</option><option value="quantity_rate" ${c.calculation_type==='quantity_rate'?'selected':''}>Quantità × tariffa</option></select></div><div class="field"><label>Unità</label><input name="unit_label" value="${esc(c.unit_label||'')}"></div><div class="field"><label>Tariffa default</label><input name="default_unit_rate" type="number" step="0.0001" value="${Number(c.default_unit_rate||0)}"></div><div class="field"><label>Macro voce fattura</label><input name="invoice_macro" value="${esc(c.invoice_macro||'Spese di trasferta')}"></div><div class="field"><label>Attiva</label><select name="active"><option value="true" ${c.active?'selected':''}>Sì</option><option value="false" ${!c.active?'selected':''}>No</option></select></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteExpenseCategory('${c.id}')">Elimina</button><button type="button" class="secondary" onclick="go('expenseCategories')">Annulla</button></div></form>`)}
 async function addExpenseCategory(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const payload={name:norm(f.name),calculation_type:f.calculation_type,unit_label:norm(f.unit_label)||null,default_unit_rate:Number(f.default_unit_rate||0)||null,invoice_macro:'Spese di trasferta',active:true};const {error}=await sb.from('expense_categories').insert(payload);if(error)return setMsg(error.message,7000);await reload();state.view='expenseCategories';render()}
 async function saveExpenseCategory(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const payload={name:norm(f.name),calculation_type:f.calculation_type,unit_label:norm(f.unit_label)||null,default_unit_rate:Number(f.default_unit_rate||0)||null,invoice_macro:norm(f.invoice_macro)||'Spese di trasferta',active:f.active==='true'};const {error}=await sb.from('expense_categories').update(payload).eq('id',state.edit);if(error)return setMsg(error.message,7000);await reload();state.view='expenseCategories';state.edit=null;render()}
 async function deleteExpenseCategory(idv){if(!confirm('Eliminare voce spesa? Se usata in spese già inserite, il database potrebbe bloccare la cancellazione.'))return;const {error}=await sb.from('expense_categories').delete().eq('id',idv);if(error)return setMsg(error.message,7000);await reload();state.view='expenseCategories';render()}
 
 function invoiceTemplates(){return appShell(`<h1>Template fattura / Fiscozen</h1><p class="sub">Gestisci qui cosa copiare su Fiscozen. I consuntivi non chiedono la voce fattura.</p><form class="form" onsubmit="addInvoiceTemplate(event)"><div class="field"><label>Codice</label><input name="template_code" placeholder="ES. CONSULENZA_CUSTOM" required></div><div class="field"><label>Nome</label><input name="name" required></div><div class="field"><label>Tipo riga</label><select name="entry_type"><option value="daily_rate_8h">Consulenza a ore/gg</option><option value="monthly_flat">Compenso mensile</option><option value="manual_entry">Consuntivo manuale</option><option value="travel_expenses">Spese di trasferta</option></select></div><div class="field"><label>Template testo</label><textarea name="template_text" required>Consulenza - [Mese Anno] - Cliente/Progetto: [Progetto]</textarea></div><button class="primary">Aggiungi template</button></form><div class="list">${data.invoiceTemplates.map(t=>`<div class="row" onclick="editInvoiceTemplate('${t.id}')"><div></div><div><div class="title">${esc(t.name)}</div><div class="desc">${esc(t.entry_type)} · ${esc(t.template_text)}</div></div><div>›</div></div>`).join('')||'<div class="empty">Nessun template.</div>'}</div>`)}
-function editInvoiceTemplate(id){state.edit=id;state.view='invoiceTemplateEdit';render()}
+function editInvoiceTemplate(id){navigateTo('invoiceTemplateEdit',{edit:id})}
 function invoiceTemplateEdit(){const t=data.invoiceTemplates.find(x=>x.id===state.edit);if(!t)return invoiceTemplates();return appShell(`<h1>Modifica template</h1><form class="form" onsubmit="saveInvoiceTemplate(event)"><div class="field"><label>Codice</label><input name="template_code" value="${esc(t.template_code)}" required></div><div class="field"><label>Nome</label><input name="name" value="${esc(t.name)}" required></div><div class="field"><label>Tipo riga</label><select name="entry_type"><option value="daily_rate_8h" ${t.entry_type==='daily_rate_8h'?'selected':''}>Consulenza a ore/gg</option><option value="monthly_flat" ${t.entry_type==='monthly_flat'?'selected':''}>Compenso mensile</option><option value="manual_entry" ${t.entry_type==='manual_entry'?'selected':''}>Consuntivo manuale</option><option value="travel_expenses" ${t.entry_type==='travel_expenses'?'selected':''}>Spese di trasferta</option></select></div><div class="field"><label>Template testo</label><textarea name="template_text" required>${esc(t.template_text)}</textarea></div><div class="field"><label>Attivo</label><select name="active"><option value="true" ${t.active?'selected':''}>Sì</option><option value="false" ${!t.active?'selected':''}>No</option></select></div><div class="field"><label>Ordine</label><input name="sort_order" type="number" value="${Number(t.sort_order||0)}"></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteInvoiceTemplate('${t.id}')">Elimina</button><button type="button" class="secondary" onclick="go('invoiceTemplates')">Annulla</button></div></form>`)}
 async function addInvoiceTemplate(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const payload={template_code:norm(f.template_code),name:norm(f.name),entry_type:f.entry_type,template_text:f.template_text,active:true,sort_order:99};const {error}=await sb.from('invoice_templates').insert(payload);if(error)return setMsg(error.message,7000);await reload();state.view='invoiceTemplates';render()}
 async function saveInvoiceTemplate(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const payload={template_code:norm(f.template_code),name:norm(f.name),entry_type:f.entry_type,template_text:f.template_text,active:f.active==='true',sort_order:Number(f.sort_order||0)};const {error}=await sb.from('invoice_templates').update(payload).eq('id',state.edit);if(error)return setMsg(error.message,7000);await reload();state.view='invoiceTemplates';state.edit=null;render()}
@@ -354,5 +365,184 @@ async function importCsv(ev){const file=ev.target.files?.[0];if(!file)return;con
 await fetchAll();state.view='timesheet';setMsg(`Import completato: ${count} righe. Clienti creati: ${createdClients}. Progetti creati: ${createdProjects}. Attività create: ${createdActivities}. Righe scartate: ${skipped}.`,9000)}catch(e){console.error(e);setMsg('Errore import CSV: '+(e.message||e),9000)}};reader.readAsText(file,'windows-1252')}
 function exportData(){const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='totime-supabase-backup.json';a.click()}
 function render(){if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(!session){document.getElementById('app').innerHTML=(state.view==='register'?registerView():loginView());return}let html='';const map={home,newChoice,dailyForm,dailyEdit,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,timesheet,summary,billing,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
+
+Object.assign(window,{
+  applyTheme,
+  logoIcon,
+  settingValue,
+  loadThemeFromSettings,
+  saveThemeChoice,
+  monthLabel,
+  periodParts,
+  changeMonth,
+  setMsg,
+  clientById,
+  projectById,
+  activityById,
+  expenseCategoryById,
+  invoiceTemplateByType,
+  clientName,
+  projectName,
+  activityName,
+  expenseCategoryName,
+  entryRate,
+  entryStd,
+  dailyAmount,
+  dailyDays,
+  rowsForMonth,
+  monthlyRows,
+  manualRows,
+  expenseRows,
+  totals,
+  metricLine,
+  amountLine,
+  dateIT,
+  go,
+  viewLabel,
+  guardUnsavedChanges,
+  pushHistory,
+  navigateTo,
+  back,
+  toggleMainMenu,
+  menuDropdown,
+  backControl,
+  groupSummary,
+  renderTemplate,
+  fiscoText,
+  headerForClient,
+  headerStatus,
+  statusLabel,
+  statusClass,
+  currentYear,
+  rowsForYear,
+  monthlyRowsForYear,
+  manualRowsForYear,
+  expenseRowsForYear,
+  monthIndexFromDate,
+  annualMonthData,
+  annualTotals,
+  currentTaxSetting,
+  annualTaxCalc,
+  billingCalc,
+  invoiceTemplateByCode,
+  init,
+  fetchAll,
+  reload,
+  ensureUserProfileFromMetadata,
+  appShell,
+  nav,
+  monthSelector,
+  loadingView,
+  loginView,
+  registerView,
+  signIn,
+  signUpDetailed,
+  logout,
+  monthSeries,
+  annualChartSvg,
+  monthChartSvg,
+  home,
+  newEntryChoice,
+  newChoice,
+  sediOptions,
+  projectOptions,
+  activityOptions,
+  expenseOptions,
+  refreshProjectsForForm,
+  activeClients,
+  dailyClients,
+  monthlyClients,
+  dailyForm,
+  saveDaily,
+  dailyEdit,
+  saveDailyEdit,
+  duplicateDaily,
+  deleteDaily,
+  monthlyForm,
+  saveMonthly,
+  monthlyEdit,
+  saveMonthlyEdit,
+  duplicateMonthly,
+  deleteMonthly,
+  manualForm,
+  saveManual,
+  manualEdit,
+  saveManualEdit,
+  duplicateManual,
+  deleteManual,
+  expenseForm,
+  updateExpenseCalc,
+  saveExpense,
+  expenseEdit,
+  saveExpenseEdit,
+  duplicateExpense,
+  deleteExpense,
+  editEntry,
+  timesheet,
+  timesheetRow,
+  annualSummaryCard,
+  summary,
+  billingGroupsByClient,
+  billing,
+  openBillingClient,
+  billingDetailView,
+  saveBillingHeader,
+  copyText,
+  parseExcludedMonths,
+  projectionCalc,
+  projectionCard,
+  tax,
+  saveTaxSettings,
+  settings,
+  appearance,
+  exportTimesheetViewOptions,
+  exportTimesheet,
+  clients,
+  editClient,
+  clientEdit,
+  addClient,
+  saveClient,
+  deleteClient,
+  projects,
+  editProject,
+  projectEdit,
+  addProject,
+  saveProject,
+  deleteProject,
+  activities,
+  editActivity,
+  activityEdit,
+  addActivity,
+  saveActivity,
+  deleteActivity,
+  expenseCategories,
+  editExpenseCategory,
+  expenseCategoryEdit,
+  addExpenseCategory,
+  saveExpenseCategory,
+  deleteExpenseCategory,
+  invoiceTemplates,
+  editInvoiceTemplate,
+  invoiceTemplateEdit,
+  addInvoiceTemplate,
+  saveInvoiceTemplate,
+  deleteInvoiceTemplate,
+  ensureClient,
+  ensureProject,
+  ensureActivity,
+  parseCsvLine,
+  canonHeader,
+  parseAmount,
+  toDate,
+  toMonth,
+  excelSafe,
+  exportRowsFor,
+  downloadTimesheetExcel,
+  importCsv,
+  exportData,
+  render
+});
+document.addEventListener('input',e=>{if(e.target.closest?.('.form'))state.dirty=true});
+document.addEventListener('change',e=>{if(e.target.closest?.('.form')&&e.target.type!=='file')state.dirty=true});
 if('serviceWorker' in navigator){navigator.serviceWorker.register('./sw.js').catch(()=>{})}
 init();
