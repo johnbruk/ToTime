@@ -18,6 +18,8 @@ Il comando esegue:
 node tests/module-startup-smoke.mjs
 node tests/calculations-smoke.mjs
 node tests/repository-smoke.mjs
+node tests/app-data-loader-smoke.mjs
+node tests/view-map-smoke.mjs
 ```
 
 ## Test disponibili
@@ -63,7 +65,35 @@ Verifica il repository layer Supabase introdotto in Fase 2:
 - struttura base del repository;
 - API di lettura tabelle;
 - ordinamento standard per clienti/anagrafiche;
-- ordinamento specifico per timesheet.
+- ordinamento specifico per timesheet;
+- `repository.loadAll()`;
+- comportamento controllato se una tabella secondaria va in errore.
+
+### App data loader smoke test
+
+```bash
+npm run test:loader
+```
+
+Verifica l'adapter `src/appDataLoader.js`:
+
+- chiamata al profilo utente prima del load;
+- lettura dati da repository;
+- propagazione errori tabella;
+- validazione minima degli argomenti.
+
+### View map smoke test
+
+```bash
+npm run test:views
+```
+
+Verifica l'helper `src/views/viewMap.js`:
+
+- registrazione viste;
+- fallback verso vista alternativa;
+- elenco nomi viste;
+- rendering tramite funzione associata.
 
 ## Quando eseguirli
 
