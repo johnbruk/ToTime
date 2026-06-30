@@ -1,0 +1,11 @@
+{
+  "name": "totime-webapp",
+  "version": "1.1.2",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node tests/module-startup-smoke.mjs && node tests/calculations-smoke.mjs",
+    "test:startup": "node tests/module-startup-smoke.mjs",
+    "test:calculations": "node tests/calculations-smoke.mjs"
+  }
+}

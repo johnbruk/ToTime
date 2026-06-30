@@ -9,13 +9,20 @@ Release di navigazione assistita e menu rapido senza modifiche al data model.
 - Cache/service worker aggiornato a `totime-v113`.
 
 ## Verifica tecnica
-- Smoke test avvio modulo: `node tests/module-startup-smoke.mjs`.
+- Test completo disponibile: `npm test`.
+- Smoke test avvio modulo: `npm run test:startup` oppure `node tests/module-startup-smoke.mjs`.
+- Test calcoli puri: `npm run test:calculations` oppure `node tests/calculations-smoke.mjs`.
 - Regression test navigazione: `node tests/navigation-regression.mjs`.
 
 ## Fase 0 baseline
 - Fotografia funzionale: `docs/PHASE_0_BASELINE.md`
 - Checklist manuale Fase 0: `docs/PHASE_0_MANUAL_REGRESSION.md`
 - Test funzioni pure: `node tests/phase0-pure-functions.mjs`
+
+## Refactoring
+- Piano generale: `REFACTORING_PLAN.md`
+- Fase 1 calcoli puri: `REFACTORING_PHASE_1.md`
+- Guida test tecnici: `TESTING.md`
 
 ## Nota deploy
 Caricare su GitHub i file estratti, non lo ZIP. Se la PWA mostra una vecchia versione, aprire il link con `?v=113` o reinstallare la PWA dalla Home.
