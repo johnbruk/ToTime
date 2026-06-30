@@ -17,6 +17,7 @@ Il comando esegue:
 ```bash
 node tests/module-startup-smoke.mjs
 node tests/calculations-smoke.mjs
+node tests/repository-smoke.mjs
 ```
 
 ## Test disponibili
@@ -51,6 +52,19 @@ Verifica le funzioni pure estratte in `src/calculations`:
 - parsing mesi esclusi;
 - proiezione annuale.
 
+### Repository smoke test
+
+```bash
+npm run test:repository
+```
+
+Verifica il repository layer Supabase introdotto in Fase 2:
+
+- struttura base del repository;
+- API di lettura tabelle;
+- ordinamento standard per clienti/anagrafiche;
+- ordinamento specifico per timesheet.
+
 ## Quando eseguirli
 
 Eseguire `npm test` prima di:
@@ -58,7 +72,8 @@ Eseguire `npm test` prima di:
 - fare merge di PR di refactoring;
 - modificare calcoli fattura/fiscalità/proiezioni;
 - toccare `app.js`;
-- modificare service worker o caricamento moduli.
+- modificare service worker o caricamento moduli;
+- collegare `app.js` al repository layer.
 
 ## Limiti
 
