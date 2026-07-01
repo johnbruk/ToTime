@@ -6,7 +6,7 @@
   "background_color": "#F6F7F8",
   "theme_color": "#12BFA5",
   "icons": [
-    { "src": "assets/TOTIME_logo_only.png", "sizes": "2048x2048", "type": "image/png", "purpose": "any" },
-    { "src": "assets/TOTIME_logo_only.png", "sizes": "2048x2048", "type": "image/png", "purpose": "maskable" }
+    { "src": "assets/TOTIME_apple_touch.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "assets/TOTIME_apple_touch.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }
