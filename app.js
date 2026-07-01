@@ -61,7 +61,9 @@ function navigateTo(v,{edit=null,editType=null,track=true,resetEdit=true}={}){if
 function go(v){navigateTo(v)}
 function back(){if(!guardUnsavedChanges())return;const prev=state.history.pop()||{view:'home',edit:null,editType:null};state.view=prev.view||'home';state.edit=prev.edit||null;state.editType=prev.editType||null;state.menuOpen=false;render()}
 function toggleMainMenu(){if(!guardUnsavedChanges())return;state.menuOpen=!state.menuOpen;render()}
-function menuDropdown(){if(!state.menuOpen)return'';const items=[['home','⌂','Home'],['timesheet','◷','Timesheet'],['summary','▥','Riepilogo'],['billing','▤','Fatture'],['tax','◌','Fiscalità'],['settings','•••','Altro']];return `<div class="topMenu" role="menu">${items.map(([v,ic,l])=>`<button class="${state.view===v?'active':''}" onclick="go('${v}')"><span>${ic}</span><b>${l}</b></button>`).join('')}</div>`}
+const NAV_ITEMS=[['home','⌂','Home'],['timesheet','◷','Timesheet'],['summary','▥','Riepilogo'],['billing','▤','Fatture'],['tax','◌','Fiscalità'],['settings','•••','Altro']];
+function navButtons(tag){return NAV_ITEMS.map(([v,ic,l])=>`<button class="${state.view===v?'active':''}" onclick="go('${v}')"><span>${ic}</span><${tag}>${l}</${tag}></button>`).join('')}
+function menuDropdown(){if(!state.menuOpen)return'';return `<div class="topMenu" role="menu">${navButtons('b')}</div>`}
 function backControl(){if(!state.history.length||state.view==='home')return'';const prev=state.history[state.history.length-1];return `<button class="backTalk" onclick="back()"><span>←</span><b>Torna a ${esc(viewLabel(prev.view))}</b></button>`}
 
 function groupSummary(){
@@ -164,8 +166,7 @@ async function ensureUserProfileFromMetadata(){
   }catch(e){console.warn('ensureUserProfileFromMetadata',e)}
 }
 
-function appShell(content){return `<div class="app"><div class="header"><div class="headerMenuWrap"><button class="headerIcon" onclick="toggleMainMenu()" title="Apri menu" aria-label="Apri menu">☰</button>${menuDropdown()}</div><div class="brand brandCenter appBrand"><img class="brandIcon mini" src="${logoIcon()}" alt="TOTIME"><div><div class="brandName">TOTIME</div><div class="brandTagline">Tempo che crei valore.</div></div></div><button class="headerIcon" onclick="go('settings')" title="Configurazione">⚙</button></div>${backControl()}${state.message?`<div class="toast">${esc(state.message)}</div>`:''}${content}<div class="version">${APP_VERSION} · Database Edition</div></div>${nav()}`}
-function nav(){const items=[['home','⌂','Home'],['timesheet','◷','Timesheet'],['summary','▥','Riepilogo'],['billing','▤','Fatture'],['tax','◌','Fiscalità'],['settings','•••','Altro']];return `<div class="nav">${items.map(([v,ic,l])=>`<button class="${state.view===v?'active':''}" onclick="go('${v}')"><span>${ic}</span><em>${l}</em></button>`).join('')}</div>`}
+function appShell(content){return `<div class="shell"><aside class="sidebar"><div class="sidebarBrand"><img class="sidebarLogo" src="${logoWordmark()}" alt="TOTIME"></div><nav class="sidebarNav">${navButtons('b')}</nav><div class="sidebarFoot"><div class="version">${APP_VERSION} · Database Edition</div></div></aside><div class="shellMain"><div class="topbar"><div class="headerMenuWrap"><button class="headerIcon" onclick="toggleMainMenu()" title="Apri menu" aria-label="Apri menu">☰</button>${menuDropdown()}</div><img class="topbarLogo" src="${logoIcon()}" alt="TOTIME"><button class="headerIcon" onclick="go('settings')" title="Configurazione">⚙</button></div><div class="app">${backControl()}${state.message?`<div class="toast">${esc(state.message)}</div>`:''}${content}<div class="version mobileVersion">${APP_VERSION} · Database Edition</div></div></div></div>`}
 function monthSelector(){return `<div class="month"><button onclick="changeMonth(-1)">‹</button><strong>${monthLabel(state.month)}</strong><button onclick="changeMonth(1)">›</button></div>`}
 function loadingView(){return `<div class="app"><div class="brand" style="margin-top:24px"><div class="brandHero"><img class="brandWordmarkImg" src="${logoWordmark()}" alt="TOTIME"></div></div><div class="card"><h1>Caricamento...</h1><p class="sub">Connessione al database Supabase.</p></div></div>`}
 function loginView(){return `<div class="app"><div class="brand" style="margin-top:24px"><div class="brandHero"><img class="brandWordmarkImg" src="${logoWordmark()}" alt="TOTIME"></div></div><div class="card"><h1>Accesso</h1><p class="sub">Accedi per salvare clienti, consuntivi, fatture e incassi nel database.</p>${state.message?`<p class="small">${esc(state.message)}</p>`:''}<form class="form" onsubmit="signIn(event)"><div class="field"><label>Email</label><input name="email" type="email" autocomplete="email" required></div><div class="field"><label>Password</label><input name="password" type="password" autocomplete="current-password" required></div><button class="primary">Accedi</button><button type="button" class="secondary" onclick="state.view='register';state.message='';render()">Registrati</button></form></div></div>`}
@@ -431,7 +432,6 @@ Object.assign(window,{
   reload,
   ensureUserProfileFromMetadata,
   appShell,
-  nav,
   monthSelector,
   loadingView,
   loginView,
