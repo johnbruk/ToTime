@@ -1,3 +1,5 @@
+import { normalizeAppData } from './appDataShape.js';
+
 export async function loadAppData(options = {}) {
   const repository = options.repository;
   const ensureUserProfile = options.ensureUserProfile;
@@ -12,7 +14,7 @@ export async function loadAppData(options = {}) {
   }
 
   const result = await repository.loadAll();
-  const loadedData = result.data || {};
+  const loadedData = normalizeAppData(result.data || {});
   const errors = result.errors || [];
 
   errors.forEach(item => tableError(item.table, item.error));
