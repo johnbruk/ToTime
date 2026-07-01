@@ -56,6 +56,8 @@ Object.defineProperty(globalThis, 'navigator', {
 });
 
 globalThis.window = globalThis;
+globalThis.location = { hash: '', search: '', pathname: '/', origin: 'http://localhost' };
+globalThis.history = { replaceState() {} };
 window.supabase = {
   createClient() {
     return {

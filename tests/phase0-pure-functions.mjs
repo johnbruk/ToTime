@@ -40,6 +40,8 @@ globalThis.localStorage = { store: new Map(), getItem(key) { return this.store.g
 globalThis.document = { documentElement: { setAttribute() {} }, getElementById: () => appNode, addEventListener() {}, createElement: () => ({ click() {} }) };
 Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { serviceWorker: { register: () => Promise.resolve() }, clipboard: { writeText: () => Promise.resolve() } } });
 globalThis.window = globalThis;
+globalThis.location = { hash: '', search: '', pathname: '/', origin: 'http://localhost' };
+globalThis.history = { replaceState() {} };
 window.supabase = { createClient: () => ({ auth: { getSession: async () => ({ data: { session: { user: { id: 'user-1', email: 'test@example.com', user_metadata: {} } } } }), onAuthStateChange() {} }, from: queryFor }) };
 globalThis.confirm = () => true;
 globalThis.prompt = () => '';

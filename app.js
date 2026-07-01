@@ -128,8 +128,10 @@ function billingCalc(group,header={}){
 function invoiceTemplateByCode(code){return data.invoiceTemplates.find(t=>t.active&&t.template_code===code)}
 
 async function init(){
+  const isRecoveryLink=/type=recovery/.test(location.hash)||/type=recovery/.test(location.search);
+  if(isRecoveryLink){state.view='resetPassword';history.replaceState(null,'',location.pathname+location.search)}
   const res=await sb.auth.getSession(); session=res.data.session;
-  if(session) await fetchAll();
+  if(session && !isRecoveryLink) await fetchAll();
   state.loading=false; render();
   sb.auth.onAuthStateChange(async(_event,newSession)=>{
     const wasLoggedIn=!!session;
