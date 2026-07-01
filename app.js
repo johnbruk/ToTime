@@ -11,8 +11,11 @@ import {
   today,
   ym
 } from './src/app-utils.js';
+import { createRepository } from './src/dataRepository.js';
+import { loadAppData } from './src/appDataLoader.js';
 
 const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);
+const repository=createRepository(sb);
 let state={view:'home',month:ym(today),edit:null,editType:null,loading:true,message:'',theme:localStorage.getItem('totime-theme')||'dark',menuOpen:false,history:[],dirty:false};
 let session=null;
 let data={clients:[],projects:[],activities:[],entries:[],monthly:[],billingHeaders:[],profiles:[],expenseCategories:[],travelExpenses:[],manualEntries:[],invoiceTemplates:[],appSettings:[],taxSettings:[],taxPayments:[]};
@@ -128,28 +131,25 @@ async function init(){
   sb.auth.onAuthStateChange(async(_event,newSession)=>{session=newSession; if(session){await fetchAll();state.view='home'}else{data={clients:[],projects:[],activities:[],entries:[],monthly:[],billingHeaders:[],profiles:[],expenseCategories:[],travelExpenses:[],manualEntries:[],invoiceTemplates:[],appSettings:[],taxSettings:[],taxPayments:[]};state.view='login'} render();});
 }
 async function fetchAll(){
-  state.loading=true; render(); await ensureUserProfileFromMetadata();
-  const tables=[
-    ['clients','clients'],['projects','projects'],['activities','activities'],['user_profiles','profiles'],
-    ['timesheet_entries','entries'],['monthly_compensations','monthly'],['billing_headers','billingHeaders'],
-    ['expense_categories','expenseCategories'],['travel_expenses','travelExpenses'],['manual_entries','manualEntries'],['invoice_templates','invoiceTemplates'],['app_settings','appSettings'],['tax_settings','taxSettings'],['tax_payments','taxPayments']
-  ];
-  for(const [table,key] of tables){
-    let q=sb.from(table).select('*');
-    if(table==='timesheet_entries') q=q.order('entry_date',{ascending:false});
-    else if(table==='travel_expenses') q=q.order('expense_date',{ascending:false});
-    else if(table==='manual_entries') q=q.order('entry_date',{ascending:false});
-    else if(table==='monthly_compensations') q=q.order('year',{ascending:false}).order('month',{ascending:false});
-    else if(table==='invoice_templates') q=q.order('sort_order',{ascending:true});
-    else if(table==='tax_settings') q=q.order('fiscal_year',{ascending:false});
-    else if(table==='tax_payments') q=q.order('fiscal_year',{ascending:false});
-    else q=q.order('created_at',{ascending:true});
-    const {data:rows,error}=await q;
-    if(error){console.error(table,error); setMsg(`Errore caricamento ${table}: ${error.message}`,7000); data[key]=[];} else data[key]=rows||[];
+  state.loading=true; render();
+  try{
+    const loaded=await loadAppData({
+      repository,
+      ensureUserProfile:ensureUserProfileFromMetadata,
+      tableError:(table,error)=>{
+        console.error(table,error);
+        setMsg(`Errore caricamento ${table}: ${error.message}`,7000);
+      }
+    });
+    data=loaded.data;
+    loadThemeFromSettings();
+    state.dirty=false;
+  }catch(error){
+    console.error('fetchAll',error);
+    setMsg(`Errore caricamento dati: ${error.message||error}`,7000);
+  }finally{
+    state.loading=false;
   }
-  loadThemeFromSettings();
-  state.dirty=false;
-  state.loading=false;
 }
 async function reload(){await fetchAll();render()}
 async function ensureUserProfileFromMetadata(){
