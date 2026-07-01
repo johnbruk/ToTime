@@ -63,7 +63,7 @@ function back(){if(!guardUnsavedChanges())return;const prev=state.history.pop()|
 function toggleMainMenu(){if(!guardUnsavedChanges())return;state.menuOpen=!state.menuOpen;render()}
 const NAV_ITEMS=[['home','⌂','Home'],['timesheet','◷','Timesheet'],['summary','▥','Riepilogo'],['billing','▤','Fatture'],['tax','◌','Fiscalità'],['settings','•••','Configurazione']];
 function navButtons(tag){return NAV_ITEMS.map(([v,ic,l])=>`<button class="${state.view===v?'active':''}" onclick="go('${v}')"><span>${ic}</span><${tag}>${l}</${tag}></button>`).join('')}
-function menuDropdown(){if(!state.menuOpen)return'';return `<div class="topMenu" role="menu">${navButtons('b')}</div>`}
+function menuDropdown(){if(!state.menuOpen)return'';return `<div class="topMenu" role="menu"><button class="topMenuClose" onclick="toggleMainMenu()" aria-label="Chiudi menu">✕</button><img class="topMenuLogo" src="${logoWordmark()}" alt="TOTIME">${navButtons('b')}</div>`}
 function backControl(){if(!state.history.length||state.view==='home')return'';return `<button class="backArrow" onclick="back()" aria-label="Indietro" title="Indietro">‹</button>`}
 
 function groupSummary(){
