@@ -135,7 +135,7 @@ async function init(){
     const wasLoggedIn=!!session;
     session=newSession;
     if(!session){data={clients:[],projects:[],activities:[],entries:[],monthly:[],billingHeaders:[],profiles:[],expenseCategories:[],travelExpenses:[],manualEntries:[],invoiceTemplates:[],appSettings:[],taxSettings:[],taxPayments:[]};state.view='login';render();return}
-    if(_event==='SIGNED_IN'&&!wasLoggedIn){await fetchAll();state.view='home';render()}
+    if(_event==='SIGNED_IN'&&!wasLoggedIn){await fetchAll();state.view='home';state.message='';render()}
   });
 }
 async function fetchAll(){
