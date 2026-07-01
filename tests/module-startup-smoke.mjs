@@ -87,7 +87,7 @@ globalThis.FileReader = class FileReaderMock {};
 await import('../app.js');
 await new Promise(resolve => setTimeout(resolve, 0));
 
-assert.match(appNode.innerHTML, /Accesso/);
+assert.match(appNode.innerHTML, /Accedi al tuo profilo/);
 assert.equal(document.documentElement.attributes['data-theme'], 'light');
 assert.equal(localStorage.getItem('totime-theme'), 'light');
 assert.equal(typeof window.signIn, 'function');
