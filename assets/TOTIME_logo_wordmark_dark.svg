@@ -32,12 +32,7 @@
 
   </g>
   <g>
-    <text x="660" y="300" font-family="Montserrat, Inter, Arial, sans-serif" font-size="138" font-weight="600" fill="#F5F7FB" letter-spacing="0">T</text>
-<text x="790" y="300" font-family="Montserrat, Inter, Arial, sans-serif" font-size="138" font-weight="600" fill="#F5F7FB" letter-spacing="0">O</text>
-<text x="930" y="300" font-family="Montserrat, Inter, Arial, sans-serif" font-size="138" font-weight="600" fill="#F5F7FB" letter-spacing="0">T</text>
-<text x="1064" y="300" font-family="Montserrat, Inter, Arial, sans-serif" font-size="138" font-weight="600" fill="#F5F7FB" letter-spacing="0">I</text>
-<text x="1162" y="300" font-family="Montserrat, Inter, Arial, sans-serif" font-size="138" font-weight="600" fill="#F5F7FB" letter-spacing="0">M</text>
-<text x="1325" y="300" font-family="Montserrat, Inter, Arial, sans-serif" font-size="138" font-weight="600" fill="#F5F7FB" letter-spacing="0">E</text>
+    <text x="662" y="300" font-family="Montserrat, Inter, Arial, sans-serif" font-size="140" font-weight="600" fill="#F5F7FB" letter-spacing="40">Totime</text>
     <text x="662" y="414" font-family="Montserrat, Inter, Arial, sans-serif" font-size="84" font-weight="500" fill="#F5F7FB" letter-spacing="0.5">Il tempo è valore</text>
   </g>
 </svg>

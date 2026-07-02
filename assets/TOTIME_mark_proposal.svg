@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="600" viewBox="0 0 600 600">
+  <rect width="600" height="600" fill="none"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <!-- hourglass bulb (left) + waist -->
+    <path d="M 423 150 C 350 86, 230 82, 156 168 C 84 252, 111 340, 235 389"
+          stroke="#151A1F" stroke-width="36"/>
+    <!-- hourglass base -->
+    <path d="M 232 392 C 177 426, 168 476, 168 510 L 432 510 C 432 472, 419 431, 366 392"
+          stroke="#151A1F" stroke-width="36"/>
+    <!-- rising value arrow (right side of hourglass, continues up) -->
+    <path d="M 366 392 C 430 350, 456 280, 450 221"
+          stroke="#151A1F" stroke-width="36"/>
+    <path d="M 421 227 L 457 205 L 474 245"
+          stroke="#151A1F" stroke-width="36"/>
+  </g>
+</svg>
