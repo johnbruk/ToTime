@@ -2,34 +2,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="2400" height="900" viewBox="0 0 1600 600">
   <rect width="1600" height="600" fill="none"/>
   <g transform="translate(95,50) scale(0.86)">
-    
-  <defs>
-    <linearGradient id="sageGrad" x1="165" y1="500" x2="500" y2="160" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#62708F"/>
-      <stop offset="0.55" stop-color="#7C89A6"/>
-      <stop offset="1" stop-color="#B3BDD0"/>
-    </linearGradient>
-  </defs>
-  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
-    <!-- upper clock / time arc -->
-    <path d="M 423 150 C 350 86, 230 82, 156 168 C 84 252, 111 340, 235 389"
-          stroke="#7C89A6" stroke-width="36"/>
-
-    <!-- lower hourglass / value flow -->
-    <path d="M 232 392 C 177 426, 168 476, 168 510 L 432 510 C 432 472, 419 431, 366 392"
-          stroke="#7C89A6" stroke-width="36"/>
-
-    <!-- rising value arrow -->
-    <path d="M 366 392 C 430 350, 456 280, 450 221"
-          stroke="#7C89A6" stroke-width="36"/>
-    <path d="M 421 227 L 457 205 L 474 245"
-          stroke="#7C89A6" stroke-width="36"/>
-
-    <!-- clock hands -->
-    <path d="M 300 186 L 300 300 L 355 326" 
-          stroke="#7C89A6" stroke-width="34"/>
-  </g>
-
+    <g fill="none" stroke="#7C89A6" stroke-width="40" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M 175 150 L 360 150"/>
+      <path d="M 175 150 L 300 300"/>
+      <path d="M 300 300 L 175 460"/>
+      <path d="M 175 460 L 420 460"/>
+      <path d="M 420 460 L 300 300"/>
+      <path d="M 300 300 L 452 148"/>
+      <path d="M 408 158 L 456 138 L 470 188"/>
+    </g>
   </g>
   <g>
     <text x="662" y="300" font-family="Montserrat, Inter, Arial, sans-serif" font-size="140" font-weight="600" fill="#151A1F" letter-spacing="40">Totime</text>
