@@ -132,6 +132,8 @@ Regola:
 
 ### `expense_categories`
 
+> Aggiornato 2026-07-02: campo `reimbursable` (boolean, default true) = voce rimborsabile dal cliente o costo a carico.
+
 Categorie spesa configurabili.
 
 Campi chiave:
@@ -158,6 +160,8 @@ Esempi:
 - Altro.
 
 ### `travel_expenses`
+
+> Aggiornato 2026-07-02: campo `reimbursable` (boolean, default true) e `client_id` reso nullable per i costi puri.
 
 Spese di trasferta puntuali.
 
@@ -262,6 +266,8 @@ Campi chiave:
 ## Configurazione utente
 
 ### `user_profiles`
+
+> Aggiornato 2026-07-02: campo `phone` (text) per la sezione Account.
 
 Dati registrazione/profilo.
 
