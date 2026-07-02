@@ -1,10 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 600 600">
   <rect width="600" height="600" fill="none"/>
-  <g fill="none" stroke="#7C89A6" stroke-width="36" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M 423 150 C 350 86, 230 82, 156 168 C 84 252, 111 340, 235 389"/>
-    <path d="M 232 392 C 177 426, 168 476, 168 510 L 432 510 C 432 472, 419 431, 366 392"/>
-    <path d="M 366 392 C 430 350, 456 280, 450 221"/>
-    <path d="M 421 227 L 457 205 L 474 245"/>
+  <g fill="none" stroke="#7C89A6" stroke-width="28" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 180 150 L 388 150"/>
+    <path d="M 180 150 C 205 215, 255 268, 300 300"/>
+    <path d="M 300 300 C 255 332, 205 385, 180 450"/>
+    <path d="M 180 450 L 420 450"/>
+    <path d="M 420 450 C 395 385, 345 332, 300 300"/>
+    <path d="M 300 300 C 358 262, 424 250, 448 176"/>
+    <path d="M 410 184 L 454 162 L 468 208"/>
   </g>
 </svg>
