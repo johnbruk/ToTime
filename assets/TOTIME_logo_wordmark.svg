@@ -17,13 +17,13 @@
 
     <!-- lower hourglass / value flow -->
     <path d="M 232 392 C 177 426, 168 476, 168 510 L 432 510 C 432 472, 419 431, 366 392"
-          stroke="url(#sageGrad)" stroke-width="36"/>
+          stroke="#151A1F" stroke-width="36"/>
 
     <!-- rising value arrow -->
     <path d="M 366 392 C 430 350, 456 280, 450 221"
-          stroke="url(#sageGrad)" stroke-width="36"/>
+          stroke="#151A1F" stroke-width="36"/>
     <path d="M 421 227 L 457 205 L 474 245"
-          stroke="url(#sageGrad)" stroke-width="36"/>
+          stroke="#151A1F" stroke-width="36"/>
 
     <!-- clock hands -->
     <path d="M 300 186 L 300 300 L 355 326" 
@@ -33,11 +33,11 @@
   </g>
   <g>
     <text x="660" y="300" font-family="Montserrat, Inter, Arial, sans-serif" font-size="138" font-weight="600" fill="#151A1F" letter-spacing="0">T</text>
-<text x="790" y="300" font-family="Montserrat, Inter, Arial, sans-serif" font-size="138" font-weight="600" fill="#93A395" letter-spacing="0">O</text>
+<text x="790" y="300" font-family="Montserrat, Inter, Arial, sans-serif" font-size="138" font-weight="600" fill="#151A1F" letter-spacing="0">O</text>
 <text x="930" y="300" font-family="Montserrat, Inter, Arial, sans-serif" font-size="138" font-weight="600" fill="#151A1F" letter-spacing="0">T</text>
 <text x="1064" y="300" font-family="Montserrat, Inter, Arial, sans-serif" font-size="138" font-weight="600" fill="#151A1F" letter-spacing="0">I</text>
 <text x="1162" y="300" font-family="Montserrat, Inter, Arial, sans-serif" font-size="138" font-weight="600" fill="#151A1F" letter-spacing="0">M</text>
 <text x="1325" y="300" font-family="Montserrat, Inter, Arial, sans-serif" font-size="138" font-weight="600" fill="#151A1F" letter-spacing="0">E</text>
-    <text x="662" y="400" font-family="Montserrat, Inter, Arial, sans-serif" font-size="64" font-weight="500" fill="#93A395" letter-spacing="4">Il tempo è valore</text>
+    <text x="662" y="414" font-family="Montserrat, Inter, Arial, sans-serif" font-size="84" font-weight="500" fill="#151A1F" letter-spacing="0.5">Il tempo è valore</text>
   </g>
 </svg>

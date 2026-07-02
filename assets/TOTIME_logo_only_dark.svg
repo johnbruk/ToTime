@@ -16,13 +16,13 @@
 
     <!-- lower hourglass / value flow -->
     <path d="M 232 392 C 177 426, 168 476, 168 510 L 432 510 C 432 472, 419 431, 366 392"
-          stroke="url(#sageGrad)" stroke-width="36"/>
+          stroke="#F5F7FB" stroke-width="36"/>
 
     <!-- rising value arrow -->
     <path d="M 366 392 C 430 350, 456 280, 450 221"
-          stroke="url(#sageGrad)" stroke-width="36"/>
+          stroke="#F5F7FB" stroke-width="36"/>
     <path d="M 421 227 L 457 205 L 474 245"
-          stroke="url(#sageGrad)" stroke-width="36"/>
+          stroke="#F5F7FB" stroke-width="36"/>
 
     <!-- clock hands -->
     <path d="M 300 186 L 300 300 L 355 326"
