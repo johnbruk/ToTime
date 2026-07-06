@@ -52,3 +52,9 @@ button,input,select,textarea{font-family:var(--font-body)} button{cursor:pointer
 .threshNote{margin-top:12px;font-size:13.5px;line-height:1.45;color:var(--soft)}
 .threshNote b{color:var(--text)}
 .sidebarFoot .version,.mobileVersion{line-height:1.5}
+
+.dayHead{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:var(--surface2);border-bottom:1px solid var(--line);font-size:14px;color:var(--soft)}
+.dayHead b{font-family:var(--font-heading)}
+.policyRow{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)}
+.policyRow:last-child{border-bottom:0}
+.policyRow select{width:auto;min-width:150px}
