@@ -73,3 +73,8 @@ button,input,select,textarea{font-family:var(--font-body)} button{cursor:pointer
 .hbar{display:grid;grid-template-columns:130px 1fr auto;gap:10px;align-items:center;font-size:13px}
 .hbar .htrack{background:var(--surface2);border-radius:4px;height:15px;overflow:hidden}
 .hbar .hfill{height:100%;background:var(--primary2);border-radius:4px;min-width:2px}
+
+/* Asse Y sui grafici a linee */
+.lineChartWrap{display:flex;gap:8px;align-items:stretch}
+.lineChartY{display:flex;flex-direction:column;justify-content:space-between;font-size:10px;color:var(--muted);text-align:right;min-width:50px;padding-bottom:8px}
+.lineChartCol{flex:1;min-width:0}
