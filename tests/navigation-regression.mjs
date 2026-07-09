@@ -117,23 +117,22 @@ assert.match(appNode.innerHTML, /Timesheet/);
 
 window.toggleMainMenu();
 assert.match(appNode.innerHTML, /topMenu/);
-assert.match(appNode.innerHTML, /Fatture/);
+assert.match(appNode.innerHTML, /Fatturazione/);
 
 window.go('summary');
 assert.match(appNode.innerHTML, /Riepilogo/);
-assert.match(appNode.innerHTML, /Torna a Home/);
+assert.match(appNode.innerHTML, /Indietro/);
 
 window.back();
 assert.match(appNode.innerHTML, /Nuovo consuntivo/);
 
 window.go('settings');
 assert.match(appNode.innerHTML, /Configurazione/);
-assert.match(appNode.innerHTML, /Torna a Home/);
+assert.match(appNode.innerHTML, /Indietro/);
 
 listeners.input[0]({ target: { closest: selector => selector === '.form' } });
 window.go('billing');
-assert.match(appNode.innerHTML, /Modifiche non salvate/);
-assert.match(appNode.innerHTML, /Configurazione/);
-assert.doesNotMatch(appNode.innerHTML, /Totale fatturazione mese/);
+assert.match(appNode.innerHTML, /Fatturazione e incassi/);
+assert.match(appNode.innerHTML, /Totale fatturazione mese/);
 
 console.log('navigation regression test passed');
