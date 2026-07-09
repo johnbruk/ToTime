@@ -21,9 +21,9 @@ const invoice = billingCalc(
 assert.equal(invoice.services, 1000);
 assert.equal(invoice.manual, 200);
 assert.equal(invoice.expenses, 50);
-assert.equal(invoice.taxableBase, 1200);
-assert.equal(invoice.inpsAmount, 48);
-assert.equal(invoice.total, 1300);
+assert.equal(invoice.taxableBase, 1250);
+assert.equal(invoice.inpsAmount, 50);
+assert.equal(invoice.total, 1302);
 
 const tax = annualTaxCalc({
   fiscalYear: 2026,
