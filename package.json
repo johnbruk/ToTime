@@ -4,9 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node tests/module-startup-smoke.mjs && node tests/calculations-smoke.mjs && node tests/repository-smoke.mjs && node tests/app-data-loader-smoke.mjs && node tests/view-map-smoke.mjs && node tests/app-data-shape-smoke.mjs",
+    "test": "node tests/module-startup-smoke.mjs && node tests/navigation-regression.mjs && node tests/calculations-smoke.mjs && node tests/phase0-pure-functions.mjs && node tests/repository-smoke.mjs && node tests/app-data-loader-smoke.mjs && node tests/view-map-smoke.mjs && node tests/app-data-shape-smoke.mjs",
     "test:startup": "node tests/module-startup-smoke.mjs",
+    "test:navigation": "node tests/navigation-regression.mjs",
     "test:calculations": "node tests/calculations-smoke.mjs",
+    "test:phase0": "node tests/phase0-pure-functions.mjs",
     "test:repository": "node tests/repository-smoke.mjs",
     "test:loader": "node tests/app-data-loader-smoke.mjs",
     "test:views": "node tests/view-map-smoke.mjs",
