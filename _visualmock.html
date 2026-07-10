@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app"></div>
+  <script>
+  // ---- Company-mode visual mock (local preview only) ----
+  const params=new URLSearchParams(location.search);
+  const ME=params.get('me')||'u1';
+  window.__TOTIME_MODE='company';
+  window.__TOTIME_BRAND={name:'Solution Consulthink',accent:'#EF3E00',accent2:'#F0764A'};
+
+  const profiles=[
+    {id:'u1',user_id:'u1',first_name:'Giovanni',last_name:'Brucculeri',full_name:'Giovanni Brucculeri',email:'giovanni@sltngroup.com',role:'admin',worker_type:'dipendente'},
+    {id:'u2',user_id:'u2',first_name:'Marco',last_name:'Rossi',full_name:'Marco Rossi',email:'marco.rossi@sltngroup.com',role:'collaboratore',worker_type:'dipendente'},
+    {id:'u3',user_id:'u3',first_name:'Laura',last_name:'Bianchi',full_name:'Laura Bianchi',email:'laura.bianchi@sltngroup.com',role:'collaboratore',worker_type:'dipendente'},
+    {id:'u4',user_id:'u4',first_name:'Paolo',last_name:'Verdi',full_name:'Paolo Verdi',email:'paolo.verdi@studio-verdi.it',role:'collaboratore',worker_type:'esterno'}
+  ];
+  const clients=[
+    {id:'c1',name:'Bouygues',daily_rate:420,standard_hours:8,created_at:'2026-01-01'},
+    {id:'c2',name:'Equans',daily_rate:480,standard_hours:8,created_at:'2026-01-02'},
+    {id:'c3',name:'Enel',daily_rate:520,standard_hours:8,created_at:'2026-01-03'}
+  ];
+  const projects=[
+    {id:'p1',client_id:'c1',name:'Rete FTTH Nord',created_at:'2026-01-01'},
+    {id:'p2',client_id:'c2',name:'Impianti HV Milano',created_at:'2026-01-02'},
+    {id:'p3',client_id:'c3',name:'Distribuzione MT',created_at:'2026-01-03'}
+  ];
+  // timesheet entries spread across 2026 months and collaborators
+  const plan=[
+    ['u1','c1','p1',420],['u1','c3','p3',520],
+    ['u2','c1','p1',360],['u2','c2','p2',360],
+    ['u3','c2','p2',400],['u3','c3','p3',400],
+    ['u4','c3','p3',450],['u4','c1','p1',450]
+  ];
+  let entries=[]; let eid=0;
+  for(let mo=1;mo<=7;mo++){
+    const mm=String(mo).padStart(2,'0');
+    plan.forEach(([owner,cl,pr,rate],i)=>{
+      const days=2+((mo+i)%4); // 2..5 days
+      entries.push({id:'e'+(++eid),entry_date:`2026-${mm}-${String(3+i).padStart(2,'0')}`,owner_user_id:owner,client_id:cl,project_id:pr,hours:days*8,daily_rate_snapshot:rate,standard_hours_snapshot:8,created_at:`2026-${mm}-01`});
+    });
+  }
+  const monthly=[]; const manualEntries=[];
+
+  // Simulate RLS: a collaboratore sees only their own rows.
+  let seedEntries=entries, seedMonthly=monthly, seedManual=manualEntries;
+  if(ME!=='u1'){
+    seedEntries=entries.filter(e=>e.owner_user_id===ME);
+  }
+
+  const SEED={
+    clients, projects, activities:[], user_profiles:profiles,
+    timesheet_entries:seedEntries, monthly_compensations:seedMonthly,
+    billing_headers:[], expense_categories:[], travel_expenses:[],
+    manual_entries:seedManual, invoice_templates:[], app_settings:[],
+    tax_settings:[], tax_payments:[]
+  };
+
+  // ---- Minimal fake Supabase returning seed data ----
+  function makeChain(table){
+    let single=false, filterId=null;
+    const resolve=()=>{
+      let rows=(SEED[table]||[]).slice();
+      let data=rows, error=null;
+      if(single){ data=rows[0]||null; }
+      return {data,error};
+    };
+    const h={
+      select(){return proxy}, order(){return proxy}, eq(){return proxy},
+      in(){return proxy}, gte(){return proxy}, lte(){return proxy},
+      ilike(){return proxy}, is(){return proxy}, limit(){return proxy},
+      insert(){single=true;return proxy}, update(){single=true;return proxy},
+      delete(){return proxy},
+      single(){single=true;return proxy}, maybeSingle(){single=true;return proxy}
+    };
+    const proxy=new Proxy({},{get(t,k){
+      if(k==='then'){const p=Promise.resolve(resolve());return p.then.bind(p);}
+      return h[k]|| (()=>proxy);
+    }});
+    return proxy;
+  }
+  window.supabase={createClient(){return {
+    from(table){return makeChain(table);},
+    auth:{
+      async getSession(){return {data:{session:{user:{id:ME,email:(profiles.find(p=>p.user_id===ME)||{}).email}}}};},
+      onAuthStateChange(){return {data:{subscription:{unsubscribe(){}}}};},
+      async updateUser(){return {error:null};},
+      async signOut(){return {error:null};}
+    }
+  };}};
+  </script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
