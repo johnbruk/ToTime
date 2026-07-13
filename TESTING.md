@@ -16,10 +16,13 @@ Il comando esegue:
 
 ```bash
 node tests/module-startup-smoke.mjs
+node tests/navigation-regression.mjs
 node tests/calculations-smoke.mjs
+node tests/phase0-pure-functions.mjs
 node tests/repository-smoke.mjs
 node tests/app-data-loader-smoke.mjs
 node tests/view-map-smoke.mjs
+node tests/app-data-shape-smoke.mjs
 ```
 
 ## Test disponibili
@@ -53,6 +56,34 @@ Verifica le funzioni pure estratte in `src/calculations`:
 - stima tasse regime forfettario;
 - parsing mesi esclusi;
 - proiezione annuale.
+
+### Phase 0 pure-function regression
+
+```bash
+npm run test:phase0
+```
+
+Verifica la baseline funzionale senza usare un Supabase reale:
+
+- importo giornaliero e giorni/uomo;
+- raggruppamento riepilogo;
+- calcolo fattura con servizi, righe manuali, spese, rivalsa INPS e bollo;
+- stima fiscale annuale;
+- proiezione annuale;
+- parsing CSV, importi e date.
+
+### Navigation regression test
+
+```bash
+npm run test:navigation
+```
+
+Verifica che la navigazione principale resti stabile:
+
+- apertura menu;
+- cambio vista;
+- ritorno alla vista precedente;
+- accesso a configurazione e fatturazione.
 
 ### Repository smoke test
 
@@ -94,6 +125,14 @@ Verifica l'helper `src/views/viewMap.js`:
 - fallback verso vista alternativa;
 - elenco nomi viste;
 - rendering tramite funzione associata.
+
+### App data shape smoke test
+
+```bash
+npm run test:data-shape
+```
+
+Verifica che la forma normalizzata dei dati applicativi resti compatibile con le viste principali.
 
 ## Quando eseguirli
 

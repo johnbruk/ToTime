@@ -16,10 +16,11 @@
 - Fase 5B — Note load state.
 - Fase 6A — Piano PWA/cache.
 - Fase 6B — Note versione/cache.
+- Fase 2E — Test suite completa nel comando `npm test`.
 
 ## In corso
 
-- Fase 2E — Test suite completa nel comando `npm test`.
+- Nessuna fase attiva nel branch corrente.
 
 ## Ancora da fare
 
