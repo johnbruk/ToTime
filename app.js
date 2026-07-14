@@ -83,9 +83,32 @@ function navigateTo(v,{edit=null,editType=null,track=true,resetEdit=true}={}){if
 function go(v){navigateTo(v)}
 function back(){if(!guardUnsavedChanges())return;const prev=state.history.pop()||{view:'home',edit:null,editType:null};state.view=prev.view||'home';state.edit=prev.edit||null;state.editType=prev.editType||null;state.menuOpen=false;render()}
 function toggleMainMenu(){if(!guardUnsavedChanges())return;state.menuOpen=!state.menuOpen;render()}
-const NAV_ITEMS=[['home','⌂','Dashboard'],['timesheet','◷','Timesheet'],['expenses','▦','Spese'],['billing','▤','Fatturazione'],['balance','▥','Bilancio'],['tax','◌','Tassazione'],['settings','•••','Impostazioni']];
-function navButtons(tag){return NAV_ITEMS.map(([v,ic,l])=>`<button class="${state.view===v?'active':''}" onclick="go('${v}')"><span>${ic}</span><${tag}>${l}</${tag}></button>`).join('')}
-function menuDropdown(){if(!state.menuOpen)return'';return `<div class="topMenu" role="menu"><button class="topMenuClose" onclick="toggleMainMenu()" aria-label="Chiudi menu">✕</button><img class="topMenuLogo" src="${logoWordmark()}" alt="TOTIME">${navButtons('b')}</div>`}
+const MENU=[
+  {v:'home',ic:'⌂',l:'Dashboard'},
+  {main:'timesheet',ic:'◷',l:'Timesheet',sub:[{v:'newChoice',l:'Nuovo consuntivo'}]},
+  {main:'expenses',ic:'▦',l:'Spese',sub:[{v:'expenseForm',l:'Nuova spesa'}]},
+  {v:'billing',ic:'▤',l:'Fatturazione'},
+  {v:'balance',ic:'▥',l:'Bilancio'},
+  {main:'tax',ic:'◌',l:'Tassazione',sub:[{v:'taxPayments',l:'Pagamenti fiscali (INPS)'},{v:'taxSettings',l:'Configurazione fiscale'}]},
+  {main:'settings',ic:'•••',l:'Impostazioni',sub:[{v:'clients',l:'Clienti'},{v:'projects',l:'Progetti'},{v:'activities',l:'Attività'},{v:'expenseCategories',l:'Voci di costo/spesa'},{v:'invoiceTemplates',l:'Template fattura'},{v:'appearance',l:'Aspetto / Tema'},{v:'account',l:'Account'}]}
+];
+const NAV_CHILDREN={
+  timesheet:['timesheet','newChoice','dailyForm','dailyEdit','monthlyForm','monthlyEdit','manualForm','manualEdit','annualMonths'],
+  expenses:['expenses','expenseForm','expenseEdit'],
+  billing:['billing','billingDetail','annualInvoices','incassi','fatturatoDetail'],
+  tax:['tax','taxPayments','taxPaymentEdit','taxSettings'],
+  settings:['settings','clients','clientEdit','projects','projectEdit','activities','activityEdit','expenseCategories','expenseCategoryEdit','invoiceTemplates','invoiceTemplateEdit','appearance','account','exportTimesheet']
+};
+function navSectionLabel(view){for(const m of MENU){const key=m.main||m.v;const kids=NAV_CHILDREN[key]||[key];if(kids.includes(view))return m.l;}return null;}
+function navMenu(){const cur=navSectionLabel(state.view);return MENU.map(m=>{
+  if(!m.sub)return `<button class="${cur===m.l?'active':''}" onclick="go('${m.v}')"><span>${m.ic}</span><b>${m.l}</b></button>`;
+  const open=cur===m.l;
+  const parent=`<button class="navParentBtn ${open?'active':''}" onclick="go('${m.main}')"><span>${m.ic}</span><b>${m.l}</b><i class="navChev">${open?'▾':'▸'}</i></button>`;
+  const subs=open?`<div class="navSubList">${m.sub.map(s=>`<button class="navSubItem ${state.view===s.v?'active':''}" onclick="${s.edit?`goNav('${s.v}','${s.edit}')`:`go('${s.v}')`}">${s.l}</button>`).join('')}</div>`:'';
+  return parent+subs;
+}).join('')}
+function goNav(v,edit){navigateTo(v,{edit:edit||null})}
+function menuDropdown(){if(!state.menuOpen)return'';return `<div class="topMenu" role="menu"><button class="topMenuClose" onclick="toggleMainMenu()" aria-label="Chiudi menu">✕</button><img class="topMenuLogo" src="${logoWordmark()}" alt="TOTIME">${navMenu()}</div>`}
 function backControl(){if(!state.history.length||state.view==='home')return'';return `<button class="backArrow" onclick="back()" aria-label="Indietro" title="Indietro">‹</button>`}
 
 function groupSummary(){
@@ -198,7 +221,7 @@ async function ensureUserProfileFromMetadata(){
   }catch(e){console.warn('ensureUserProfileFromMetadata',e)}
 }
 
-function appShell(content){return `<div class="shell"><aside class="sidebar"><div class="sidebarBrand"><img class="sidebarLogo" src="${logoWordmark()}" alt="TOTIME" onclick="go('home')" role="button" title="Torna alla Home"></div><nav class="sidebarNav">${navButtons('b')}</nav><div class="sidebarFoot"><div class="version">${APP_VERSION} · Database Edition · © ${new Date().getFullYear()} johnbruk</div></div></aside><div class="shellMain"><div class="topbar"><div class="headerMenuWrap"><button class="headerIcon" onclick="toggleMainMenu()" title="Apri menu" aria-label="Apri menu">☰</button>${menuDropdown()}</div><img class="topbarLogo" src="${logoIcon()}" alt="TOTIME" onclick="go('home')" role="button" title="Torna alla Home"><button class="headerIcon" onclick="go('settings')" title="Configurazione">⚙</button></div><div class="app">${backControl()}${state.message?`<div class="toast">${esc(state.message)}</div>`:''}${content}<div class="version mobileVersion">${APP_VERSION} · Database Edition · © ${new Date().getFullYear()} johnbruk</div></div></div></div>`}
+function appShell(content){return `<div class="shell"><aside class="sidebar"><div class="sidebarBrand"><img class="sidebarLogo" src="${logoWordmark()}" alt="TOTIME" onclick="go('home')" role="button" title="Torna alla Home"></div><nav class="sidebarNav">${navMenu()}</nav><div class="sidebarFoot"><div class="version">${APP_VERSION} · Database Edition · © ${new Date().getFullYear()} johnbruk</div></div></aside><div class="shellMain"><div class="topbar"><div class="headerMenuWrap"><button class="headerIcon" onclick="toggleMainMenu()" title="Apri menu" aria-label="Apri menu">☰</button>${menuDropdown()}</div><img class="topbarLogo" src="${logoIcon()}" alt="TOTIME" onclick="go('home')" role="button" title="Torna alla Home"><button class="headerIcon" onclick="go('settings')" title="Configurazione">⚙</button></div><div class="app">${state.message?`<div class="toast">${esc(state.message)}</div>`:''}${backControl()}${content}<div class="version mobileVersion">${APP_VERSION} · Database Edition · © ${new Date().getFullYear()} johnbruk</div></div></div></div>`}
 function monthSelector(){return `<div class="month"><button onclick="changeMonth(-1)">‹</button><strong>${monthLabel(state.month)}</strong><button onclick="changeMonth(1)">›</button></div>`}
 function loadingView(){return `<div class="authScreen"><div class="authBox"><img class="authLogo" src="${logoWordmark()}" alt="TOTIME"><h1>Caricamento...</h1><p class="sub">Un attimo, stiamo preparando i tuoi dati.</p></div></div>`}
 function switchAuthView(v){state.view=v;state.message='';render()}
@@ -242,7 +265,7 @@ function homeMultiChart(){
   const upTax=cNet.map((v,i)=>v+cTax[i]);const zeros=cNet.map(()=>0);
   const area=(lower,upper,color)=>{const top=[];const bot=[];for(let i=0;i<=actualEnd;i++)top.push(`${X(i)},${Y(upper[i])}`);for(let i=actualEnd;i>=0;i--)bot.push(`${X(i)},${Y(lower[i])}`);return `<polygon points="${top.concat(bot).join(' ')}" style="fill:${color};stroke:none"></polygon>`;};
   const bands=area(zeros,cNet,'#3FB27F')+area(cNet,upTax,'#F7A647')+area(upTax,cCons,'#94A2BE');
-  const legend=`<div class="segLegend"><span class="li"><span class="sdot" style="background:#3FB27F"></span>Netto · ${fmtEUR(cNet[actualEnd])}</span><span class="li"><span class="sdot" style="background:#F7A647"></span>Tasse · ${fmtEUR(cTax[actualEnd])}</span><span class="li"><span class="sdot" style="background:#94A2BE"></span>Spese · ${fmtEUR(cExp[actualEnd])}</span><span class="li"><span class="sdot" style="background:transparent;border:1.5px solid var(--muted)"></span>Consuntivato · ${fmtEUR(cCons[actualEnd])}</span></div>`;
+  const legend=`<div class="segLegend"><span class="li"><span class="sdot" style="background:transparent;border:1.5px solid var(--muted)"></span>Consuntivato · ${fmtEUR(cCons[actualEnd])}</span><span class="li"><span class="sdot" style="background:#3FB27F"></span>Netto · ${fmtEUR(cNet[actualEnd])}</span><span class="li"><span class="sdot" style="background:#F7A647"></span>Tasse · ${fmtEUR(cTax[actualEnd])}</span><span class="li"><span class="sdot" style="background:#94A2BE"></span>Spese · ${fmtEUR(cExp[actualEnd])}</span></div>`;
   return `<div class="card"><b>Composizione del consuntivato ${year}</b><div class="desc" style="margin-top:2px">Il consuntivato cumulato ripartito in netto (dopo spese e tasse) + tasse + spese</div><div class="lineChartWrap" style="margin-top:14px"><div class="lineChartY"><span>${fmtK(max)}</span><span>${fmtK(max/2)}</span><span>0</span></div><div class="lineChartCol"><svg class="lineChart" viewBox="0 0 100 58" preserveAspectRatio="none"><line x1="0" y1="6" x2="100" y2="6"></line><line x1="0" y1="52" x2="100" y2="52"></line>${bands}</svg></div></div><div class="chartMonths" style="padding-left:58px">${monthNames.map((m,i)=>`<span class="${i>actualEnd?'future':''}">${m.slice(0,3)}</span>`).join('')}</div>${legend}</div>`;
 }
 function annualChartSvg(){
@@ -544,6 +567,7 @@ Object.assign(window,{
   amountLine,
   dateIT,
   go,
+  goNav,
   viewLabel,
   guardUnsavedChanges,
   pushHistory,
