@@ -335,7 +335,55 @@ async function duplicateExpense(idv){const e=data.travelExpenses.find(x=>x.id===
 async function deleteExpense(idv){if(!confirm('Eliminare questa spesa di trasferta?'))return;const {error}=await sb.from('travel_expenses').delete().eq('id',idv);if(error)return setMsg(error.message,7000);await reload();state.view='timesheet';render()}
 
 function editEntry(id,type){navigateTo(type==='monthly'?'monthlyEdit':type==='manual'?'manualEdit':type==='expense'?'expenseEdit':'dailyEdit',{edit:id})}
-function timesheet(){const rows=rowsForMonth().map(e=>({...e,kind:'daily',date:e.entry_date})).concat(monthlyRows().map(m=>({...m,kind:'monthly',date:`${m.year}-${String(m.month).padStart(2,'0')}-01`}))).concat(manualRows().map(e=>({...e,kind:'manual',date:e.entry_date}))).concat(expenseRows().map(e=>({...e,kind:'expense',date:e.expense_date}))).sort((a,b)=>String(b.date).localeCompare(String(a.date)));const t=totals();const groups=groupSummary();return appShell(`<h1>Timesheet</h1>${monthSelector()}<div class="card"><b>Riepilogo ${monthLabel(state.month)}</b><div class="kpiGrid" style="margin-top:14px"><div><span>Ore consuntivate</span><strong>${fmtNum(t.hours,1)} h</strong><small>${fmtNum(t.days,1)} gg/u</small></div><div><span>Importo mese</span><strong>${fmtEUR(t.amount)}</strong><small>${monthLabel(state.month)}</small></div></div><div class="chartWrap"><div class="chartTitle"><span>Andamento mese</span><span>1 → fine mese</span></div>${monthChartSvg()}</div></div>${groups.length?`<div class="card"><b>Per cliente</b><div class="list" style="box-shadow:none;margin:10px 0 0">${groups.map(r=>`<div class="row"><div></div><div><div class="title">${esc(clientName(r.client_id))}</div><div class="desc">${esc(projectName(r.project_id)||'Senza progetto')} · ${esc(r.label)}</div></div><div class="value">${fmtEUR(r.amount)}</div></div>`).join('')}</div></div>`:''}<button class="primary" onclick="newEntryChoice()">+ Nuovo consuntivo</button><div class="list">${rows.map(r=>timesheetRow(r)).join('')||'<div class="empty">Nessun consuntivo nel mese.</div>'}</div>`)}
+function fmtDMY(s){const p=String(s||'').split('-');return p.length===3?p[2]+'/'+p[1]+'/'+p[0]:String(s||'');}
+function monthWorkbookXml(){
+  const [year,mo]=String(state.month).split('-').map(Number);
+  const days=new Date(year,mo,0).getDate();
+  const rows=rowsForMonth().slice().sort((a,b)=>String(a.entry_date).localeCompare(String(b.entry_date)));
+  const prof=(data.profiles||[])[0]||{};
+  const uname=[prof.first_name,prof.last_name].filter(Boolean).join(' ')||prof.company_name||'Consulente';
+  const monLabel=monthLabel(state.month);
+  const palette=['#DDEBF7','#E2EFDA','#FFF2CC','#FCE4D6','#EDEDED','#EAD1DC','#D9E1F2','#FFE699'];
+  const pv={},order=[],dayTot=new Array(days+1).fill(0);let grand=0;const clientColor={};let ci=0;
+  rows.forEach(e=>{const cName=clientName(e.client_id);const key=cName+' - '+(projectName(e.project_id)||'—')+' - '+(activityName(e.activity_id)||'—');if(!pv[key]){pv[key]={d:new Array(days+1).fill(0),tot:0,client:cName};order.push(key);}if(!(cName in clientColor)){clientColor[cName]=ci%palette.length;ci++;}const d=Number(String(e.entry_date).slice(8,10));const h=Number(e.hours||0);pv[key].d[d]+=h;pv[key].tot+=h;if(d>=1&&d<=days)dayTot[d]+=h;grand+=h;});
+  const B='<Borders><Border ss:Position="Bottom" ss:LineStyle="Continuous"/><Border ss:Position="Top" ss:LineStyle="Continuous"/><Border ss:Position="Left" ss:LineStyle="Continuous"/><Border ss:Position="Right" ss:LineStyle="Continuous"/></Borders>';
+  const styles='<Style ss:ID="t"><Font ss:Bold="1" ss:Size="13"/></Style>'
+    +'<Style ss:ID="nm"><Font ss:Bold="1" ss:Italic="1"/></Style>'
+    +'<Style ss:ID="h"><Font ss:Bold="1"/><Interior ss:Color="#FFC000" ss:Pattern="Solid"/><Alignment ss:Horizontal="Center"/>'+B+'</Style>'
+    +'<Style ss:ID="hl"><Font ss:Bold="1"/><Interior ss:Color="#FFC000" ss:Pattern="Solid"/>'+B+'</Style>'
+    +'<Style ss:ID="n"><Alignment ss:Horizontal="Center"/>'+B+'</Style>'
+    +'<Style ss:ID="e">'+B+'</Style>'
+    +'<Style ss:ID="num2"><NumberFormat ss:Format="#,##0.00"/>'+B+'</Style>'
+    +'<Style ss:ID="tt"><Font ss:Bold="1"/><Interior ss:Color="#F2F2F2" ss:Pattern="Solid"/><Alignment ss:Horizontal="Center"/>'+B+'</Style>'
+    +'<Style ss:ID="tot"><Font ss:Bold="1"/><Interior ss:Color="#D9D9D9" ss:Pattern="Solid"/>'+B+'</Style>'
+    +'<Style ss:ID="totn"><Font ss:Bold="1"/><Interior ss:Color="#D9D9D9" ss:Pattern="Solid"/><Alignment ss:Horizontal="Center"/>'+B+'</Style>'
+    +palette.map((c,i)=>'<Style ss:ID="lbl'+i+'"><Font ss:Bold="1"/><Interior ss:Color="'+c+'" ss:Pattern="Solid"/>'+B+'</Style>').join('');
+  const cS=(v,st)=>'<Cell ss:StyleID="'+st+'"><Data ss:Type="String">'+esc(v)+'</Data></Cell>';
+  const cN=(v,st)=>'<Cell ss:StyleID="'+st+'"><Data ss:Type="Number">'+Number(v||0)+'</Data></Cell>';
+  const cE=st=>'<Cell ss:StyleID="'+st+'"/>';
+  let dayHdr='';for(let d=1;d<=days;d++)dayHdr+=cN(d,'h');
+  let pivotRows='';
+  order.forEach(key=>{const r=pv[key];let cells=cS(key,'lbl'+clientColor[r.client]);for(let d=1;d<=days;d++){cells+=r.d[d]>0?cN(r.d[d],'n'):cE('e');}cells+=cN(r.tot,'tt');pivotRows+='<Row>'+cells+'</Row>';});
+  let totCells=cS('Totale','tot');for(let d=1;d<=days;d++){totCells+=dayTot[d]>0?cN(dayTot[d],'totn'):cE('tot');}totCells+=cN(grand,'totn');
+  let cols='<Column ss:Width="210"/>';for(let d=1;d<=days;d++)cols+='<Column ss:Width="24"/>';cols+='<Column ss:Width="54"/>';
+  const pivotSheet='<Worksheet ss:Name="Pivot mese"><Table>'+cols
+    +'<Row><Cell ss:StyleID="t"><Data ss:Type="String">Attività mese di: '+esc(monLabel)+'</Data></Cell></Row>'
+    +'<Row><Cell ss:StyleID="nm"><Data ss:Type="String">'+esc(uname)+'</Data></Cell></Row>'
+    +'<Row>'+cS('Data','hl')+dayHdr+cS('Tot.Ore','h')+'</Row>'
+    +pivotRows+'<Row>'+totCells+'</Row></Table></Worksheet>';
+  let detRows='';let oreTot=0;
+  rows.forEach(e=>{const ore=Number(e.hours||0);oreTot+=ore;const sede=e.work_location||[e.work_site,e.work_city].filter(Boolean).join(' - ')||'';detRows+='<Row>'+cS(fmtDMY(e.entry_date),'e')+cS(clientName(e.client_id),'e')+cS(projectName(e.project_id)||'','e')+cS(activityName(e.activity_id)||'','e')+cS(sede,'e')+cS(e.description||'','e')+cN(ore,'n')+'</Row>';});
+  const detHdr='<Row>'+cS('Data','hl')+cS('Cliente','hl')+cS('Progetto','hl')+cS('Attività','hl')+cS('Sede','hl')+cS('Descrizione','hl')+cS('Ore','h')+'</Row>';
+  const detTot='<Row>'+cS('Totale','tot')+cE('tot')+cE('tot')+cE('tot')+cE('tot')+cE('tot')+cN(oreTot,'totn')+'</Row>';
+  const detCols='<Column ss:Width="70"/><Column ss:Width="110"/><Column ss:Width="140"/><Column ss:Width="120"/><Column ss:Width="120"/><Column ss:Width="220"/><Column ss:Width="50"/>';
+  const detailSheet='<Worksheet ss:Name="Dettaglio"><Table>'+detCols+detHdr+detRows+detTot+'</Table></Worksheet>';
+  return '<?xml version="1.0" encoding="UTF-8"?>\n<?mso-application progid="Excel.Sheet"?>\n<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"><Styles>'+styles+'</Styles>'+detailSheet+pivotSheet+'</Workbook>';
+}
+function monthExcelBlob(){return new Blob([monthWorkbookXml()],{type:'application/vnd.ms-excel'});}
+function monthExcelFilename(){return 'TOTIME_consuntivi_'+state.month+'.xls';}
+function downloadMonthExcel(){const url=URL.createObjectURL(monthExcelBlob());const a=document.createElement('a');a.href=url;a.download=monthExcelFilename();document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500);setMsg('Excel dei consuntivi di '+monthLabel(state.month)+' generato.',3500);}
+async function shareMonthExcel(){const file=new File([monthExcelBlob()],monthExcelFilename(),{type:'application/vnd.ms-excel'});try{if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],title:'Consuntivi '+monthLabel(state.month),text:'Consuntivi '+monthLabel(state.month)});return;}}catch(err){if(err&&err.name==='AbortError')return;}downloadMonthExcel();}
+function timesheet(){const rows=rowsForMonth().map(e=>({...e,kind:'daily',date:e.entry_date})).concat(monthlyRows().map(m=>({...m,kind:'monthly',date:`${m.year}-${String(m.month).padStart(2,'0')}-01`}))).concat(manualRows().map(e=>({...e,kind:'manual',date:e.entry_date}))).concat(expenseRows().map(e=>({...e,kind:'expense',date:e.expense_date}))).sort((a,b)=>String(b.date).localeCompare(String(a.date)));const t=totals();const groups=groupSummary();return appShell(`<h1>Timesheet</h1>${monthSelector()}<div class="card"><b>Riepilogo ${monthLabel(state.month)}</b><div class="kpiGrid" style="margin-top:14px"><div><span>Ore consuntivate</span><strong>${fmtNum(t.hours,1)} h</strong><small>${fmtNum(t.days,1)} gg/u</small></div><div><span>Importo mese</span><strong>${fmtEUR(t.amount)}</strong><small>${monthLabel(state.month)}</small></div></div><div class="chartWrap"><div class="chartTitle"><span>Andamento mese</span><span>1 → fine mese</span></div>${monthChartSvg()}</div></div><div class="grid" style="margin:14px 0"><button class="secondary" onclick="downloadMonthExcel()">⤓ Scarica Excel del mese</button><button class="secondary" onclick="shareMonthExcel()">↗ Condividi / Invia</button></div>${groups.length?`<div class="card"><b>Per cliente</b><div class="list" style="box-shadow:none;margin:10px 0 0">${groups.map(r=>`<div class="row"><div></div><div><div class="title">${esc(clientName(r.client_id))}</div><div class="desc">${esc(projectName(r.project_id)||'Senza progetto')} · ${esc(r.label)}</div></div><div class="value">${fmtEUR(r.amount)}</div></div>`).join('')}</div></div>`:''}<button class="primary" onclick="newEntryChoice()">+ Nuovo consuntivo</button><div class="list">${rows.map(r=>timesheetRow(r)).join('')||'<div class="empty">Nessun consuntivo nel mese.</div>'}</div>`)}
 function timesheetRow(r){if(r.kind==='daily')return `<div class="row" onclick="editEntry('${r.id}','daily')"><div class="date">${dateIT(r.entry_date)}</div><div><div class="title">${esc(clientName(r.client_id))}${projectName(r.project_id)?' / '+esc(projectName(r.project_id)):''}</div><div class="desc">${esc(activityName(r.activity_id)||'')} ${r.work_site||r.work_city?'· '+esc([r.work_site,r.work_city].filter(Boolean).join(' - ')):''}</div><div class="desc">${esc(r.description||'')}</div>${r.notes?`<div class="desc">Note: ${esc(r.notes)}</div>`:''}</div><div class="value">${fmtNum(r.hours,1)} h</div></div>`;
 if(r.kind==='monthly')return `<div class="row" onclick="editEntry('${r.id}','monthly')"><div class="date">${String(r.month).padStart(2,'0')}/${r.year}</div><div><div class="title">${esc(clientName(r.client_id))}${projectName(r.project_id)?' / '+esc(projectName(r.project_id)):''}</div><div class="desc">Una tantum mensile</div><div class="desc">${esc(r.description||'')}</div></div><div class="value">Mensile</div></div>`;
 if(r.kind==='manual')return `<div class="row" onclick="editEntry('${r.id}','manual')"><div class="date">${dateIT(r.entry_date)}</div><div><div class="title">${esc(clientName(r.client_id))}${projectName(r.project_id)?' / '+esc(projectName(r.project_id)):''}</div><div class="desc">Manuale · ${esc(activityName(r.activity_id)||'')} ${r.work_site||r.work_city?'· '+esc([r.work_site,r.work_city].filter(Boolean).join(' - ')):''}</div><div class="desc">${esc(r.description||'')}</div></div><div class="value">Manuale</div></div>`;
@@ -568,6 +616,9 @@ Object.assign(window,{
   dateIT,
   go,
   goNav,
+  downloadMonthExcel,
+  shareMonthExcel,
+  monthWorkbookXml,
   viewLabel,
   guardUnsavedChanges,
   pushHistory,
