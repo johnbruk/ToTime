@@ -79,3 +79,12 @@ button,input,select,textarea{font-family:var(--font-body)} button{cursor:pointer
 .lineChartWrap{display:flex;gap:8px;align-items:stretch}
 .lineChartY{display:flex;flex-direction:column;justify-content:space-between;font-size:10px;color:var(--muted);text-align:right;min-width:50px;padding-bottom:8px}
 .lineChartCol{flex:1;min-width:0}
+
+/* Menu ad accordion (voci di sezione esplose) */
+.sidebarNav .navParentBtn,.topMenu .navParentBtn{grid-template-columns:26px 1fr auto}
+.navChev{color:var(--muted);font-size:11px;font-style:normal;justify-self:end;align-self:center}
+.sidebarNav .navSubList,.topMenu .navSubList{display:flex;flex-direction:column;gap:2px;margin:2px 0 8px}
+.sidebarNav .navSubItem,.topMenu .navSubItem{display:block;grid-template-columns:none;border:0;background:transparent;color:var(--muted);text-align:left;cursor:pointer;padding:10px 12px 10px 50px;font-size:14px;font-weight:600;border-radius:0}
+.sidebarNav .navSubItem:hover,.topMenu .navSubItem:hover{color:var(--text);background:rgba(124,137,166,.08)}
+.sidebarNav .navSubItem.active,.topMenu .navSubItem.active{color:var(--primary);background:rgba(124,137,166,.12);font-weight:700}
+.topMenu .navSubItem{padding-left:58px;font-size:16px}
