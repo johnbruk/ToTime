@@ -43,7 +43,7 @@ button,input,select,textarea{font-family:var(--font-body)} button{cursor:pointer
 .tint-pink{--tint:rgba(217,139,166,.15);--dot:#D98BA6}
 @media(max-width:430px){.stat strong{font-size:16px}.statRow{gap:10px}.stat{padding:12px}}
 
-.app h1,.app .screenTitle{text-align:center}
+.app h1,.app .screenTitle{text-align:left}
 
 .threshVals{font-size:15px;margin-bottom:12px}
 .threshVals strong{font-size:22px;font-weight:760;letter-spacing:-.3px}
@@ -99,3 +99,44 @@ button,input,select,textarea{font-family:var(--font-body)} button{cursor:pointer
 .refHead{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:8px 12px;background:rgba(124,137,166,.10);border:1px solid var(--line);border-bottom:0}
 .refHead b{font-size:14px}
 .refHead span{font-weight:700;font-size:14px;color:var(--soft)}
+
+/* Calendario ferie/festivi */
+.calGrid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.calGrid.head{margin-bottom:6px;gap:4px}
+.calHead{text-align:center;font-size:11.5px;font-weight:700;color:var(--muted);padding:2px 0}
+.calCell{position:relative;min-height:52px;border:1px solid var(--line);background:var(--surface2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;transition:background .12s ease}
+.calCell.empty{border:0;background:transparent;cursor:default}
+.calCell:hover:not(.empty){background:var(--surface)}
+.calNum{font-size:14px;font-weight:700;line-height:1}
+.calH{font-size:10.5px;color:var(--muted);font-weight:700;line-height:1}
+.calCell.we{background:rgba(148,166,196,.10);color:var(--muted)}
+.calCell.holiday{background:rgba(255,107,107,.16);border-color:rgba(255,107,107,.42);color:#D9534F}
+.calCell.ferie{background:rgba(190,40,60,.32);border-color:rgba(190,40,60,.6);color:#fff}
+.calCell.ferie .calNum{color:#fff}
+.calCell.worked{box-shadow:inset 0 -3px 0 var(--primary)}
+.calCell.worked .calH{color:var(--primary)}
+.calLegend{display:flex;flex-wrap:wrap;gap:14px;margin-top:12px;font-size:12.5px;color:var(--soft)}
+.calLegend span{display:flex;align-items:center;gap:6px}
+.calLegend .sw{width:14px;height:14px;display:inline-block;border:1px solid var(--line)}
+.calLegend .sw.we{background:rgba(148,166,196,.10)}
+.calLegend .sw.holiday{background:rgba(255,107,107,.16);border-color:rgba(255,107,107,.42)}
+.calLegend .sw.ferie{background:rgba(190,40,60,.32);border-color:rgba(190,40,60,.6)}
+.calLegend .sw.worked{background:var(--surface2);box-shadow:inset 0 -3px 0 var(--primary)}
+@media(max-width:430px){.calCell{min-height:44px}.calNum{font-size:13px}.calH{font-size:9.5px}}
+
+/* Azioni compatte (Excel / Condividi) */
+.miniActions{display:flex;gap:8px;justify-content:flex-end;margin:10px 0 14px;flex-wrap:wrap}
+.miniBtn{border:1px solid var(--line);background:var(--surface2);color:var(--soft);padding:7px 12px;font-size:13px;font-weight:700;border-radius:0;box-shadow:none;width:auto;display:inline-flex;align-items:center;gap:6px}
+.miniBtn:hover{background:var(--surface);color:var(--text)}
+
+/* CR5: dashboard toggle, link oggi, campi collassabili, giorno corrente */
+.dashToggle{margin:6px 0 4px}
+.todayLink{display:flex;justify-content:center;margin:-8px 0 14px}
+.todayLink button{border:0;background:transparent;color:var(--primary);font-size:13px;font-weight:700;padding:2px 8px;box-shadow:none;width:auto;text-decoration:underline}
+.moreFields{border:1px solid var(--line);background:var(--surface2);padding:0 12px}
+.moreFields>summary{cursor:pointer;padding:12px 0;font-size:14px;font-weight:700;color:var(--soft);list-style:none}
+.moreFields>summary::-webkit-details-marker{display:none}
+.moreFields>summary:before{content:"▸ ";color:var(--muted)}
+.moreFields[open]>summary:before{content:"▾ "}
+.moreFields[open]{padding-bottom:12px}
+.calCell.today{outline:2px solid var(--primary);outline-offset:-2px;z-index:1}
