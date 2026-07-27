@@ -93,3 +93,9 @@ button,input,select,textarea{font-family:var(--font-body)} button{cursor:pointer
 .moveBtns{display:flex;flex-direction:column;gap:3px}
 .moveBtns button{border:1px solid var(--line);background:var(--surface2);color:var(--soft);width:30px;height:24px;line-height:1;font-size:13px;border-radius:0;padding:0;box-shadow:none}
 .moveBtns button:hover{background:var(--surface);color:var(--text)}
+
+/* Tasse future: gruppi per anno di riferimento */
+.refGroup{margin-top:14px}
+.refHead{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:8px 12px;background:rgba(124,137,166,.10);border:1px solid var(--line);border-bottom:0}
+.refHead b{font-size:14px}
+.refHead span{font-weight:700;font-size:14px;color:var(--soft)}
