@@ -88,3 +88,8 @@ button,input,select,textarea{font-family:var(--font-body)} button{cursor:pointer
 .sidebarNav .navSubItem:hover,.topMenu .navSubItem:hover{color:var(--text);background:rgba(124,137,166,.08)}
 .sidebarNav .navSubItem.active,.topMenu .navSubItem.active{color:var(--primary);background:rgba(124,137,166,.12);font-weight:700}
 .topMenu .navSubItem{padding-left:58px;font-size:16px}
+
+/* Ordinamento manuale liste */
+.moveBtns{display:flex;flex-direction:column;gap:3px}
+.moveBtns button{border:1px solid var(--line);background:var(--surface2);color:var(--soft);width:30px;height:24px;line-height:1;font-size:13px;border-radius:0;padding:0;box-shadow:none}
+.moveBtns button:hover{background:var(--surface);color:var(--text)}
