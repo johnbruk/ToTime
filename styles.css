@@ -156,3 +156,25 @@ button,input,select,textarea{font-family:var(--font-body)} button{cursor:pointer
 .festList span{color:#D9534F;font-weight:600}
 .calCell.patron{background:rgba(247,166,71,.16);border-color:rgba(247,166,71,.45)}
 .calCell.patron .calNum,.calCell.patron .calFest{color:#C77E22}
+
+/* UX: aree di tocco conformi (min 44px) */
+.miniBtn{min-height:44px;padding:10px 14px}
+.moveBtns button{width:40px;height:40px;font-size:15px}
+.month button{width:46px;height:46px}
+.todayLink button{min-height:44px;padding:8px 14px}
+.tabs button{min-height:44px}
+.moreFields>summary{min-height:44px;display:flex;align-items:center}
+.calCell{min-height:56px}
+@media(max-width:430px){.calCell{min-height:50px}}
+.headerIcon,.iconbtn{width:44px;height:44px}
+.backArrow{min-height:44px;min-width:44px;display:inline-flex;align-items:center;justify-content:center}
+.ferieRange{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+.ferieRange b{font-size:13.5px}
+.frRow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0 6px}
+.frRow input{flex:1;min-width:130px;min-height:44px;border:1px solid var(--line);background:var(--surface2);color:var(--text);padding:8px 10px;font-size:14px}
+.frRow span{color:var(--muted)}
+.monthRel{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:2px 6px;margin-left:6px;vertical-align:middle}
+.monthRel.passato{background:rgba(148,166,196,.18);color:var(--muted)}
+.monthRel.futuro{background:rgba(138,109,255,.18);color:#7A5BEF}
+.empty{padding:28px 20px}
+.emptyCta{display:block;margin:10px auto 0;max-width:280px}
