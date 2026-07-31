@@ -9,7 +9,7 @@
 }
 :root[data-theme="light"]{
   --bg:#F6F7F8; --bg2:#F6F7F8; --surface:#FFFFFF; --surface2:#F7F8FA; --card:#FFFFFF; --card2:#F5F6F8;
-  --text:#151A1F; --muted:#71767D; --soft:#40454B; --line:rgba(21,26,31,.09); --shadow:0 10px 24px rgba(21,26,31,.06);
+  --text:#151A1F; --muted:#6B7078; --soft:#40454B; --line:rgba(21,26,31,.09); --shadow:0 10px 24px rgba(21,26,31,.06);
   --authPanel:#ECEEF1;
 }
 *{box-sizing:border-box} html{background:var(--bg)}
@@ -84,7 +84,7 @@ button,input,select,textarea{font-family:var(--font-body)} button{cursor:pointer
 .sidebarNav .navParentBtn,.topMenu .navParentBtn{grid-template-columns:26px 1fr auto}
 .navChev{color:var(--muted);font-size:11px;font-style:normal;justify-self:end;align-self:center}
 .sidebarNav .navSubList,.topMenu .navSubList{display:flex;flex-direction:column;gap:2px;margin:2px 0 8px}
-.sidebarNav .navSubItem,.topMenu .navSubItem{display:block;grid-template-columns:none;border:0;background:transparent;color:var(--muted);text-align:left;cursor:pointer;padding:10px 12px 10px 50px;font-size:14px;font-weight:600;border-radius:0}
+.sidebarNav .navSubItem,.topMenu .navSubItem{display:flex;align-items:center;min-height:44px;grid-template-columns:none;border:0;background:transparent;color:var(--muted);text-align:left;cursor:pointer;padding:10px 12px 10px 50px;font-size:14px;font-weight:600;border-radius:0}
 .sidebarNav .navSubItem:hover,.topMenu .navSubItem:hover{color:var(--text);background:rgba(124,137,166,.08)}
 .sidebarNav .navSubItem.active,.topMenu .navSubItem.active{color:var(--primary);background:rgba(124,137,166,.12);font-weight:700}
 .topMenu .navSubItem{padding-left:58px;font-size:16px}
@@ -105,7 +105,7 @@ button,input,select,textarea{font-family:var(--font-body)} button{cursor:pointer
 .calGrid.head{margin-bottom:6px;gap:4px}
 .calHead{text-align:center;font-size:11.5px;font-weight:700;color:var(--muted);padding:2px 0}
 .calCell{position:relative;min-height:52px;border:1px solid var(--line);background:var(--surface2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;transition:background .12s ease}
-.calCell.empty{border:0;background:transparent;cursor:default}
+.calCell.blank{border:0;background:transparent;cursor:default;padding:0}
 .calCell:hover:not(.empty){background:var(--surface)}
 .calNum{font-size:14px;font-weight:700;line-height:1}
 .calH{font-size:10.5px;color:var(--muted);font-weight:700;line-height:1}
@@ -185,3 +185,47 @@ button,input,select,textarea{font-family:var(--font-body)} button{cursor:pointer
 .dayNav button:hover{background:var(--surface);color:var(--text)}
 .tag.ferieTag{background:rgba(190,40,60,.28);color:#fff}
 .tag.red{background:rgba(255,107,107,.18);color:#D9534F}
+
+/* Selezione multipla e cancellazione */
+.selBar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;margin:14px 0 -4px}
+.selBar.on{border:1px solid rgba(124,137,166,.42);background:var(--card);padding:8px 10px;margin:14px 0 0;position:sticky;top:105px;z-index:30;box-shadow:var(--shadow)}
+@media(min-width:960px){.selBar.on{top:0}}
+.selCount{font-size:13.5px;font-weight:720;color:var(--soft)}
+.selActions{display:flex;flex-wrap:wrap;gap:8px}
+.miniBtn.danger{color:var(--red);border-color:rgba(217,83,79,.42)}
+.miniBtn[disabled]{opacity:.45}
+.row.selectable{cursor:pointer}
+.row.selectable.selOn{background:rgba(124,137,166,.14)}
+.selBox{display:inline-grid;place-items:center;width:22px;height:22px;margin-right:8px;vertical-align:middle;border:1.5px solid var(--line);background:var(--surface2);color:transparent;font-size:14px;font-weight:900;line-height:1}
+.selBox.on{border-color:var(--primary);background:var(--primary);color:#fff}
+
+/* Analisi consuntivi (pivot) */
+.pvPresets{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 4px}
+.pvDims{display:grid;grid-template-columns:1fr;gap:12px;margin-top:12px}
+@media(min-width:560px){.pvDims{grid-template-columns:1fr 1fr}}
+.pvOpts{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}
+.pvOptLabel{font-size:13px;font-weight:700;color:var(--muted)}
+.miniBtn.active{background:linear-gradient(135deg,#7C89A6,#62708F);color:#fff;border-color:rgba(179,189,208,.42)}
+.pivotTable{border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,.032),rgba(255,255,255,.014)),var(--card);box-shadow:var(--shadow);margin:14px 0}
+.pvGroup{border-bottom:1px solid var(--line)}
+.pvGroup:last-child{border-bottom:0}
+.pvRow{display:grid;grid-template-columns:1fr auto;grid-template-areas:"name val" "meta meta" "bar bar";gap:2px 12px;padding:13px 16px;align-items:baseline}
+.pvRow[onclick]{cursor:pointer}
+.pvRow[onclick]:hover{background:rgba(127,160,210,.06)}
+.pvName{grid-area:name;font-weight:730;font-size:15.5px;letter-spacing:-.1px;color:var(--text);min-width:0;overflow-wrap:anywhere}
+.pvVal{grid-area:val;font-weight:760;font-size:15px;white-space:nowrap;color:var(--text)}
+.pvMeta{grid-area:meta;font-size:13px;color:var(--muted);margin-top:2px}
+.pvMeta .tag{margin-top:0;padding:2px 7px;font-size:11.5px}
+.pvBar{grid-area:bar;height:4px;background:rgba(148,166,196,.16);margin-top:9px}
+.pvBar i{display:block;height:100%;background:linear-gradient(90deg,var(--primary),var(--primary2))}
+.pvChev{display:inline-block;width:18px;color:var(--muted);font-weight:400}
+.pvKids{border-top:1px solid var(--line);background:rgba(148,166,196,.05)}
+.pvKids .pvRow{padding:11px 16px 11px 34px;border-bottom:1px solid var(--line)}
+.pvKids .pvRow:last-child{border-bottom:0}
+.pvKids .pvName{font-size:14.5px;font-weight:680}
+.pvKids .pvVal{font-size:14px;font-weight:720}
+.pvKids .pvBar{height:3px;background:rgba(148,166,196,.12)}
+@media(max-width:430px){.pvRow{padding:12px 13px}.pvKids .pvRow{padding-left:28px}.pvName{font-size:15px}.pvVal{font-size:14.5px}.pvMeta{font-size:12.5px}}
+.moreFields>summary:before{margin-right:6px}
+.card>.moreFields{margin-top:12px}
+.srOnly{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
