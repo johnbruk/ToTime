@@ -91,7 +91,7 @@ function back(){if(!guardUnsavedChanges())return;const prev=state.history.pop()|
 function toggleMainMenu(){if(!guardUnsavedChanges())return;state.menuOpen=!state.menuOpen;render()}
 const MENU=[
   {v:'home',ic:'⌂',l:'Dashboard'},
-  {main:'timesheet',ic:'◷',l:'Timesheet',sub:[{v:'newChoice',l:'Nuovo consuntivo'},{v:'calendario',l:'Calendario'},{v:'pivot',l:'Analisi consuntivi'},{v:'tmManage',l:'Incarichi continuativi'}]},
+  {main:'timesheet',ic:'◷',l:'Timesheet',sub:[{v:'newChoice',l:'Nuovo consuntivo'},{v:'calendario',l:'Calendario'},{v:'griglia',l:'Griglia del mese'},{v:'pivot',l:'Analisi consuntivi'},{v:'tmManage',l:'Incarichi continuativi'}]},
   {main:'expenses',ic:'▦',l:'Spese',sub:[{v:'expenseForm',l:'Nuova spesa'}]},
   {v:'billing',ic:'▤',l:'Fatturazione'},
   {v:'balance',ic:'▥',l:'Bilancio'},
@@ -518,7 +518,7 @@ function monthExcelFilename(){return 'TOTIME_consuntivi_'+state.month+'.xls';}
 function downloadMonthExcel(){const url=URL.createObjectURL(monthExcelBlob());const a=document.createElement('a');a.href=url;a.download=monthExcelFilename();document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500);setMsg('Excel dei consuntivi di '+monthLabel(state.month)+' generato.',3500);}
 async function shareMonthExcel(){const file=new File([monthExcelBlob()],monthExcelFilename(),{type:'application/vnd.ms-excel'});try{if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],title:'Consuntivi '+monthLabel(state.month),text:'Consuntivi '+monthLabel(state.month)});return;}}catch(err){if(err&&err.name==='AbortError')return;}downloadMonthExcel();}
 function timesheetRows(){return rowsForMonth().map(e=>({...e,kind:'daily',date:e.entry_date})).concat(monthlyRows().map(m=>({...m,kind:'monthly',date:`${m.year}-${String(m.month).padStart(2,'0')}-01`}))).concat(manualRows().map(e=>({...e,kind:'manual',date:e.entry_date}))).concat(expenseRows().map(e=>({...e,kind:'expense',date:e.expense_date}))).sort((a,b)=>String(b.date).localeCompare(String(a.date)))}
-function timesheet(){const rows=timesheetRows();const t=totals();const groups=groupSummary();return appShell(`<h1>Timesheet</h1>${monthSelector()}<div class="card"><b>Riepilogo ${monthLabel(state.month)}</b><div class="kpiGrid" style="margin-top:14px"><div><span>Ore consuntivate</span><strong>${fmtNum(t.hours,1)} h</strong><small>${fmtNum(t.days,2)} gg/u</small></div><div><span>Importo mese</span><strong>${fmtEUR(t.amount)}</strong><small>consuntivato</small></div></div>${t.plannedAmount>0?`<div class="metricLine" style="margin-top:10px"><span class="tag blue">Pianificato</span> ${fmtNum(t.plannedHours,1)} h · ${fmtNum(t.plannedDays,2)} gg/u · ${fmtEUR(t.plannedAmount)}</div>`:''}<div class="chartWrap"><div class="chartTitle"><span>Andamento mese</span><span>1 → fine mese</span></div>${monthChartSvg()}</div></div><div class="miniActions"><button type="button" class="miniBtn" onclick="go('pivot')" title="Analizza i consuntivi per cliente, progetto, attività">▦ Analisi</button><button type="button" class="miniBtn" onclick="downloadMonthExcel()" title="Scarica l'Excel del mese">⤓ Excel</button><button type="button" class="miniBtn" onclick="shareMonthExcel()" title="Condividi o invia i consuntivi">↗ Condividi</button></div>${groups.length?`<div class="card"><b>Per cliente</b><div class="list" style="box-shadow:none;margin:10px 0 0">${groups.map(r=>`<div class="row"><div></div><div><div class="title">${esc(clientName(r.client_id))}</div><div class="desc">${esc(projectName(r.project_id)||'Senza progetto')} · ${esc(r.label)}</div></div><div class="value">${fmtEUR(r.amount)}</div></div>`).join('')}</div></div>`:''}<button class="primary" onclick="newEntryChoice()">+ Nuovo consuntivo</button>${selBar('timesheet',rows.length)}<div class="list">${rows.map(r=>timesheetRow(r)).join('')||'<div class="empty">Nessun consuntivo in questo mese.<button type="button" class="secondary emptyCta" onclick="newEntryChoice()">+ Aggiungi il primo consuntivo</button></div>'}</div>`)}
+function timesheet(){const rows=timesheetRows();const t=totals();const groups=groupSummary();return appShell(`<h1>Timesheet</h1>${monthSelector()}<div class="card"><b>Riepilogo ${monthLabel(state.month)}</b><div class="kpiGrid" style="margin-top:14px"><div><span>Ore consuntivate</span><strong>${fmtNum(t.hours,1)} h</strong><small>${fmtNum(t.days,2)} gg/u</small></div><div><span>Importo mese</span><strong>${fmtEUR(t.amount)}</strong><small>consuntivato</small></div></div>${t.plannedAmount>0?`<div class="metricLine" style="margin-top:10px"><span class="tag blue">Pianificato</span> ${fmtNum(t.plannedHours,1)} h · ${fmtNum(t.plannedDays,2)} gg/u · ${fmtEUR(t.plannedAmount)}</div>`:''}<div class="chartWrap"><div class="chartTitle"><span>Andamento mese</span><span>1 → fine mese</span></div>${monthChartSvg()}</div></div><div class="miniActions"><button type="button" class="miniBtn" onclick="go('griglia')" title="Compila il mese in una griglia">▦ Griglia</button><button type="button" class="miniBtn" onclick="go('pivot')" title="Analizza i consuntivi per cliente, progetto, attività">▦ Analisi</button><button type="button" class="miniBtn" onclick="downloadMonthExcel()" title="Scarica l'Excel del mese">⤓ Excel</button><button type="button" class="miniBtn" onclick="shareMonthExcel()" title="Condividi o invia i consuntivi">↗ Condividi</button></div>${groups.length?`<div class="card"><b>Per cliente</b><div class="list" style="box-shadow:none;margin:10px 0 0">${groups.map(r=>`<div class="row"><div></div><div><div class="title">${esc(clientName(r.client_id))}</div><div class="desc">${esc(projectName(r.project_id)||'Senza progetto')} · ${esc(r.label)}</div></div><div class="value">${fmtEUR(r.amount)}</div></div>`).join('')}</div></div>`:''}<button class="primary" onclick="newEntryChoice()">+ Nuovo consuntivo</button>${selBar('timesheet',rows.length)}<div class="list">${rows.map(r=>timesheetRow(r)).join('')||'<div class="empty">Nessun consuntivo in questo mese.<button type="button" class="secondary emptyCta" onclick="newEntryChoice()">+ Aggiungi il primo consuntivo</button></div>'}</div>`)}
 /* ===== Analisi consuntivi (pivot) ===== */
 const PIVOT_DIMS=[['client','Cliente'],['project','Cliente / Progetto'],['activity','Attività'],['desc','Descrizione'],['type','Tipo voce'],['site','Sede'],['month','Mese']];
 const PIVOT_PRESETS=[['client','project','Cliente › Progetto'],['project','activity','Progetto › Attività'],['activity','desc','Attività › Descrizione'],['client','activity','Cliente › Attività'],['month','client','Mese › Cliente']];
@@ -609,6 +609,153 @@ function pivot(){
 <div class="card"><b>Raggruppamento</b>${presets}<details class="moreFields"><summary>Dimensioni, ordinamento e opzioni</summary><div class="pvDims"><div class="field"><label>Primo livello</label>${pivotDimSelect(1,d1)}</div><div class="field"><label>Secondo livello</label>${pivotDimSelect(2,d2)}</div></div><div class="pvOpts"><span class="pvOptLabel">Ordina per</span>${sortBtn('amount','Importo')}${sortBtn('hours','Ore')}${sortBtn('label','Nome')}</div><div class="pvOpts"><button type="button" class="miniBtn${pivotWithExpenses()?' active':''}" onclick="togglePivotExpenses()">${pivotWithExpenses()?'☑':'☐'} Includi rimborsi in fattura</button></div></details>${d2!=='none'&&t.kids.length?`<div class="pvOpts"><button type="button" class="miniBtn" onclick="pivotExpandAll(${allOpen?'false':'true'})">${allOpen?'Comprimi tutto':'Espandi tutto'}</button></div>`:''}</div>
 <h2>${esc(pivotDimLabel(d1))}${d2!=='none'?' › '+esc(pivotDimLabel(d2)):''}</h2>${body}
 <div class="actions"><button type="button" class="secondary" onclick="go('timesheet')">Torna al timesheet</button></div>`);
+}
+/* ===== Griglia mensile =====
+   Una riga per commessa (cliente · progetto · attività), una colonna per
+   giorno. Ogni cella è una voce di timesheet_entries: lo schema non cambia,
+   cambia solo il modo di compilarlo. */
+function daysInMonth(ymStr){const [y,m]=String(ymStr).split('-').map(Number);return new Date(Date.UTC(y,m,0)).getUTCDate()}
+function isoOf(y,m,d){return `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`}
+function gridKey(e){return [e.client_id||'',e.project_id||'',e.activity_id||''].join('|')}
+function gridRows(){
+  const map=new Map();
+  rowsForMonth().filter(e=>!isPlanned(e)).forEach(e=>{
+    const k=gridKey(e);
+    if(!map.has(k))map.set(k,{k,client_id:e.client_id,project_id:e.project_id,activity_id:e.activity_id,hours:{},items:{}});
+    const r=map.get(k),d=String(e.entry_date);
+    r.hours[d]=(r.hours[d]||0)+Number(e.hours||0);
+    (r.items[d]=r.items[d]||[]).push(e);
+  });
+  (state.gridNew||[]).forEach(r=>{if(!map.has(r.k))map.set(r.k,{...r,hours:{},items:{}})});
+  return [...map.values()].sort((a,b)=>
+    (clientName(a.client_id)||'').localeCompare(clientName(b.client_id)||'','it')||
+    (projectName(a.project_id)||'').localeCompare(projectName(b.project_id)||'','it'));
+}
+function gridPlannedByDay(){const o={};rowsForMonth().filter(isPlanned).forEach(e=>{const d=String(e.entry_date);o[d]=(o[d]||0)+Number(e.hours||0)});return o}
+function gridDays(){
+  const [y,m]=String(state.month).split('-').map(Number);
+  const n=daysInMonth(state.month),t=todayISO(),out=[];
+  for(let d=1;d<=n;d++){const iso=isoOf(y,m,d);
+    out.push({d,iso,holiday:holidayName(iso),we:isWeekendISO(iso),off:isFerie(iso),today:iso===t});}
+  return out;
+}
+function gridDayClass(x){const c=[];if(x.holiday)c.push('festivo');else if(x.we)c.push('we');if(x.off)c.push('assente');if(x.today)c.push('oggi');return c}
+function gridDayWhy(x){return [x.holiday||'',(!x.holiday&&x.we)?'weekend':'',x.off?'giorno off':''].filter(Boolean).join(' · ')}
+function gridNum(v){return fmtNum(v, Number(v)%1?2:0)}
+function griglia(){
+  const days=gridDays(),rows=gridRows(),planned=gridPlannedByDay();
+  const wd=['dom','lun','mar','mer','gio','ven','sab'];
+  const rowTot=r=>Object.values(r.hours).reduce((t,v)=>t+Number(v||0),0);
+  const total=rows.reduce((t,r)=>t+rowTot(r),0);
+  const plannedTot=Object.values(planned).reduce((t,v)=>t+Number(v||0),0);
+
+  const cells=r=>days.map(x=>{
+    const items=r.items[x.iso]||[],v=Number(r.hours[x.iso]||0),locked=items.length>1;
+    const cls=['gg',...gridDayClass(x)];if(v>0)cls.push('pieno');if(locked)cls.push('bloccata');
+    const why=gridDayWhy(x);
+    const who=`${esc(clientName(r.client_id)||'senza cliente')} giorno ${x.d}`;
+    if(locked)return `<td class="${cls.join(' ')}" title="${esc(items.length+' voci in questo giorno: apri il giorno per modificarle')}"><button type="button" class="gCell" onclick="openDay('${x.iso}')" aria-label="${who}, ${items.length} voci">${gridNum(v)}</button></td>`;
+    return `<td class="${cls.join(' ')}"${why?` title="${esc(why)}"`:''}><input inputmode="decimal" data-row="${esc(r.k)}" data-day="${x.iso}" value="${v>0?esc(String(v)):''}" aria-label="${who}${why?', '+esc(why):''}"></td>`;
+  }).join('');
+
+  const head=days.map(x=>{
+    const c=[x.holiday?'fest':x.we?'we':'',x.today?'oggi':''].filter(Boolean).join(' ');
+    return `<th class="${c}"${x.holiday?` title="${esc(x.holiday)}"`:''}>${wd[new Date(x.iso+'T00:00:00Z').getUTCDay()]}<br>${x.d}</th>`;
+  }).join('');
+
+  const foot=days.map(x=>{
+    const t=rows.reduce((a,r)=>a+Number(r.hours[x.iso]||0),0);
+    return `<td class="${gridDayClass(x).join(' ')}">${t>0?gridNum(t):''}</td>`;
+  }).join('');
+
+  const plannedRow=plannedTot>0?`<tr class="planRow">
+      <td class="riga"><div class="n">Pianificato</div><div class="d">Incarichi continuativi sui giorni futuri · non modificabile qui</div></td>
+      ${days.map(x=>`<td class="gg ${gridDayClass(x).join(' ')}"><span class="pl">${planned[x.iso]?gridNum(planned[x.iso]):''}</span></td>`).join('')}
+      <td class="tot">${gridNum(plannedTot)}</td></tr>`:'';
+
+  const body=rows.length
+    ? rows.map(r=>`<tr>
+        <td class="riga"><div class="n">${esc(clientName(r.client_id)||'Senza cliente')}</div>
+          <div class="d">${esc(projectName(r.project_id)||'Senza progetto')}${r.activity_id?' · '+esc(activityName(r.activity_id)||''):''}</div></td>
+        ${cells(r)}<td class="tot">${gridNum(rowTot(r))}</td></tr>`).join('')
+    : (plannedRow?'':`<tr><td class="riga vuota" colspan="${days.length+2}">Nessuna commessa in questo mese. Aggiungine una qui sotto.</td></tr>`);
+
+  const opts=(list,empty)=>`<option value="">${empty}</option>`+list.map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('');
+
+  return appShell(`<h1>Griglia del mese</h1>
+    <p class="sub">Una riga per commessa, una colonna per giorno. Si compila con la tastiera — Tab per il giorno dopo — e si salva una volta sola.</p>
+    ${monthSelector()}
+    <div class="card grigliaCard">
+      <div class="barra">
+        <button type="button" class="miniBtn" onclick="go('timesheet')">☰ Passa all'elenco</button>
+        <button type="button" class="primary" onclick="saveGrid()"${state.busy?' disabled':''}>${state.busy?'Salvataggio…':'Salva le modifiche'}</button>
+      </div>
+      <div class="scrollGriglia"><table class="griglia">
+        <thead><tr><th class="riga">Commessa</th>${head}<th class="tot">Tot</th></tr></thead>
+        <tbody>${body}${plannedRow}</tbody>
+        <tfoot><tr><td class="riga">Totale giornata</td>${foot}<td class="tot">${gridNum(total)}</td></tr></tfoot>
+      </table></div>
+      <div class="nuovaRiga">
+        <select id="g-cliente" onchange="gridFillProjects()" aria-label="Cliente">${opts(activeClients(),'— cliente —')}</select>
+        <select id="g-progetto" aria-label="Progetto"><option value="">— prima scegli il cliente —</option></select>
+        <select id="g-attivita" aria-label="Attività">${opts(sortEntities('activities',data.activities.filter(a=>a.active)),'— attività —')}</select>
+        <button type="button" class="miniBtn" onclick="addGridRow()">+ Aggiungi riga</button>
+      </div>
+      <div class="calLegend" style="padding:10px 14px">
+        <span><i class="sw we"></i>Weekend</span><span><i class="sw holiday"></i>Festivo</span>
+        <span><i class="sw ferie"></i>Giorno off</span><span><i class="sw worked"></i>Oggi</span>
+      </div>
+    </div>
+    <div class="metricLine" style="margin-top:12px">${gridNum(total)} h consuntivate <span class="dot">·</span> ${fmtDays(total)} gg/u${plannedTot>0?` <span class="dot">·</span> <span class="tag blue">Pianificato ${gridNum(plannedTot)} h</span>`:''}</div>`);
+}
+function gridFillProjects(){const c=document.getElementById('g-cliente')?.value||'';const p=document.getElementById('g-progetto');if(p)p.innerHTML=`<option value="">— progetto —</option>`+sortEntities('projects',data.projects.filter(x=>x.active&&x.client_id===c)).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('')}
+function addGridRow(){
+  const c=document.getElementById('g-cliente')?.value||'';
+  const p=document.getElementById('g-progetto')?.value||'';
+  const a=document.getElementById('g-attivita')?.value||'';
+  if(!c)return setMsg('Scegli almeno il cliente.',5000);
+  const k=[c,p,a].join('|');
+  state.gridNew=state.gridNew||[];
+  if(gridRows().some(r=>r.k===k))return setMsg('Questa commessa è già nella griglia.',5000);
+  state.gridNew.push({k,client_id:c,project_id:p||null,activity_id:a||null});
+  render();
+}
+function gridConfirmRed(dates){
+  if(!dates.length)return true;
+  const lines=dates.sort().map(iso=>{const w=gridDayWhy({iso,holiday:holidayName(iso),we:isWeekendISO(iso),off:isFerie(iso)});return fmtDMY(iso)+(w?' — '+w:'')});
+  return confirm('Stai registrando ore in giorni non lavorativi:\n\n'+lines.join('\n')+'\n\nVuoi procedere?');
+}
+async function saveGrid(){
+  const rows=new Map(gridRows().map(r=>[r.k,r]));
+  const toCreate=[],toUpdate=[],toDelete=[];
+  for(const el of document.querySelectorAll('.griglia input:not([disabled])')){
+    const r=rows.get(el.dataset.row);if(!r)continue;
+    const iso=el.dataset.day,before=Number(r.hours[iso]||0);
+    const txt=norm(el.value).replace(',','.');
+    const after=txt===''?0:Number(txt);
+    if(!Number.isFinite(after)||after<0||after>24)return setMsg('Valore non valido il '+fmtDMY(iso)+': le ore stanno fra 0 e 24.',7000);
+    if(after===before)continue;
+    const items=r.items[iso]||[];
+    if(after===0)toDelete.push(...items.map(e=>e.id));
+    else if(!items.length){const c=clientById(r.client_id);
+      toCreate.push({entry_date:iso,client_id:r.client_id,project_id:r.project_id||null,activity_id:r.activity_id||null,hours:after,daily_rate_snapshot:Number(c?.daily_rate||0),standard_hours_snapshot:Number(c?.standard_hours||8)});}
+    else toUpdate.push({id:items[0].id,iso,patch:{hours:after}});
+  }
+  const n=toCreate.length+toUpdate.length+toDelete.length;
+  if(!n){const pruned=(state.gridNew||[]).length;state.gridNew=[];return setMsg(pruned?'Non c\'era niente da salvare. Tolte '+(pruned===1?'la riga aggiunta e mai compilata.':pruned+' righe aggiunte e mai compilate.'):'Non c\'è niente da salvare.',4000)||render();}
+  const red=[...new Set(toCreate.map(e=>e.entry_date).concat(toUpdate.map(u=>u.iso)))]
+    .filter(iso=>holidayName(iso)||isFerie(iso)||isWeekendISO(iso));
+  if(!gridConfirmRed(red))return;
+  state.busy=true;render();
+  try{
+    if(toDelete.length){const {error}=await sb.from('timesheet_entries').delete().in('id',toDelete);if(error)throw error;}
+    for(const u of toUpdate){const r=await updateResilient('timesheet_entries',u.patch,u.id);if(r.error)throw r.error;}
+    if(toCreate.length){const r=await insertManyResilient('timesheet_entries',toCreate);if(r.error)throw r.error;}
+  }catch(e){state.busy=false;return setMsg(e.message||String(e),8000)||render();}
+  state.busy=false;state.gridNew=[];
+  await reload();
+  setMsg('Griglia salvata: '+[toCreate.length?toCreate.length+' aggiunte':'',toUpdate.length?toUpdate.length+' modificate':'',toDelete.length?toDelete.length+' eliminate':''].filter(Boolean).join(', ')+'.',4500);
+  render();
 }
 const SEL_TABLES={daily:'timesheet_entries',monthly:'monthly_compensations',manual:'manual_entries',expense:'travel_expenses'};
 function selKey(kind,id){return kind+':'+id}
@@ -913,9 +1060,12 @@ function downloadTimesheetExcel(ev){ev.preventDefault();const f=Object.fromEntri
 async function importCsv(ev){const file=ev.target.files?.[0];if(!file)return;const reader=new FileReader();reader.onload=async()=>{try{const text=reader.result.replace(/^\uFEFF/,'').trim();if(!text)return setMsg('CSV vuoto.');const lines=text.split(/\r?\n/).filter(Boolean);const sep=(lines[0].match(/;/g)||[]).length>=(lines[0].match(/,/g)||[]).length?';':',';const headers=parseCsvLine(lines.shift(),sep).map(canonHeader);const get=(row,names)=>{for(const n of names.map(canonHeader)){const i=headers.indexOf(n);if(i>=0)return row[i]||''}return''};let count=0,updated=0,skipped=0,createdClients=0,createdProjects=0,createdActivities=0;for(const line of lines){const row=parseCsvLine(line,sep);if(!row.some(x=>norm(x))){skipped++;continue}const cliente=norm(get(row,['cliente','client']));if(!cliente){skipped++;continue}const tipoRaw=get(row,['tipo','type']);const tipo=(tipoRaw||'Tariffa giornaliera 8h').toLowerCase();const isMonthly=tipo.includes('mens')||tipo.includes('monthly')||tipo.includes('una tantum');const ore=parseAmount(get(row,['ore','hours']));const amount=parseAmount(get(row,['importo','amount']));let rowRate=amount>0&&ore>0?amount/ore*8:0;const beforeC=data.clients.length;const client=await ensureClient(cliente,isMonthly?'monthly':'daily',rowRate);if(data.clients.length>beforeC)createdClients++;if(!client.daily_rate&&rowRate>0){await updateResilient('clients',{daily_rate:rowRate},client.id);client.daily_rate=rowRate}const progetto=norm(get(row,['cliente/progetto','progetto','cliente finale','project']));const beforeP=data.projects.length;const project=await ensureProject(client.id,progetto);if(data.projects.length>beforeP)createdProjects++;const att=norm(get(row,['attività','attivita','activity']));const beforeA=data.activities.length;const activity=await ensureActivity(att);if(data.activities.length>beforeA)createdActivities++;const descrizione=get(row,['descrizione','description']);const sede=norm(get(row,['sede','work_site','site']));const citta=norm(get(row,['luogo/città','luogo/citta','città','citta','luogo','work_city','city','location']));const luogo=[sede,citta].filter(Boolean).join(' - ');const note=get(row,['note','notes']);const idv=norm(get(row,['id','import_id','riga','key','chiave']));if(isMonthly){const mese=norm(get(row,['mese','month']))||toMonth(get(row,['data','date']))||state.month;const [year,month]=mese.split('-').map(Number);const payload={year,month,client_id:client.id,project_id:project?.id||null,description:descrizione||null,notes:note||null,amount};const key=idv?importKey(['mc',idv]):importKey(['mc',year,month,client.id,project?.id||'']);const {res,updated:u}=await upsertByKey('monthly_compensations',data.monthly,payload,key);if(res.error)throw res.error;if(u)updated++;else count++;}else{const date=toDate(get(row,['data','date']))||new Date().toISOString().slice(0,10);const rate=rowRate||Number(client.daily_rate||0);const payload={entry_date:date,client_id:client.id,project_id:project?.id||null,activity_id:activity?.id||null,work_location:luogo||null,work_site:sede||null,work_city:citta||null,description:descrizione||null,notes:note||null,hours:ore,daily_rate_snapshot:rate,standard_hours_snapshot:8};const key=idv?importKey(['ts',idv]):importKey(['ts',date,client.id,project?.id||'',activity?.id||'',descrizione,ore]);const {res,updated:u}=await upsertByKey('timesheet_entries',data.entries,payload,key);if(res.error)throw res.error;if(u)updated++;else count++;}}
 await fetchAll();state.view='timesheet';setMsg(`Import completato: ${count} inserite, ${updated} aggiornate. Clienti creati: ${createdClients}. Progetti: ${createdProjects}. Attività: ${createdActivities}. Scartate: ${skipped}.`,9000)}catch(e){console.error(e);setMsg('Errore import CSV: '+(e.message||e),9000)}};reader.readAsText(file,'windows-1252')}
 function exportData(){const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='totime-supabase-backup.json';a.click()}
-function render(){if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,newChoice,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,timesheet,pivot,summary,billing,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,incassi,balance,taxSettings,tasseFuture,fatturatoDetail,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
+function render(){if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,newChoice,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,timesheet,griglia,pivot,summary,billing,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,incassi,balance,taxSettings,tasseFuture,fatturatoDetail,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
 
 Object.assign(window,{
+  saveGrid,
+  addGridRow,
+  gridFillProjects,
   focusForm,
   setPivotSetting,
   setPivotPreset,

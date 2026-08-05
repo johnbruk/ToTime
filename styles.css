@@ -229,3 +229,43 @@ button,input,select,textarea{font-family:var(--font-body)} button{cursor:pointer
 .moreFields>summary:before{margin-right:6px}
 .card>.moreFields{margin-top:12px}
 .srOnly{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+
+/* Griglia mensile */
+.grigliaCard{padding:0;overflow:hidden}
+.grigliaCard .barra{display:flex;gap:8px;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.grigliaCard .barra .primary{width:auto;padding:10px 16px;font-size:14px;margin:0}
+.grigliaCard .nuovaRiga{padding:12px 14px;border-top:1px solid var(--line);display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.grigliaCard .nuovaRiga select{width:auto;min-width:150px;margin:0;padding:10px;font-size:13.5px;min-height:44px}
+.scrollGriglia{overflow-x:auto}
+table.griglia{border-collapse:separate;border-spacing:0;width:100%;font-variant-numeric:tabular-nums}
+table.griglia th,table.griglia td{border-bottom:1px solid var(--line);padding:0;text-align:center;font-size:13px}
+table.griglia thead th{background:var(--surface2);font-weight:700;color:var(--muted);font-size:11.5px;padding:8px 4px;line-height:1.25;white-space:nowrap}
+table.griglia thead th.fest{color:#D9534F;background:rgba(255,107,107,.16)}
+table.griglia thead th.oggi{color:var(--primary)}
+table.griglia .riga{text-align:left;padding:10px 12px;min-width:230px;position:sticky;left:0;background:var(--card);z-index:2;border-right:1px solid var(--line)}
+table.griglia thead .riga{background:var(--surface2);z-index:3}
+table.griglia .riga .n{font-weight:730;font-size:14px;letter-spacing:-.1px}
+table.griglia .riga .d{color:var(--muted);font-size:12.5px;margin-top:2px}
+table.griglia .riga.vuota{color:var(--muted);font-weight:400;text-align:center;padding:24px;min-width:0}
+table.griglia td.gg{width:46px;min-width:46px}
+table.griglia td.gg input,table.griglia td.gg .gCell{width:100%;height:44px;border:0;border-right:1px solid var(--line);background:transparent;text-align:center;font:inherit;font-size:13.5px;font-weight:650;color:var(--text);font-variant-numeric:tabular-nums;border-radius:0;box-shadow:none;display:block;padding:0}
+table.griglia td.gg input:focus{outline:2px solid var(--primary);outline-offset:-2px;background:rgba(124,137,166,.10)}
+table.griglia td.gg.we{background:rgba(148,166,196,.10)}
+table.griglia td.gg.festivo{background:rgba(255,107,107,.16)}
+table.griglia td.gg.festivo input{color:#D9534F}
+table.griglia td.gg.assente{background:rgba(190,40,60,.32)}
+table.griglia td.gg.assente input{color:#fff}
+table.griglia td.gg.oggi{box-shadow:inset 0 -3px 0 var(--primary)}
+table.griglia td.gg.pieno input{color:var(--primary2)}
+table.griglia td.gg.bloccata .gCell{color:var(--muted);text-decoration:underline dotted;cursor:pointer}
+table.griglia .tot{position:sticky;right:0;background:var(--surface2);font-weight:750;min-width:58px;border-left:1px solid var(--line);z-index:2;padding:0 6px}
+table.griglia tfoot td{background:var(--surface2);font-weight:750;padding:10px 4px}
+table.griglia tfoot td.we{background:rgba(148,166,196,.16);color:var(--muted)}
+table.griglia tfoot td.festivo{background:rgba(255,107,107,.16);color:#D9534F}
+table.griglia tfoot td.assente{background:rgba(190,40,60,.32);color:#fff}
+table.griglia tfoot .riga{background:var(--surface2)}
+table.griglia .planRow td{background:rgba(124,137,166,.07)}
+table.griglia .planRow .riga{background:var(--card)}
+table.griglia .planRow .riga .n{color:var(--primary2)}
+table.griglia .planRow span.pl{display:block;height:44px;line-height:44px;font-size:13.5px;font-weight:700;color:var(--primary2);border-right:1px solid var(--line)}
+@media(max-width:520px){.grigliaCard .barra{flex-direction:column;align-items:stretch}table.griglia .riga{min-width:170px}}
