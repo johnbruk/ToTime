@@ -324,9 +324,10 @@ async function moveEntity(kind,id,dir){const ids=sortEntities(kind,entitiesOf(ki
 function sortControl(kind){const m=sortMode(kind);const b=(v,l)=>`<button type="button" class="${m===v?'active':''}" onclick="setSortMode('${kind}','${v}')">${l}</button>`;return `<div class="tabs">${b('asc','A → Z')}${b('desc','Z → A')}${b('manual','Manuale')}</div>`}
 function moveBtns(kind,id){if(sortMode(kind)!=='manual')return '<div>›</div>';return `<div class="moveBtns"><button type="button" onclick="event.stopPropagation();moveEntity('${kind}','${id}',-1)" title="Sposta su" aria-label="Sposta su">↑</button><button type="button" onclick="event.stopPropagation();moveEntity('${kind}','${id}',1)" title="Sposta giù" aria-label="Sposta giù">↓</button></div>`}
 function activeClients(){return sortEntities('clients',data.clients.filter(c=>c.active))}
-function guardDay(iso){if(!iso)return true;const fe=isFerie(iso);const ho=holidayName(iso);
-  if(fe&&ho)return confirm('Il '+fmtDMY(iso)+' è '+ho+' ed è un giorno off.\n\nVuoi inserire comunque il consuntivo?');
-  if(fe)return confirm('Il '+fmtDMY(iso)+' è un giorno off.\n\nVuoi inserire comunque il consuntivo?');
+function guardDay(iso){if(!iso)return true;const a=assenzaDel(iso);const fe=!!a;const ho=holidayName(iso);
+  const eti=a?assenzaLabel(a).toLowerCase()+' ('+fmtNum(a.h,a.h%1?1:0)+' h)':'';
+  if(fe&&ho)return confirm('Il '+fmtDMY(iso)+' è '+ho+' ed è segnato come '+eti+'.\n\nVuoi inserire comunque il consuntivo?');
+  if(fe)return confirm('Il '+fmtDMY(iso)+' è segnato come '+eti+'.\n\nVuoi inserire comunque il consuntivo?');
   if(ho)return confirm('Il '+fmtDMY(iso)+' è '+ho+' (giorno festivo).\n\nVuoi inserire comunque il consuntivo?');
   return true}
 function dailyClients(){return sortEntities('clients',data.clients.filter(c=>c.compensation_type==='daily_rate_8h'&&c.active))}
@@ -336,7 +337,40 @@ function todayISO(){return new Date().toISOString().slice(0,10);}
 function isPlanned(e){return !!e&&(e.status==='planned'||String(e.entry_date||'')>todayISO());}
 function isTM(e){return !!e&&(!!e.tm_batch_id||e.description==='Time & Material');}
 function easterMonday(y){const a=y%19,b=Math.floor(y/100),c=y%100,d=Math.floor(b/4),e=b%4,f=Math.floor((b+8)/25),g=Math.floor((b-f+1)/3),h=(19*a+b-d-g+15)%30,i=Math.floor(c/4),k=c%4,l=(32+2*e+2*i-h-k)%7,m=Math.floor((a+11*h+22*l)/451),mo=Math.floor((h+l-7*m+114)/31),da=((h+l-7*m+114)%31)+1;return new Date(Date.UTC(y,mo-1,da)+86400000).toISOString().slice(0,10);}
-function ferieList(year){try{const v=JSON.parse(settingValue('ferie_'+year)||'[]');return Array.isArray(v)?v:[]}catch(e){return []}}
+/* ===== Assenze =====
+   Ferie, permessi, malattia e recuperi non sono ore lavorate: non hanno
+   cliente e non si fatturano, quindi non stanno in timesheet_entries.
+   Vivono in app_settings, come tutte le impostazioni: nessuna modifica
+   allo schema Supabase.
+
+   Compatibilità con il pregresso: fino alla v1.6 i giorni off erano un
+   semplice elenco di date in "ferie_<anno>". Quelle date continuano a
+   valere, lette come ferie di 8 ore. E a ogni salvataggio la vecchia
+   chiave viene tenuta aggiornata, così tornare indietro di versione non
+   perde nulla. */
+const ASSENZE={ferie:{l:'Ferie',i:'🏖'},permesso:{l:'Permesso',i:'🕘'},malattia:{l:'Malattia',i:'🩺'},recupero:{l:'Recupero',i:'↩'}};
+const ASSENZA_ORE_DEFAULT=8;
+function assenzeRaw(year){try{const v=JSON.parse(settingValue('assenze_'+year)||'[]');return Array.isArray(v)?v:[]}catch(e){return []}}
+function legacyFerie(year){try{const v=JSON.parse(settingValue('ferie_'+year)||'[]');return Array.isArray(v)?v.filter(x=>typeof x==='string'):[]}catch(e){return []}}
+function normAssenza(a){const k=ASSENZE[a&&a.k]?a.k:'ferie';const h=Number(a&&a.h);return {d:String(a.d),k,h:(Number.isFinite(h)&&h>0&&h<=24)?h:ASSENZA_ORE_DEFAULT,n:(a&&a.n)?String(a.n):''}}
+function assenzeList(year){
+  const out=assenzeRaw(year).filter(a=>a&&a.d).map(normAssenza);
+  const seen=new Set(out.map(a=>a.d));
+  legacyFerie(year).forEach(d=>{if(!seen.has(d)){out.push({d,k:'ferie',h:ASSENZA_ORE_DEFAULT,n:''});seen.add(d)}});
+  return out.sort((a,b)=>a.d.localeCompare(b.d));
+}
+function assenzeOfMonth(ym){return assenzeList(String(ym).slice(0,4)).filter(a=>a.d.startsWith(ym))}
+function assenzaDel(iso){return assenzeList(String(iso).slice(0,4)).find(a=>a.d===iso)||null}
+function oreAssenza(iso){return Number(assenzaDel(iso)?.h||0)}
+function assenzaLabel(a){return a?(ASSENZE[a.k]?.l||a.k):''}
+function assenzaIcona(a){return a?(ASSENZE[a.k]?.i||''):''}
+async function saveAssenze(year,list){
+  const clean=list.filter(a=>a&&a.d).map(normAssenza).sort((a,b)=>a.d.localeCompare(b.d));
+  const r=await saveSetting('assenze_'+year,JSON.stringify(clean));
+  if(r.error)return r;
+  return await saveSetting('ferie_'+year,JSON.stringify(clean.map(a=>a.d)));
+}
+function ferieList(year){return assenzeList(year).map(a=>a.d)}
 function ferieSet(year){return new Set(ferieList(year))}
 function isFerie(iso){return ferieSet(String(iso).slice(0,4)).has(iso)}
 function isHolidayISO(iso){const y=Number(String(iso).slice(0,4));return italianHolidays(y).has(iso)}
@@ -364,12 +398,75 @@ function giorno(){
   const rows=dayRows(iso);
   const ore=rows.filter(r=>r.kind==='daily').reduce((s,r)=>s+Number(r.hours||0),0);
   const imp=rows.reduce((s,r)=>s+(r.kind==='daily'?dailyAmount(r):Number(r.amount||0)),0);
-  const badges=[fe?'<span class="tag ferieTag">Giorno off</span>':'',hn?`<span class="tag ${isPatron(iso)?'orange':'red'}">${esc(hn)}</span>`:'',we&&!hn?'<span class="tag gray">Weekend</span>':''].filter(Boolean).join(' ');
+  const az=assenzaDel(iso);const badges=[az?`<span class="tag ferieTag">${esc(assenzaIcona(az))} ${esc(assenzaLabel(az))} · ${fmtNum(az.h,az.h%1?1:0)} h</span>`:'',hn?`<span class="tag ${isPatron(iso)?'orange':'red'}">${esc(hn)}</span>`:'',we&&!hn?'<span class="tag gray">Weekend</span>':''].filter(Boolean).join(' ');
   const list=rows.length?`<div class="list">${rows.map(r=>r.kind==='expense'?`<div ${rowAttrs('expense',r.id)}><div class="date">${selBox('expense',r.id)}${dateIT(r.expense_date)}</div><div><div class="title">${esc(expenseCategoryName(r.expense_category_id))}</div><div class="desc">${esc(clientName(r.client_id))} · ${expenseTypeTag(r)}</div></div><div class="value">${fmtEUR(r.amount)}</div></div>`:timesheetRow(r)).join('')}</div>`:'<div class="empty">Nessun consuntivo in questo giorno.<button type="button" class="secondary emptyCta" onclick="newEntryForDay()">+ Aggiungi consuntivo</button></div>';
   return appShell(`<h1>${wdName} ${fmtDMY(iso)}</h1>${badges?`<p class="sub">${badges}</p>`:''}<div class="dayNav"><button type="button" onclick="dayShift(-1)">‹ Giorno prec.</button><button type="button" onclick="go('calendario')">Calendario</button><button type="button" onclick="dayShift(1)">Giorno succ. ›</button></div><div class="card"><b>Riepilogo giornata</b><div class="kpiGrid three" style="margin-top:14px"><div><span>Ore</span><strong>${fmtNum(ore,1)} h</strong><small>${fmtDays(ore)} gg/u</small></div><div><span>Voci</span><strong>${rows.length}</strong></div><div><span>Importo</span><strong>${fmtEUR(imp)}</strong></div></div></div>${selBar('giorno',rows.length)}${list}${rows.length?`<button type="button" class="secondary" onclick="newEntryForDay()">+ Aggiungi consuntivo in questo giorno</button>`:''}`);
 }
 function goForDay(v){navigateTo(v,{editType:state.editType})}
 function newEntryForDay(){navigateTo('newChoice',{editType:state.edit||todayISO()})}
+async function saveAssenza(ev){
+  ev.preventDefault();
+  const f=Object.fromEntries(new FormData(ev.target));
+  const d=norm(f.day);
+  if(!d)return setMsg('Indica il giorno.',5000);
+  const k=ASSENZE[f.kind]?f.kind:'ferie';
+  const h=Number(String(f.hours??'').replace(',','.'));
+  if(!Number.isFinite(h)||h<=0||h>24)return setMsg('Le ore devono stare fra 0 e 24.',6000);
+  const ore=dayHours(d);
+  if(ore>0&&!confirm('Il '+fmtDMY(d)+' ha già '+fmtNum(ore,1)+' h consuntivate.\n\nSegnarlo comunque come '+ASSENZE[k].l.toLowerCase()+'?'))return;
+  const y=d.slice(0,4);
+  const list=assenzeList(y).filter(a=>a.d!==d);
+  list.push({d,k,h,n:norm(f.note)||''});
+  const r=await saveAssenze(y,list);
+  if(r.error)return setMsg(r.error.message,7000);
+  state.month=d.slice(0,7);
+  await reload();
+  setMsg(ASSENZE[k].l+' del '+fmtDMY(d)+' segnata.',4000);
+  render();
+}
+async function removeAssenza(iso){
+  const a=assenzaDel(iso);
+  if(!confirm('Togliere '+(a?assenzaLabel(a).toLowerCase():'l\'assenza')+' del '+fmtDMY(iso)+'?'))return;
+  const y=String(iso).slice(0,4);
+  const r=await saveAssenze(y,assenzeList(y).filter(x=>x.d!==iso));
+  if(r.error)return setMsg(r.error.message,7000);
+  await reload();setMsg('Assenza tolta.',3500);render();
+}
+function assenzeCard(){
+  const list=assenzeOfMonth(state.month);
+  const [y,m]=String(state.month).split('-').map(Number);
+  const first=`${y}-${String(m).padStart(2,'0')}-01`;
+  const last=`${y}-${String(m).padStart(2,'0')}-${String(new Date(y,m,0).getDate()).padStart(2,'0')}`;
+  const today=todayISO();
+  const proposed=today.startsWith(state.month)?today:first;
+  const kinds=Object.entries(ASSENZE).map(([k,v])=>`<option value="${k}">${esc(v.i+' '+v.l)}</option>`).join('');
+  const tot=list.reduce((t,a)=>t+Number(a.h||0),0);
+  return `<div class="card"><b>Assenze di ${esc(monthLabel(state.month))}</b>
+    <div class="desc" style="margin-top:4px">Ferie, permessi, malattia e recuperi. Non sono ore lavorate e non si fatturano: compaiono nella griglia in una riga già valorizzata, che non devi compilare.</div>
+    <details class="moreFields"><summary>Segna un'assenza</summary>
+    <form class="form assForm" onsubmit="saveAssenza(event)">
+      <input name="day" type="date" required value="${esc(proposed)}" min="${esc(first)}" max="${esc(last)}" aria-label="Giorno dell'assenza">
+      <select name="kind" aria-label="Tipo di assenza">${kinds}</select>
+      <input name="hours" type="number" step="0.5" min="0.5" max="24" value="${ASSENZA_ORE_DEFAULT}" aria-label="Ore">
+      <input name="note" placeholder="Nota (facoltativa)" aria-label="Nota">
+      <button class="miniBtn">Segna</button>
+    </form>
+    <div class="ferieRange"><b>Oppure un periodo intero</b>
+      <div class="frRow"><input type="date" id="ferieFrom" aria-label="Dal"><span>→</span><input type="date" id="ferieTo" aria-label="Al">
+        <select id="ferieKind" aria-label="Tipo di assenza del periodo">${kinds}</select>
+        <input type="number" id="ferieHours" step="0.5" min="0.5" max="24" value="${ASSENZA_ORE_DEFAULT}" aria-label="Ore al giorno">
+        <button type="button" class="miniBtn" onclick="ferieRange('add')">Segna periodo</button>
+        <button type="button" class="miniBtn danger" onclick="ferieRange('remove')">Rimuovi periodo</button></div>
+      <div class="desc">Vengono segnati i giorni lavorativi dell'intervallo, weekend esclusi.</div></div>
+    </details>
+    <div class="list" style="margin-bottom:0">${list.map(a=>`<div class="row">
+      <div class="date">${esc(a.d.slice(8,10))}/${esc(a.d.slice(5,7))}</div>
+      <div><div class="title">${esc(assenzaIcona(a))} ${esc(assenzaLabel(a))}</div>${a.n?`<div class="desc">${esc(a.n)}</div>`:''}</div>
+      <div class="value">${fmtNum(a.h,a.h%1?1:0)} h <button type="button" class="miniBtn danger" style="margin-left:8px" onclick="removeAssenza('${esc(a.d)}')" aria-label="Togli l'assenza del ${esc(fmtDMY(a.d))}">✕</button></div>
+      </div>`).join('')||'<div class="empty">Nessuna assenza segnata in questo mese.</div>'}</div>
+    ${tot>0?`<div class="metricLine" style="margin-top:12px">${list.length===1?'1 assenza':list.length+' assenze'} <span class="dot">·</span> ${fmtNum(tot,tot%1?1:0)} h <span class="dot">·</span> ${fmtDays(tot)} gg/u</div>`:''}
+  </div>`;
+}
 async function ferieRange(mode){
   const f=document.getElementById('ferieFrom'),t=document.getElementById('ferieTo');
   if(!f||!t||!f.value||!t.value){setMsg('Indica la data di inizio e di fine.',5000);render();return}
@@ -380,13 +477,17 @@ async function ferieRange(mode){
   const remove=mode==='remove';
   if(!remove){const withH=days.filter(x=>dayHours(x)>0);
     if(withH.length&&!confirm(withH.length+' giorni dell\'intervallo hanno già ore consuntivate.\n\nSegnarli comunque come giorni off?'))return;}
+  const kEl=document.getElementById('ferieKind'),hEl=document.getElementById('ferieHours');
+  const kind=ASSENZE[kEl&&kEl.value]?kEl.value:'ferie';
+  const ore=Number(String((hEl&&hEl.value)||ASSENZA_ORE_DEFAULT).replace(',','.'));
+  if(!remove&&(!Number.isFinite(ore)||ore<=0||ore>24)){setMsg('Le ore devono stare fra 0 e 24.',6000);render();return}
   const byYear={};days.forEach(x=>{const yy=x.slice(0,4);(byYear[yy]=byYear[yy]||[]).push(x)});
   let n=0;
-  for(const yy of Object.keys(byYear)){let list=ferieList(yy);
-    if(remove){const before=list.length;list=list.filter(x=>byYear[yy].indexOf(x)<0);n+=before-list.length;}
-    else byYear[yy].forEach(x=>{if(list.indexOf(x)<0){list.push(x);n++}});
-    list.sort();const r=await saveSetting('ferie_'+yy,JSON.stringify(list));if(r.error){setMsg(r.error.message,7000);return}}
-  await reload();setMsg(n?(n+(remove?' giorni rimossi dai giorni off.':' giorni segnati come off.')):'Nessuna modifica: i giorni erano già nello stato richiesto.',4000);render();
+  for(const yy of Object.keys(byYear)){let list=assenzeList(yy);
+    if(remove){const before=list.length;list=list.filter(a=>byYear[yy].indexOf(a.d)<0);n+=before-list.length;}
+    else byYear[yy].forEach(x=>{const i=list.findIndex(a=>a.d===x);const rec={d:x,k:kind,h:ore,n:''};if(i<0)list.push(rec);else list[i]=rec;n++});
+    const r=await saveAssenze(yy,list);if(r.error){setMsg(r.error.message,7000);return}}
+  await reload();setMsg(n?(n+' giorni '+(remove?'rimossi dalle assenze.':'segnati come '+ASSENZE[kind].l.toLowerCase()+'.')):'Nessuna modifica: i giorni erano già nello stato richiesto.',4000);render();
 }
 async function toggleFerie(iso){const y=String(iso).slice(0,4);const list=ferieList(y);const i=list.indexOf(iso);
   if(i<0){const h=dayHours(iso);if(h>0&&!confirm('Il '+fmtDMY(iso)+' ha già '+fmtNum(h,1)+' h consuntivate.\n\nVuoi segnarlo comunque come ferie?'))return;list.push(iso);}
@@ -403,9 +504,9 @@ function calendario(){
     if(fe)nFer++;else if(ho)nFest++;else if(!we)nLav++;
     if(h>0){nCons++;totH+=h;}
     const cls=['calCell'];if(iso===todayISO())cls.push('today');if(we)cls.push('we');if(ho)cls.push(isPatron(iso)?'patron':'holiday');if(fe)cls.push('ferie');if(h>0)cls.push('worked');
-    const tip=[fe?'Ferie':'',hn||'',h>0?fmtNum(h,1)+' h consuntivate':''].filter(Boolean).join(' · ');
-    cells+=`<div class="${cls.join(' ')}" onclick="openDay('${iso}')" role="button" title="${esc(tip?tip+' · ':'')}Apri il dettaglio del giorno"><span class="calNum">${d}</span>${hn?`<span class="calFest">${esc(hn)}</span>`:''}${h>0?`<span class="calH">${fmtNum(h,1)}h</span>`:''}</div>`;}
-  return appShell(`<h1>Calendario</h1><p class="sub">Giorni non lavorabili e ore consuntivate. Tocca un giorno per aprirne il dettaglio; i giorni off si impostano nella sezione in fondo.</p>${monthSelector()}<div class="card"><div class="calGrid head">${['Lun','Mar','Mer','Gio','Ven','Sab','Dom'].map(d=>`<div class="calHead">${d}</div>`).join('')}</div><div class="calGrid">${cells}</div>${festList.length?`<div class="festList"><b>Festività del mese</b>${festList.map(f=>`<span>${f[0]} · ${esc(f[1])}</span>`).join('')}</div>`:''}<div class="ferieRange"><b>Segna un periodo di giorni off</b><div class="frRow"><input type="date" id="ferieFrom" aria-label="Dal"><span>→</span><input type="date" id="ferieTo" aria-label="Al"><button type="button" class="miniBtn" onclick="ferieRange('add')">Segna off</button><button type="button" class="miniBtn" onclick="ferieRange('remove')">Rimuovi off</button></div><div class="desc">Vengono segnati i giorni lavorativi dell'intervallo (weekend esclusi).</div></div><div class="calLegend"><span><i class="sw we"></i>Weekend</span><span><i class="sw holiday"></i>Festivo</span><span><i class="sw ferie"></i>Giorno off</span><span><i class="sw worked"></i>Consuntivato</span></div></div><div class="card"><b>Riepilogo ${monthLabel(state.month)}</b><div class="kpiGrid" style="margin-top:14px"><div><span>Giorni lavorabili</span><strong>${nLav}</strong></div><div><span>Giorni off</span><strong>${nFer}</strong></div><div><span>Festivi</span><strong>${nFest}</strong></div><div><span>Giorni consuntivati</span><strong>${nCons}</strong><small>${fmtNum(totH,1)} h</small></div></div></div>`);
+    const az=fe?assenzaDel(iso):null;const tip=[az?assenzaLabel(az)+' '+fmtNum(az.h,az.h%1?1:0)+' h':'',hn||'',h>0?fmtNum(h,1)+' h consuntivate':''].filter(Boolean).join(' · ');
+    cells+=`<div class="${cls.join(' ')}" onclick="openDay('${iso}')" role="button" title="${esc(tip?tip+' · ':'')}Apri il dettaglio del giorno"><span class="calNum">${d}</span>${az?`<span class="calFest">${esc(assenzaLabel(az))}</span>`:hn?`<span class="calFest">${esc(hn)}</span>`:''}${h>0?`<span class="calH">${fmtNum(h,1)}h</span>`:''}</div>`;}
+  return appShell(`<h1>Calendario</h1><p class="sub">Giorni non lavorabili e ore consuntivate. Tocca un giorno per aprirne il dettaglio; le assenze si gestiscono nella sezione in fondo.</p>${monthSelector()}<div class="card"><div class="calGrid head">${['Lun','Mar','Mer','Gio','Ven','Sab','Dom'].map(d=>`<div class="calHead">${d}</div>`).join('')}</div><div class="calGrid">${cells}</div>${festList.length?`<div class="festList"><b>Festività del mese</b>${festList.map(f=>`<span>${f[0]} · ${esc(f[1])}</span>`).join('')}</div>`:''}<div class="calLegend"><span><i class="sw we"></i>Weekend</span><span><i class="sw holiday"></i>Festivo</span><span><i class="sw ferie"></i>Assenza</span><span><i class="sw worked"></i>Consuntivato</span></div></div>${assenzeCard()}<div class="card"><b>Riepilogo ${monthLabel(state.month)}</b><div class="kpiGrid" style="margin-top:14px"><div><span>Giorni lavorabili</span><strong>${nLav}</strong></div><div><span>Assenze</span><strong>${nFer}</strong><small>${fmtNum(assenzeOfMonth(state.month).reduce((t,a)=>t+Number(a.h||0),0),0)} h</small></div><div><span>Festivi</span><strong>${nFest}</strong></div><div><span>Giorni consuntivati</span><strong>${nCons}</strong><small>${fmtNum(totH,1)} h</small></div></div></div>`);
 }
 function italianHolidays(y){return new Set([...Object.keys(PATRON_HOLIDAYS).map(md=>y+'-'+md),y+'-01-01',y+'-01-06',y+'-04-25',y+'-05-01',y+'-06-02',y+'-08-15',y+'-11-01',y+'-12-08',y+'-12-25',y+'-12-26',easterMonday(y)]);}
 function tmWorkingDays(start,end,excludeHolidays){const out=[];if(!start||!end)return out;let d=new Date(start+'T00:00:00Z');const e=new Date(end+'T00:00:00Z');if(isNaN(d.getTime())||isNaN(e.getTime())||d>e)return out;const hol={};for(let y=d.getUTCFullYear();y<=e.getUTCFullYear();y++)hol[y]=italianHolidays(y);let guard=0;while(d<=e&&guard++<1200){const wd=d.getUTCDay();const iso=d.toISOString().slice(0,10);if(wd!==0&&wd!==6&&!(excludeHolidays&&hol[d.getUTCFullYear()].has(iso))&&!isFerie(iso))out.push(iso);d=new Date(d.getTime()+86400000);}return out;}
@@ -636,11 +737,11 @@ function gridDays(){
   const [y,m]=String(state.month).split('-').map(Number);
   const n=daysInMonth(state.month),t=todayISO(),out=[];
   for(let d=1;d<=n;d++){const iso=isoOf(y,m,d);
-    out.push({d,iso,holiday:holidayName(iso),we:isWeekendISO(iso),off:isFerie(iso),today:iso===t});}
+    out.push({d,iso,holiday:holidayName(iso),we:isWeekendISO(iso),off:isFerie(iso),ass:assenzaDel(iso),today:iso===t});}
   return out;
 }
 function gridDayClass(x){const c=[];if(x.holiday)c.push('festivo');else if(x.we)c.push('we');if(x.off)c.push('assente');if(x.today)c.push('oggi');return c}
-function gridDayWhy(x){return [x.holiday||'',(!x.holiday&&x.we)?'weekend':'',x.off?'giorno off':''].filter(Boolean).join(' · ')}
+function gridDayWhy(x){return [x.holiday||'',(!x.holiday&&x.we)?'weekend':'',x.ass?assenzaLabel(x.ass).toLowerCase():''].filter(Boolean).join(' · ')}
 function gridNum(v){return fmtNum(v, Number(v)%1?2:0)}
 function griglia(){
   const days=gridDays(),rows=gridRows(),planned=gridPlannedByDay();
@@ -663,10 +764,18 @@ function griglia(){
     return `<th class="${c}"${x.holiday?` title="${esc(x.holiday)}"`:''}>${wd[new Date(x.iso+'T00:00:00Z').getUTCDay()]}<br>${x.d}</th>`;
   }).join('');
 
+  const assTot=days.reduce((t,x)=>t+Number(x.ass?.h||0),0);
   const foot=days.map(x=>{
-    const t=rows.reduce((a,r)=>a+Number(r.hours[x.iso]||0),0);
+    const t=rows.reduce((a,r)=>a+Number(r.hours[x.iso]||0),0)+Number(x.ass?.h||0);
     return `<td class="${gridDayClass(x).join(' ')}">${t>0?gridNum(t):''}</td>`;
   }).join('');
+
+  // Le assenze sono già segnate a calendario: qui si vedono, non si
+  // riscrivono. Tenerle in due posti vorrebbe dire vederle divergere.
+  const assRow=assTot>0?`<tr class="assRiga">
+      <td class="riga"><div class="n">Assenze</div><div class="d">Ferie, permessi e malattia segnati a calendario</div></td>
+      ${days.map(x=>`<td class="gg ${gridDayClass(x).join(' ')}"><span class="ass"${x.ass?` title="${esc(assenzaLabel(x.ass))}"`:''}>${x.ass?gridNum(x.ass.h):''}</span></td>`).join('')}
+      <td class="tot">${gridNum(assTot)}</td></tr>`:'';
 
   const plannedRow=plannedTot>0?`<tr class="planRow">
       <td class="riga"><div class="n">Pianificato</div><div class="d">Incarichi continuativi sui giorni futuri · non modificabile qui</div></td>
@@ -678,7 +787,7 @@ function griglia(){
         <td class="riga"><div class="n">${esc(clientName(r.client_id)||'Senza cliente')}</div>
           <div class="d">${esc(projectName(r.project_id)||'Senza progetto')}${r.activity_id?' · '+esc(activityName(r.activity_id)||''):''}</div></td>
         ${cells(r)}<td class="tot">${gridNum(rowTot(r))}</td></tr>`).join('')
-    : (plannedRow?'':`<tr><td class="riga vuota" colspan="${days.length+2}">Nessuna commessa in questo mese. Aggiungine una qui sotto.</td></tr>`);
+    : ((plannedRow||assRow)?'':`<tr><td class="riga vuota" colspan="${days.length+2}">Nessuna commessa in questo mese. Aggiungine una qui sotto.</td></tr>`);
 
   const opts=(list,empty)=>`<option value="">${empty}</option>`+list.map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('');
 
@@ -692,8 +801,8 @@ function griglia(){
       </div>
       <div class="scrollGriglia"><table class="griglia">
         <thead><tr><th class="riga">Commessa</th>${head}<th class="tot">Tot</th></tr></thead>
-        <tbody>${body}${plannedRow}</tbody>
-        <tfoot><tr><td class="riga">Totale giornata</td>${foot}<td class="tot">${gridNum(total)}</td></tr></tfoot>
+        <tbody>${body}${assRow}${plannedRow}</tbody>
+        <tfoot><tr><td class="riga">Totale giornata</td>${foot}<td class="tot">${gridNum(total+assTot)}</td></tr></tfoot>
       </table></div>
       <div class="nuovaRiga">
         <select id="g-cliente" onchange="gridFillProjects()" aria-label="Cliente">${opts(activeClients(),'— cliente —')}</select>
@@ -706,7 +815,7 @@ function griglia(){
         <span><i class="sw ferie"></i>Giorno off</span><span><i class="sw worked"></i>Oggi</span>
       </div>
     </div>
-    <div class="metricLine" style="margin-top:12px">${gridNum(total)} h consuntivate <span class="dot">·</span> ${fmtDays(total)} gg/u${plannedTot>0?` <span class="dot">·</span> <span class="tag blue">Pianificato ${gridNum(plannedTot)} h</span>`:''}</div>`);
+    <div class="metricLine" style="margin-top:12px">${gridNum(total)} h consuntivate <span class="dot">·</span> ${fmtDays(total)} gg/u${assTot>0?` <span class="dot">·</span> <span class="tag ferieTag">Assenze ${gridNum(assTot)} h</span>`:''}${plannedTot>0?` <span class="dot">·</span> <span class="tag blue">Pianificato ${gridNum(plannedTot)} h</span>`:''}</div>`);
 }
 function gridFillProjects(){const c=document.getElementById('g-cliente')?.value||'';const p=document.getElementById('g-progetto');if(p)p.innerHTML=`<option value="">— progetto —</option>`+sortEntities('projects',data.projects.filter(x=>x.active&&x.client_id===c)).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('')}
 function addGridRow(){
@@ -1063,6 +1172,8 @@ function exportData(){const blob=new Blob([JSON.stringify(data,null,2)],{type:'a
 function render(){if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,newChoice,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,timesheet,griglia,pivot,summary,billing,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,incassi,balance,taxSettings,tasseFuture,fatturatoDetail,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
 
 Object.assign(window,{
+  saveAssenza,
+  removeAssenza,
   saveGrid,
   addGridRow,
   gridFillProjects,

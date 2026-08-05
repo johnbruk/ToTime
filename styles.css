@@ -269,3 +269,14 @@ table.griglia .planRow .riga{background:var(--card)}
 table.griglia .planRow .riga .n{color:var(--primary2)}
 table.griglia .planRow span.pl{display:block;height:44px;line-height:44px;font-size:13.5px;font-weight:700;color:var(--primary2);border-right:1px solid var(--line)}
 @media(max-width:520px){.grigliaCard .barra{flex-direction:column;align-items:stretch}table.griglia .riga{min-width:170px}}
+.assForm{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:12px 0 4px}
+.assForm input,.assForm select{width:auto;flex:1 1 120px;min-width:110px;min-height:44px;margin:0}
+.assForm input[name=note]{flex:2 1 180px}
+.assForm .miniBtn{flex:0 0 auto}
+.frRow select,.frRow input[type=number]{flex:0 1 130px;min-width:110px;min-height:44px;border:1px solid var(--line);background:var(--surface2);color:var(--text);padding:8px 10px;font-size:14px}
+table.griglia .assRiga td{background:rgba(148,166,196,.06)}
+table.griglia .assRiga .riga{background:var(--card)}
+table.griglia .assRiga .riga .n{color:#D9534F}
+table.griglia .assRiga td.assente{background:rgba(190,40,60,.32)}
+table.griglia .assRiga span.ass{display:block;height:44px;line-height:44px;font-size:13.5px;font-weight:700;font-variant-numeric:tabular-nums;border-right:1px solid var(--line)}
+table.griglia .assRiga td.assente span.ass{color:#fff}
