@@ -13,7 +13,7 @@
     "test:loader": "node tests/app-data-loader-smoke.mjs",
     "test:views": "node tests/view-map-smoke.mjs",
     "test:data-shape": "node tests/app-data-shape-smoke.mjs",
-    "test:ui": "node tests/ui/offline.mjs && node tests/ui/griglia.mjs && node tests/ui/assenze.mjs",
+    "test:ui": "node tests/ui/offline.mjs && node tests/ui/griglia.mjs && node tests/ui/assenze.mjs && node tests/ui/grafica.mjs",
     "test:all": "npm test && npm run test:ui"
   }
 }
