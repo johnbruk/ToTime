@@ -1,0 +1,38 @@
+<!doctype html><html lang="it"><head><meta charset="utf-8"/><link rel="stylesheet" href="/styles.css"/></head><body><div id="app"></div>
+<script>
+const profiles=[{id:'u1',user_id:'u1',first_name:'G',last_name:'B'}];
+const clients=[{id:'c2',name:'Zeta',daily_rate:400,standard_hours:8,compensation_type:'daily_rate_8h',active:true},{id:'c1',name:'Equans',daily_rate:480,standard_hours:8,compensation_type:'daily_rate_8h',active:true}];
+const projects=[{id:'p1',client_id:'c1',name:'Beta',active:true},{id:'p2',client_id:'c1',name:'Alfa',active:true}];
+const activities=[{id:'a2',name:'Zulu',active:true},{id:'a1',name:'Alfa',active:true}];
+const expense_categories=[{id:'x1',name:'Alfa',active:true,reimbursable:true}];
+const STORES={
+  timesheet_entries:[
+    {id:'e1',entry_date:'2026-07-10',client_id:'c1',project_id:'p1',activity_id:'a1',hours:8,daily_rate_snapshot:480,standard_hours_snapshot:8},
+    {id:'e2',entry_date:'2026-07-13',client_id:'c1',project_id:'p1',activity_id:'a1',hours:8,daily_rate_snapshot:480,standard_hours_snapshot:8},
+    {id:'e3',entry_date:'2026-07-14',client_id:'c1',project_id:'p1',activity_id:'a1',hours:4,daily_rate_snapshot:480,standard_hours_snapshot:8},
+    {id:'e3b',entry_date:'2026-07-14',client_id:'c1',project_id:'p1',activity_id:'a1',hours:4,description:'seconda voce',daily_rate_snapshot:480,standard_hours_snapshot:8},
+    {id:'e7',entry_date:'2026-07-20',client_id:'c2',project_id:null,activity_id:'a2',hours:6,daily_rate_snapshot:400,standard_hours_snapshot:8},
+    {id:'e9',entry_date:'2026-07-30',client_id:'c1',project_id:'p2',activity_id:'a1',hours:4,status:'planned',tm_batch_id:'tm_x',daily_rate_snapshot:480,standard_hours_snapshot:8}
+  ],
+  manual_entries:[],travel_expenses:[],monthly_compensations:[],
+  app_settings:[{id:'s1',setting_key:'ferie_2026',setting_value:'["2026-07-06","2026-07-07"]'}],
+  billing_headers:[],invoice_templates:[],tax_settings:[],tax_payments:[],
+  clients,projects,activities,expense_categories,user_profiles:profiles
+};
+let seq=0;
+function makeChain(table){
+  let op='select',single=false,pl=null,inF=null,eqCol=null,eqVal=null;
+  const rows=()=>(STORES[table]=STORES[table]||[]);
+  const resolve=()=>{
+    if(op==='insert'){const arr=Array.isArray(pl)?pl:[pl];arr.forEach(r=>{rows().push({id:'n'+(++seq),...r});if(!window.__ins)window.__ins=[];window.__ins.push({__table:table,...r})});return {data:null,error:null};}
+    if(op==='update'){const i=rows().findIndex(r=>r.id===eqVal);if(i>=0)rows()[i]={...rows()[i],...pl};return {data:null,error:null};}
+    if(op==='delete'){if(inF)STORES[table]=rows().filter(r=>!inF.vals.includes(r[inF.col]));else if(eqCol)STORES[table]=rows().filter(r=>String(r[eqCol])!==String(eqVal));return {data:null,error:null};}
+    return {data:single?(rows()[0]||null):rows().slice(),error:null};
+  };
+  const h={select(){op='select';return proxy},order(){return proxy},eq(c,v){eqCol=c;eqVal=v;return proxy},in(c,v){inF={col:c,vals:v};return proxy},gte(){return proxy},lte(){return proxy},ilike(){return proxy},is(){return proxy},limit(){return proxy},insert(v){op='insert';pl=v;return proxy},update(v){op='update';pl=v;return proxy},delete(){op='delete';return proxy},single(){single=true;return proxy},maybeSingle(){single=true;return proxy}};
+  const proxy=new Proxy({},{get(t,k){if(k==='then'){const p=Promise.resolve(resolve());return p.then.bind(p);}return h[k]||(()=>proxy);}});
+  return proxy;
+}
+window.__stores=STORES;window.__ins=[];
+window.supabase={createClient(){return {from(t){return makeChain(t);},auth:{async getSession(){return {data:{session:{user:{id:'u1'}}}};},onAuthStateChange(){return {data:{subscription:{unsubscribe(){}}}};}}};}};
+</script><script type="module" src="/app.js"></script></body></html>
