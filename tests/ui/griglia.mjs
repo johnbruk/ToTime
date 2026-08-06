@@ -119,26 +119,40 @@ await pgm.close();
 await pg.evaluate(()=>window.go('griglia'));await pg.waitForTimeout(400);
 await pg.screenshot({path:path.join(OUT,'griglia-desktop.png')});
 
-console.log('\n=== J. Voce dedicata sotto Nuovo consuntivo ===');
+console.log('\n=== J. Nuovo consuntivo: solo giornaliero, mensile e una tantum ===');
 await pg.evaluate(()=>window.go('newChoice'));await pg.waitForTimeout(350);
 const voci=await pg.evaluate(()=>[...document.querySelectorAll('.menuBtn b')].map(x=>x.textContent.trim()));
 console.log('  voci:',JSON.stringify(voci));
-ok(voci[0]==='Consuntivo giornaliero','la prima voce è il consuntivo giornaliero',voci[0]);
-ok(voci[1]==='Consuntivo mensile','la seconda è il consuntivo mensile',voci[1]);
-ok(voci.length===5,'restano anche impegno continuativo, forfettario e rimborso spese',String(voci.length));
-const gruppi=await pg.evaluate(()=>[...document.querySelectorAll('.app h2')].map(x=>x.textContent.trim()));
-ok(gruppi.join('|')==='Ore lavorate|Altro','le voci sono divise per gruppo',JSON.stringify(gruppi));
+ok(voci.join('|')==='Consuntivo giornaliero|Consuntivo mensile|Compenso una tantum','tre voci, nell\'ordine giusto',JSON.stringify(voci));
+ok(!voci.some(v=>/Impegno continuativo|Rimborso spese|Time & Material|forfettario/i.test(v)),'niente impegno continuativo né rimborso spese qui');
 await pg.evaluate(()=>{[...document.querySelectorAll('.menuBtn')].find(x=>/Consuntivo mensile/.test(x.textContent)).click()});
 await pg.waitForTimeout(500);
-ok(/Consuntivo mensile/.test(await pg.evaluate(()=>document.querySelector('h1')?.textContent||'')),'la voce apre la griglia',await pg.evaluate(()=>document.querySelector('h1')?.textContent));
+ok(/Consuntivo mensile/.test(await pg.evaluate(()=>document.querySelector('h1')?.textContent||'')),'la voce apre il consuntivo mensile');
 ok(await pg.evaluate(()=>!!document.querySelector('table.griglia')),'e la griglia c\'è davvero');
-// aprendola dal dettaglio di un giorno, la griglia si posiziona su quel mese
+await pg.evaluate(()=>window.go('newChoice'));await pg.waitForTimeout(300);
+await pg.evaluate(()=>{[...document.querySelectorAll('.menuBtn')].find(x=>/una tantum/.test(x.textContent)).click()});
+await pg.waitForTimeout(400);
+ok(/Compenso una tantum/.test(await pg.evaluate(()=>document.querySelector('h1')?.textContent||'')),'la terza voce apre il compenso una tantum',await pg.evaluate(()=>document.querySelector('h1')?.textContent));
+
+console.log('\n=== K. Quello che ho tolto dal menu resta raggiungibile ===');
+await pg.evaluate(()=>window.go('tmManage'));await pg.waitForTimeout(400);
+ok(/Incarichi continuativi/.test(await pg.evaluate(()=>document.querySelector('h1')?.textContent||'')),'la pagina degli incarichi continuativi c\'è');
+const crea=await pg.evaluate(()=>[...document.querySelectorAll('button')].some(b=>/Nuovo incarico continuativo/.test(b.textContent)));
+ok(crea,'e ha il pulsante per crearne uno, anche con incarichi già presenti');
+await pg.evaluate(()=>{[...document.querySelectorAll('button')].find(b=>/Nuovo incarico continuativo/.test(b.textContent)).click()});
+await pg.waitForTimeout(450);
+ok(/Impegno continuativo/.test(await pg.evaluate(()=>document.querySelector('h1')?.textContent||'')),'il pulsante apre davvero il form',await pg.evaluate(()=>document.querySelector('h1')?.textContent));
+const spese=await pg.evaluate(()=>{const m=window.MENU;return true});
+await pg.evaluate(()=>window.go('expenseForm'));await pg.waitForTimeout(400);
+ok(/Nuova spesa/.test(await pg.evaluate(()=>document.querySelector('h1')?.textContent||'')),'il rimborso spese resta nella sua sezione Spese');
+
+// il consuntivo mensile aperto dal dettaglio di un giorno si posiziona su quel mese
 await pg.evaluate(()=>window.openDay('2026-05-12'));await pg.waitForTimeout(350);
 await pg.evaluate(()=>{const b=[...document.querySelectorAll('button')].find(x=>/Aggiungi consuntivo/.test(x.textContent));b&&b.click()});
 await pg.waitForTimeout(350);
 await pg.evaluate(()=>{const b=[...document.querySelectorAll('.menuBtn')].find(x=>/Consuntivo mensile/.test(x.textContent));b&&b.click()});
 await pg.waitForTimeout(500);
-ok((await pg.evaluate(()=>document.querySelector('.month strong')?.textContent||'')).startsWith('Maggio 2026'),'aperta da un giorno, si posiziona sul suo mese',await pg.evaluate(()=>document.querySelector('.month strong')?.textContent.trim()));
+ok((await pg.evaluate(()=>document.querySelector('.month strong')?.textContent||'')).startsWith('Maggio 2026'),'aperto da un giorno, si posiziona sul suo mese',await pg.evaluate(()=>document.querySelector('.month strong')?.textContent.trim()));
 
 await b.close();server.close();
 console.log('\n'+(errs.length?('ERRORI JS:\n'+errs.join('\n')):'✓ nessun errore JS'));
