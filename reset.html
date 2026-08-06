@@ -6,9 +6,7 @@
   <meta name="theme-color" content="#7C89A6" />
   <title>TOTIME · Nuova password</title>
   <link rel="icon" href="assets/TOTIME_logo_only.svg" type="image/svg+xml" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Work+Sans:wght@400;500;600;700&display=swap" />
+  <link rel="stylesheet" href="assets/fonts.css" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -27,7 +25,7 @@
     <p class="sub authSwitch"><a href="index.html">Torna al login</a></p>
   </div></div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="vendor/supabase-js.js"></script>
   <script type="module">
     import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from './src/app-utils.js';
     const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
