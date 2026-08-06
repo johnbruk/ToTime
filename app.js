@@ -745,6 +745,27 @@ function gridDays(){
     out.push({d,iso,holiday:holidayName(iso),we:isWeekendISO(iso),off:isFerie(iso),ass:assenzaDel(iso),today:iso===t});}
   return out;
 }
+function gridWeeks(days){
+  const out=[];let cur=[];
+  for(const d of days){
+    const wd=(new Date(d.iso+'T00:00:00Z').getUTCDay()+6)%7; // 0 = lunedi
+    if(wd===0&&cur.length){out.push(cur);cur=[]}
+    cur.push(d);
+  }
+  if(cur.length)out.push(cur);
+  return out;
+}
+function gridWeekIndex(weeks){
+  if(state.gridWeekOf!==state.month){state.gridWeekOf=state.month;state.gridWeek=null}
+  if(state.gridWeek==null){
+    const t=todayISO();
+    const i=weeks.findIndex(w=>w.some(d=>d.iso===t));
+    state.gridWeek=i<0?0:i;
+  }
+  return Math.max(0,Math.min(weeks.length-1,state.gridWeek));
+}
+function gridWeekShift(n){const w=gridWeeks(gridDays());state.gridWeek=Math.max(0,Math.min(w.length-1,gridWeekIndex(w)+n));render()}
+function gridWeekLabel(w){if(!w||!w.length)return '';const a=w[0],b=w[w.length-1];return a.d===b.d?String(a.d):a.d+'\u2013'+b.d}
 function gridDayClass(x){const c=[];if(x.holiday)c.push('festivo');else if(x.we)c.push('we');if(x.off)c.push('assente');if(x.today)c.push('oggi');return c}
 function gridDayWhy(x){return [x.holiday||'',(!x.holiday&&x.we)?'weekend':'',x.ass?assenzaLabel(x.ass).toLowerCase():''].filter(Boolean).join(' · ')}
 function gridNum(v){return fmtNum(v, Number(v)%1?2:0)}
@@ -755,9 +776,13 @@ function griglia(){
   const total=rows.reduce((t,r)=>t+rowTot(r),0);
   const plannedTot=Object.values(planned).reduce((t,v)=>t+Number(v||0),0);
 
+  const weeks=gridWeeks(days);
+  const wi=gridWeekIndex(weeks);
+  const inWeek=new Set((weeks[wi]||[]).map(d=>d.iso));
+  const wk=x=>inWeek.has(x.iso)?' wk':'';
   const cells=r=>days.map(x=>{
     const items=r.items[x.iso]||[],v=Number(r.hours[x.iso]||0),locked=items.length>1;
-    const cls=['gg',...gridDayClass(x)];if(v>0)cls.push('pieno');if(locked)cls.push('bloccata');
+    const cls=['gg',...gridDayClass(x)];if(v>0)cls.push('pieno');if(locked)cls.push('bloccata');if(inWeek.has(x.iso))cls.push('wk');
     const why=gridDayWhy(x);
     const who=`${esc(clientName(r.client_id)||'senza cliente')} giorno ${x.d}`;
     if(locked)return `<td class="${cls.join(' ')}" title="${esc(items.length+' voci in questo giorno: apri il giorno per modificarle')}"><button type="button" class="gCell" onclick="openDay('${x.iso}')" aria-label="${who}, ${items.length} voci">${gridNum(v)}</button></td>`;
@@ -766,25 +791,25 @@ function griglia(){
 
   const head=days.map(x=>{
     const c=[x.holiday?'fest':x.we?'we':'',x.today?'oggi':''].filter(Boolean).join(' ');
-    return `<th class="${c}"${x.holiday?` title="${esc(x.holiday)}"`:''}>${wd[new Date(x.iso+'T00:00:00Z').getUTCDay()]}<br>${x.d}</th>`;
+    return `<th class="gg ${c}${wk(x)}"${x.holiday?` title="${esc(x.holiday)}"`:''}>${wd[new Date(x.iso+'T00:00:00Z').getUTCDay()]}<br>${x.d}</th>`;
   }).join('');
 
   const assTot=days.reduce((t,x)=>t+Number(x.ass?.h||0),0);
   const foot=days.map(x=>{
     const t=rows.reduce((a,r)=>a+Number(r.hours[x.iso]||0),0)+Number(x.ass?.h||0);
-    return `<td class="${gridDayClass(x).join(' ')}">${t>0?gridNum(t):''}</td>`;
+    return `<td class="gg ${gridDayClass(x).join(' ')}${wk(x)}">${t>0?gridNum(t):''}</td>`;
   }).join('');
 
   // Le assenze sono già segnate a calendario: qui si vedono, non si
   // riscrivono. Tenerle in due posti vorrebbe dire vederle divergere.
   const assRow=assTot>0?`<tr class="assRiga">
       <td class="riga"><div class="n">Assenze</div><div class="d">Ferie, permessi e malattia segnati a calendario</div></td>
-      ${days.map(x=>`<td class="gg ${gridDayClass(x).join(' ')}"><span class="ass"${x.ass?` title="${esc(assenzaLabel(x.ass))}"`:''}>${x.ass?gridNum(x.ass.h):''}</span></td>`).join('')}
+      ${days.map(x=>`<td class="gg ${gridDayClass(x).join(' ')}${wk(x)}"><span class="ass"${x.ass?` title="${esc(assenzaLabel(x.ass))}"`:''}>${x.ass?gridNum(x.ass.h):''}</span></td>`).join('')}
       <td class="tot">${gridNum(assTot)}</td></tr>`:'';
 
   const plannedRow=plannedTot>0?`<tr class="planRow">
       <td class="riga"><div class="n">Pianificato</div><div class="d">Incarichi continuativi sui giorni futuri · non modificabile qui</div></td>
-      ${days.map(x=>`<td class="gg ${gridDayClass(x).join(' ')}"><span class="pl">${planned[x.iso]?gridNum(planned[x.iso]):''}</span></td>`).join('')}
+      ${days.map(x=>`<td class="gg ${gridDayClass(x).join(' ')}${wk(x)}"><span class="pl">${planned[x.iso]?gridNum(planned[x.iso]):''}</span></td>`).join('')}
       <td class="tot">${gridNum(plannedTot)}</td></tr>`:'';
 
   const body=rows.length
@@ -804,8 +829,9 @@ function griglia(){
         <button type="button" class="miniBtn" onclick="go('timesheet')">☰ Passa all'elenco</button>
         <button type="button" class="primary" onclick="saveGrid()"${state.busy?' disabled':''}>${state.busy?'Salvataggio…':'Salva le modifiche'}</button>
       </div>
+      <div class="settimanaNav"><button type="button" onclick="gridWeekShift(-1)"${wi===0?' disabled':''} aria-label="Settimana precedente">‹</button><strong>${wi+1}ª settimana<span>${gridWeekLabel(weeks[wi])} ${esc(monthLabel(state.month).split(' ')[0].toLowerCase())}</span></strong><button type="button" onclick="gridWeekShift(1)"${wi>=weeks.length-1?' disabled':''} aria-label="Settimana successiva">›</button></div>
       <div class="scrollGriglia"><table class="griglia">
-        <thead><tr><th class="riga">Commessa</th>${head}<th class="tot">Tot</th></tr></thead>
+        <thead><tr><th class="riga">Commessa</th>${head}<th class="tot"><span class="totMese">Mese</span><span class="totTot">Tot</span></th></tr></thead>
         <tbody>${body}${assRow}${plannedRow}</tbody>
         <tfoot><tr><td class="riga">Totale giornata</td>${foot}<td class="tot">${gridNum(total+assTot)}</td></tr></tfoot>
       </table></div>
@@ -1177,6 +1203,7 @@ function exportData(){const blob=new Blob([JSON.stringify(data,null,2)],{type:'a
 function render(){if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,newChoice,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,timesheet,griglia,pivot,summary,billing,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,incassi,balance,taxSettings,tasseFuture,fatturatoDetail,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
 
 Object.assign(window,{
+  gridWeekShift,
   openGriglia,
   saveAssenza,
   removeAssenza,

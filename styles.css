@@ -292,3 +292,57 @@ table.griglia .assRiga td.assente span.ass{color:#fff}
 .selBar.on{top:calc(105px + env(safe-area-inset-top))}
 @media(min-width:960px){.app{padding-left:calc(48px + env(safe-area-inset-left));padding-right:calc(48px + env(safe-area-inset-right))}.selBar.on{top:0}}
 @media(max-width:430px){.app{padding-left:calc(12px + env(safe-area-inset-left));padding-right:calc(12px + env(safe-area-inset-right));padding-bottom:calc(24px + env(safe-area-inset-bottom))}}
+
+/* La griglia su telefono.
+   Trentuno colonne su 390px lasciavano tre giorni visibili: non è una
+   griglia, è una feritoia. Sotto i 720px si mostra una settimana alla
+   volta. Le altre colonne restano nel documento — così il salvataggio
+   continua a raccogliere tutto il mese in un colpo solo — ma non si
+   vedono. */
+.settimanaNav{display:none}
+@media(max-width:719px){
+  .settimanaNav{display:flex;align-items:center;justify-content:space-between;gap:8px;
+    padding:10px 12px;border-bottom:1px solid var(--line);background:var(--surface2)}
+  .settimanaNav button{width:44px;height:44px;flex:0 0 44px;border:1px solid var(--line);
+    background:var(--surface);color:var(--soft);font-size:20px;border-radius:0;box-shadow:none;padding:0}
+  .settimanaNav button[disabled]{opacity:.35}
+  .settimanaNav strong{flex:1;text-align:center;font-size:14.5px;font-weight:730;letter-spacing:-.1px;line-height:1.2}
+  .settimanaNav strong span{display:block;font-weight:500;font-size:12.5px;color:var(--muted);margin-top:2px}
+
+  table.griglia th.gg:not(.wk),table.griglia td.gg:not(.wk){display:none}
+  table.griglia .riga{min-width:118px;padding:10px 10px;position:static}
+  table.griglia thead .riga,table.griglia tfoot .riga{position:static}
+  table.griglia .riga .n{font-size:13.5px;line-height:1.2}
+  table.griglia .riga .d{font-size:11.5px;line-height:1.25;margin-top:1px}
+  table.griglia td.gg{width:auto;min-width:0}
+  table.griglia .tot{position:static;min-width:46px}
+  .scrollGriglia{overflow-x:visible}
+
+  /* I due pulsanti avevano altezze diverse, 44 contro 38: bastava
+     guardarli per vedere lo scalino. */
+  .grigliaCard .barra{flex-direction:column;align-items:stretch;gap:8px}
+  .grigliaCard .barra .miniBtn,.grigliaCard .barra .primary{width:100%;min-height:46px;height:46px;
+    justify-content:center;margin:0;padding:0 14px;font-size:14.5px}
+
+  /* I tre selettori si disponevano a caso, e il pulsante finiva a fianco
+     dell'ultimo. In colonna si legge cosa si sta scegliendo. */
+  .grigliaCard .nuovaRiga{flex-direction:column;align-items:stretch;gap:8px}
+  .grigliaCard .nuovaRiga select,.grigliaCard .nuovaRiga .miniBtn{width:100%;min-width:0;
+    min-height:46px;justify-content:center}
+}
+@media(max-width:380px){
+  table.griglia .riga{min-width:104px;padding:9px 8px}
+  table.griglia th.gg,table.griglia td.gg{font-size:12px}
+}
+.totMese{display:none}
+@media(max-width:719px){
+  /* Su telefono si vede una settimana per volta, ma la colonna dei totali
+     continua a contare il mese: dirlo evita di leggere un numero che non
+     torna con le celle sotto gli occhi. */
+  .totMese{display:inline}
+  .totTot{display:none}
+  /* Con cinque colonne al posto di trentuno le celle vuote sparivano:
+     serve un confine che dica dove finisce un giorno e comincia l'altro. */
+  table.griglia td.gg,table.griglia th.gg{border-left:1px solid var(--line)}
+  table.griglia td.gg input{min-width:0}
+}

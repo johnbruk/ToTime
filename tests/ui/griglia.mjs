@@ -107,17 +107,21 @@ console.log('\n=== I. Mobile e accessibilità ===');
 const pgm=await b.newPage({viewport:{width:390,height:844},deviceScaleFactor:2});
 pgm.on('pageerror',e=>errs.push('PAGEERROR(mobile): '+e.message));
 await pgm.goto(base,{waitUntil:'networkidle'});await pgm.waitForTimeout(600);
-await pgm.evaluate(()=>window.go('griglia'));await pgm.waitForTimeout(500);
 await goJuly(pgm);
+await pgm.evaluate(()=>window.go('griglia'));await pgm.waitForTimeout(500);
 ok(await pgm.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth+1),'nessuno scroll orizzontale di pagina');
-ok(await pgm.evaluate(()=>{const s=document.querySelector('.scrollGriglia');return s.scrollWidth>s.clientWidth}),'la griglia scorre dentro il suo contenitore');
-ok(await pgm.evaluate(()=>[...document.querySelectorAll('td.gg input')].every(i=>i.getBoundingClientRect().height>=44)),'celle alte almeno 44px');
+ok(await pgm.evaluate(()=>{const s=document.querySelector('.scrollGriglia');return s.scrollWidth<=s.clientWidth+1}),'la griglia ci sta senza scorrere: niente più feritoia da tre giorni');
+ok(await pgm.evaluate(()=>[...document.querySelectorAll('td.gg input')].filter(i=>i.offsetParent!==null).every(i=>i.getBoundingClientRect().height>=44)),'le celle visibili sono alte almeno 44px');
 ok(await pgm.evaluate(()=>[...document.querySelectorAll('td.gg input')].every(i=>i.getAttribute('aria-label'))),'ogni cella ha un\'etichetta accessibile');
-ok(await pgm.evaluate(()=>getComputedStyle(document.querySelector('table.griglia .riga')).position==='sticky'),'la colonna commessa resta ferma mentre scorri');
-await pgm.screenshot({path:path.join(OUT,'griglia-mobile.png')});
 await pgm.close();
-await pg.evaluate(()=>window.go('griglia'));await pg.waitForTimeout(400);
-await pg.screenshot({path:path.join(OUT,'griglia-desktop.png')});
+const pgd=await b.newPage({viewport:{width:1280,height:900}});
+await pgd.goto(base,{waitUntil:'networkidle'});await pgd.waitForTimeout(600);
+await goJuly(pgd);
+await pgd.evaluate(()=>window.go('griglia'));await pgd.waitForTimeout(500);
+ok(await pgd.evaluate(()=>document.querySelectorAll('table.griglia thead th.gg').length===31),'su schermo grande restano tutti e 31 i giorni');
+ok(await pgd.evaluate(()=>getComputedStyle(document.querySelector('table.griglia .riga')).position==='sticky'),'e la colonna commessa resta ferma mentre si scorre');
+ok(await pgd.evaluate(()=>getComputedStyle(document.querySelector('.settimanaNav')).display==='none'),'la navigazione per settimana non compare dove non serve');
+await pgd.close();
 
 console.log('\n=== J. Nuovo consuntivo: solo giornaliero, mensile e una tantum ===');
 await pg.evaluate(()=>window.go('newChoice'));await pg.waitForTimeout(350);
@@ -153,6 +157,51 @@ await pg.waitForTimeout(350);
 await pg.evaluate(()=>{const b=[...document.querySelectorAll('.menuBtn')].find(x=>/Consuntivo mensile/.test(x.textContent));b&&b.click()});
 await pg.waitForTimeout(500);
 ok((await pg.evaluate(()=>document.querySelector('.month strong')?.textContent||'')).startsWith('Maggio 2026'),'aperto da un giorno, si posiziona sul suo mese',await pg.evaluate(()=>document.querySelector('.month strong')?.textContent.trim()));
+
+console.log('\n=== L. La griglia su telefono: una settimana per volta ===');
+const pgw=await b.newPage({viewport:{width:390,height:844},deviceScaleFactor:2});
+pgw.on('pageerror',e=>errs.push('PAGEERROR(mobile): '+e.message));
+pgw.on('dialog',async d=>{await d.accept()});
+await pgw.goto(base,{waitUntil:'networkidle'});await pgw.waitForTimeout(600);
+await goJuly(pgw);
+await pgw.evaluate(()=>window.go('griglia'));await pgw.waitForTimeout(500);
+const vis=()=>pgw.evaluate(()=>[...document.querySelectorAll('table.griglia thead th.gg')].filter(t=>t.offsetParent!==null).map(t=>t.textContent.trim()));
+let v=await vis();
+console.log('  colonne visibili:',JSON.stringify(v));
+ok(v.length<=7,'al massimo sette colonne di giorno',v.length+' colonne');
+ok(await pgw.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth+1),'nessuno scroll orizzontale di pagina');
+ok(await pgw.evaluate(()=>{const s=document.querySelector('.scrollGriglia');return s.scrollWidth<=s.clientWidth+1}),'e nemmeno dentro la griglia: ci sta tutto');
+ok(await pgw.evaluate(()=>getComputedStyle(document.querySelector('.settimanaNav')).display!=='none'),'compare la navigazione per settimana');
+ok(await pgw.evaluate(()=>{const t=[...document.querySelectorAll('.tot')][0];return /Mese/.test(t.textContent)}),'la colonna dei totali dice "Mese", perché conta più della settimana mostrata');
+const alt=await pgw.evaluate(()=>[...document.querySelectorAll('.grigliaCard .barra button')].map(b=>Math.round(b.getBoundingClientRect().height)));
+ok(new Set(alt).size===1&&alt[0]>=44,'i due pulsanti hanno la stessa altezza',JSON.stringify(alt));
+const selH=await pgw.evaluate(()=>[...document.querySelectorAll('.nuovaRiga select,.nuovaRiga button')].map(e=>Math.round(e.getBoundingClientRect().width)));
+ok(new Set(selH).size===1,'i selettori sono incolonnati e larghi uguale',JSON.stringify(selH));
+
+await pgw.evaluate(()=>window.gridWeekShift(1));await pgw.waitForTimeout(400);
+const v2=await vis();
+console.log('  seconda settimana:',JSON.stringify(v2));
+ok(v2.length===7&&v2[0]!==v[0],'la freccia cambia settimana',v2[0]);
+ok(/2ª settimana/.test(await pgw.evaluate(()=>document.querySelector('.settimanaNav strong')?.textContent||'')),'e l\'indicazione si aggiorna');
+
+console.log('\n=== M. Il salvataggio continua a coprire tutto il mese ===');
+// il rischio dell\'approccio: le colonne fuori settimana sono nascoste, non
+// rimosse. Se il salvataggio le perdesse, si perderebbero dati.
+const primaM=await pgw.evaluate(()=>window.__stores.timesheet_entries.length);
+const fuori=await pgw.evaluate(()=>{
+  const el=document.querySelector('input[data-row="c1|p1|a1"][data-day="2026-07-28"]');
+  if(!el)return 'cella assente';
+  const nascosta=el.offsetParent===null;
+  el.value='7';
+  return nascosta?'nascosta':'visibile';
+});
+ok(fuori==='nascosta','la cella del 28 luglio è fuori dalla settimana mostrata',fuori);
+await pgw.evaluate(()=>window.saveGrid());await pgw.waitForTimeout(1300);
+const creata=await pgw.evaluate(()=>window.__stores.timesheet_entries.find(e=>e.entry_date==='2026-07-28'));
+ok(!!creata&&Number(creata.hours)===7,'viene salvata lo stesso: nessun dato perso fuori dalla settimana',JSON.stringify(creata&&creata.hours));
+ok(await pgw.evaluate(()=>window.__stores.timesheet_entries.length)===primaM+1,'ed è una sola voce in più');
+await pgw.screenshot({path:path.join(OUT,'griglia-mobile.png'),fullPage:true});
+await pgw.close();
 
 await b.close();server.close();
 console.log('\n'+(errs.length?('ERRORI JS:\n'+errs.join('\n')):'✓ nessun errore JS'));
