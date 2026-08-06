@@ -745,6 +745,12 @@ function gridDays(){
     out.push({d,iso,holiday:holidayName(iso),we:isWeekendISO(iso),off:isFerie(iso),ass:assenzaDel(iso),today:iso===t});}
   return out;
 }
+function gridScope(){
+  const v=settingValue('grid_scope');
+  if(v==='week'||v==='month')return v;
+  return (typeof window!=='undefined'&&window.innerWidth<720)?'week':'month';
+}
+async function setGridScope(v){const r=await saveSetting('grid_scope',v);if(r.error)return setMsg(r.error.message,7000);await reload();render()}
 function gridWeeks(days){
   const out=[];let cur=[];
   for(const d of days){
@@ -776,6 +782,7 @@ function griglia(){
   const total=rows.reduce((t,r)=>t+rowTot(r),0);
   const plannedTot=Object.values(planned).reduce((t,v)=>t+Number(v||0),0);
 
+  const scope=gridScope();
   const weeks=gridWeeks(days);
   const wi=gridWeekIndex(weeks);
   const inWeek=new Set((weeks[wi]||[]).map(d=>d.iso));
@@ -824,11 +831,12 @@ function griglia(){
   return appShell(`<h1>Consuntivo mensile</h1>
     <p class="sub">Una riga per commessa, una colonna per giorno. Si compila con la tastiera — Tab per il giorno dopo — e si salva una volta sola.</p>
     ${monthSelector()}
-    <div class="card grigliaCard">
+    <div class="card grigliaCard" data-scope="${scope}">
       <div class="barra">
         <button type="button" class="miniBtn" onclick="go('timesheet')">☰ Passa all'elenco</button>
         <button type="button" class="primary" onclick="saveGrid()"${state.busy?' disabled':''}>${state.busy?'Salvataggio…':'Salva le modifiche'}</button>
       </div>
+      <div class="scopeNav"><span class="scopeLbl">Vista</span><div class="tabs"><button type="button" class="${scope==='week'?'active':''}" onclick="setGridScope('week')">Settimana</button><button type="button" class="${scope==='month'?'active':''}" onclick="setGridScope('month')">Mese intero</button></div></div>
       <div class="settimanaNav"><button type="button" onclick="gridWeekShift(-1)"${wi===0?' disabled':''} aria-label="Settimana precedente">‹</button><strong>${wi+1}ª settimana<span>${gridWeekLabel(weeks[wi])} ${esc(monthLabel(state.month).split(' ')[0].toLowerCase())}</span></strong><button type="button" onclick="gridWeekShift(1)"${wi>=weeks.length-1?' disabled':''} aria-label="Settimana successiva">›</button></div>
       <div class="scrollGriglia"><table class="griglia">
         <thead><tr><th class="riga">Commessa</th>${head}<th class="tot"><span class="totMese">Mese</span><span class="totTot">Tot</span></th></tr></thead>
@@ -1203,6 +1211,7 @@ function exportData(){const blob=new Blob([JSON.stringify(data,null,2)],{type:'a
 function render(){if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,newChoice,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,timesheet,griglia,pivot,summary,billing,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,incassi,balance,taxSettings,tasseFuture,fatturatoDetail,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
 
 Object.assign(window,{
+  setGridScope,
   gridWeekShift,
   openGriglia,
   saveAssenza,
