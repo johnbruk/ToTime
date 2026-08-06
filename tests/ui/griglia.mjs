@@ -203,6 +203,45 @@ ok(await pgw.evaluate(()=>window.__stores.timesheet_entries.length)===primaM+1,'
 await pgw.screenshot({path:path.join(OUT,'griglia-mobile.png'),fullPage:true});
 await pgw.close();
 
+console.log("\n=== N. Settimana o mese: sceglie l'utente, non la larghezza ===");
+const conta=pp=>pp.evaluate(()=>[...document.querySelectorAll('table.griglia thead th.gg')].filter(t=>t.offsetParent!==null).length);
+// desktop: di suo mostra il mese
+const pgD=await b.newPage({viewport:{width:1280,height:900}});
+pgD.on('pageerror',e=>errs.push('PAGEERROR(scope): '+e.message));
+await pgD.goto(base,{waitUntil:'networkidle'});await pgD.waitForTimeout(600);
+await goJuly(pgD);
+await pgD.evaluate(()=>window.go('griglia'));await pgD.waitForTimeout(500);
+ok(await conta(pgD)===31,'su desktop parte con il mese intero',String(await conta(pgD)));
+ok(await pgD.evaluate(()=>!!document.querySelector('.scopeNav')),'il comando Vista è presente');
+ok(await pgD.evaluate(()=>{const b=[...document.querySelectorAll('.scopeNav button')];return b[1]&&b[1].classList.contains('active')}),'ed è su "Mese intero"');
+// scelgo la settimana anche su desktop
+await pgD.evaluate(()=>window.setGridScope('week'));await pgD.waitForTimeout(900);
+ok(await conta(pgD)<=7,'scegliendo Settimana, anche su desktop si vede la settimana',String(await conta(pgD)));
+// e la scelta resta cambiando pagina
+await pgD.evaluate(()=>window.go('timesheet'));await pgD.waitForTimeout(300);
+await pgD.evaluate(()=>window.go('griglia'));await pgD.waitForTimeout(500);
+ok(await conta(pgD)<=7,'la scelta è ricordata');
+ok(await pgD.evaluate(()=>window.__stores.app_settings.some(s=>s.setting_key==='grid_scope'&&s.setting_value==='week')),'ed è salvata come impostazione');
+// torno al mese: è la richiesta di partenza
+await pgD.evaluate(()=>window.setGridScope('month'));await pgD.waitForTimeout(900);
+ok(await conta(pgD)===31,'tornando a Mese intero si rivedono tutti e 31 i giorni',String(await conta(pgD)));
+await pgD.close();
+
+// telefono: parte con la settimana ma può chiedere il mese
+const pgW=await b.newPage({viewport:{width:390,height:844}});
+pgW.on('pageerror',e=>errs.push('PAGEERROR(scope mobile): '+e.message));
+await pgW.goto(base,{waitUntil:'networkidle'});await pgW.waitForTimeout(600);
+await goJuly(pgW);
+await pgW.evaluate(()=>window.go('griglia'));await pgW.waitForTimeout(500);
+ok(await conta(pgW)<=7,'su telefono parte dalla settimana',String(await conta(pgW)));
+await pgW.evaluate(()=>window.setGridScope('month'));await pgW.waitForTimeout(900);
+ok(await conta(pgW)===31,'ma chiedendo il mese intero lo ottiene anche a 390px',String(await conta(pgW)));
+ok(await pgW.evaluate(()=>{const s=document.querySelector('.scrollGriglia');return s.scrollWidth>s.clientWidth}),'lì il mese si scorre lateralmente, come su desktop');
+await pgW.evaluate(()=>window.setGridScope('week'));await pgW.waitForTimeout(900);
+ok(await conta(pgW)<=7,'e si torna alla settimana quando serve',String(await conta(pgW)));
+ok(await pgW.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth+1),'senza scroll orizzontale di pagina');
+await pgW.close();
+
 await b.close();server.close();
 console.log('\n'+(errs.length?('ERRORI JS:\n'+errs.join('\n')):'✓ nessun errore JS'));
 console.log(`RISULTATO: ${pass} OK / ${fail} KO`);
