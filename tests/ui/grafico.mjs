@@ -124,6 +124,25 @@ const senzaPlan=await pg.evaluate(()=>({
 ok(senzaPlan.c,'un anno senza dati non rompe il grafico');
 ok(senzaPlan.leg===1,'e senza pianificato la legenda mostra una sola serie',senzaPlan.leg+' voce');
 
+console.log('\n=== F. L\'asse dei valori ===');
+const asse=await pg.evaluate(()=>{
+  const casi=[0,480,660,1200,1740,5700,20917,85000];
+  return casi.map(v=>{const m=window.niceMax(v);
+    return {v,m,alto:window.fmtAxis(m),mezzo:window.fmtAxis(m/2),uso:v>0?v/m:1}})});
+const doppie=asse.filter(a=>a.alto===a.mezzo&&a.v>0);
+ok(doppie.length===0,'l\'asse non ripete mai due volte la stessa etichetta',
+  doppie.map(d=>d.alto).join(' ')||asse.map(a=>a.alto).join(' '));
+const stretti=asse.filter(a=>a.uso<0.6);
+ok(stretti.length===0,'il massimo dell\'asse non spreca altezza',
+  stretti.map(s=>s.v+'/'+s.m).join(' ')||'dal '+Math.round(Math.min(...asse.map(a=>a.uso))*100)+'% in su');
+ok(asse.every(a=>a.m>=a.v),'e non taglia mai il valore più alto');
+// a mese vuoto l'asse diceva «1 € / 1 € / 0»
+await pg.evaluate(()=>{window.openMonthTimesheet(2024,5);window.go('timesheet')});
+await pg.waitForTimeout(350);
+const vuoto=await pg.evaluate(()=>[...document.querySelectorAll('.lineChartY span')].map(e=>e.textContent));
+ok(new Set(vuoto.filter(Boolean)).size===vuoto.filter(Boolean).length,
+  'anche su un mese senza dati non ci sono etichette ripetute','['+vuoto.join('] [')+']');
+
 await b.close();server.close();
 console.log('\n'+(errs.length?('ERRORI JS:\n'+errs.join('\n')):'✓ nessun errore JS'));
 console.log(`RISULTATO: ${pass} OK / ${fail} KO`);

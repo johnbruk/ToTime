@@ -258,6 +258,20 @@ async function signUpDetailed(ev){
 async function logout(){await sb.auth.signOut()}
 
 function monthSeries(){const {year,month}=periodParts();const last=new Date(year,month,0).getDate();const daily=Array(last).fill(0);rowsForMonth().forEach(e=>{if(isPlanned(e))return;const d=Number(String(e.entry_date).slice(8,10));if(d>=1&&d<=last)daily[d-1]+=dailyAmount(e)});manualRows().forEach(e=>{if(isPlanned(e))return;const d=Number(String(e.entry_date).slice(8,10));if(d>=1&&d<=last)daily[d-1]+=Number(e.amount||0)});expenseRows().forEach(e=>{const d=Number(String(e.expense_date).slice(8,10));if(d>=1&&d<=last)daily[d-1]+=Number(e.amount||0)});let cum=0;return daily.map(v=>cum+=v)}
+// L'asse dei grafici finiva su numeri arbitrari («1,7k €», «870 €») e a
+// mese vuoto ripeteva due volte «1 €». Qui il massimo sale al primo
+// numero tondo utile, con passi fitti per non sprecare altezza.
+function niceMax(v){v=Number(v)||0;if(v<=0)return 1;
+  const e=Math.pow(10,Math.floor(Math.log10(v)));const n=v/e;
+  const p=[1,1.5,2,2.5,3,4,5,6,8,10];
+  return (p.find(x=>n<=x+1e-9)||10)*e}
+// Le migliaia con un decimale solo quando serve davvero: la tacca a
+// 12.500 non deve leggersi «13k».
+function fmtAxis(n){n=Number(n)||0;const a=Math.abs(n);
+  if(a>=1000){const v=n/1000;return (Number.isInteger(v)?String(v):v.toFixed(1)).replace('.',',')+'k €'}
+  return Math.round(n)+' €'}
+function axisY(max){const alto=fmtAxis(max),mezzo=fmtAxis(max/2);
+  return '<div class="lineChartY"><span>'+alto+'</span><span>'+(mezzo===alto?'':mezzo)+'</span><span>0</span></div>'}
 function fmtK(n){n=Number(n)||0;const a=Math.abs(n);if(a>=1000)return (n/1000).toFixed(a>=10000?0:1).replace('.',',')+'k €';return Math.round(n)+' €'}
 function homeMultiChart(){
   const year=currentYear();const md=annualMonthData(year);const net=netMarginByMonth(year);
@@ -267,13 +281,13 @@ function homeMultiChart(){
   const per=md.map(m=>{const forfait=m.compensi*coeff;const inps=forfait*gsRate;const imposta=Math.max(0,forfait-inps)*taxRate;const tasse=inps+imposta;const spese=(m.costi||0)+(m.rimborsiFattura||0);const netto=m.consuntivato-tasse-spese;return {netto,tasse,spese,cons:m.consuntivato};});
   const cum=sel=>{let s=0;return per.map(p=>s+=sel(p));};
   const cNet=cum(p=>p.netto),cTax=cum(p=>p.tasse),cExp=cum(p=>p.spese),cCons=cum(p=>p.cons);
-  const max=Math.max(1,...cCons.slice(0,actualEnd+1));
+  const max=niceMax(Math.max(...cCons.slice(0,actualEnd+1)));
   const X=i=>(i/11*100).toFixed(1);const Y=v=>(52-(Math.max(0,v)/max)*46).toFixed(1);
   const upTax=cNet.map((v,i)=>v+cTax[i]);const zeros=cNet.map(()=>0);
   const area=(lower,upper,color)=>{const top=[];const bot=[];for(let i=0;i<=actualEnd;i++)top.push(`${X(i)},${Y(upper[i])}`);for(let i=actualEnd;i>=0;i--)bot.push(`${X(i)},${Y(lower[i])}`);return `<polygon points="${top.concat(bot).join(' ')}" style="fill:${color};stroke:none"></polygon>`;};
   const bands=area(zeros,cNet,'#3FB27F')+area(cNet,upTax,'#F7A647')+area(upTax,cCons,'#94A2BE');
   const legend=`<div class="segLegend"><span class="li"><span class="sdot" style="background:transparent;border:1.5px solid var(--muted)"></span>Consuntivato · ${fmtEUR(cCons[actualEnd])}</span><span class="li"><span class="sdot" style="background:#3FB27F"></span>Netto · ${fmtEUR(cNet[actualEnd])}</span><span class="li"><span class="sdot" style="background:#F7A647"></span>Tasse · ${fmtEUR(cTax[actualEnd])}</span><span class="li"><span class="sdot" style="background:#94A2BE"></span>Spese · ${fmtEUR(cExp[actualEnd])}</span></div>`;
-  return `<div class="card"><b>Composizione del consuntivato ${year}</b><div class="desc" style="margin-top:2px">Il consuntivato cumulato ripartito in netto (dopo spese e tasse) + tasse + spese</div><div class="lineChartWrap" style="margin-top:14px"><div class="lineChartY"><span>${fmtK(max)}</span><span>${fmtK(max/2)}</span><span>0</span></div><div class="lineChartCol"><svg class="lineChart" viewBox="0 0 100 58" preserveAspectRatio="none"><line x1="0" y1="6" x2="100" y2="6"></line><line x1="0" y1="52" x2="100" y2="52"></line>${bands}</svg></div></div><div class="chartMonths" style="padding-left:58px">${monthNames.map((m,i)=>`<span class="${i>actualEnd?'future':''}">${m.slice(0,3)}</span>`).join('')}</div>${legend}</div>`;
+  return `<div class="card"><b>Composizione del consuntivato ${year}</b><div class="desc" style="margin-top:2px">Il consuntivato cumulato ripartito in netto (dopo spese e tasse) + tasse + spese</div><div class="lineChartWrap" style="margin-top:14px">${axisY(max)}<div class="lineChartCol"><svg class="lineChart" viewBox="0 0 100 58" preserveAspectRatio="none"><line x1="0" y1="6" x2="100" y2="6"></line><line x1="0" y1="52" x2="100" y2="52"></line>${bands}</svg></div></div><div class="chartMonths" style="padding-left:58px">${monthNames.map((m,i)=>`<span class="${i>actualEnd?'future':''}">${m.slice(0,3)}</span>`).join('')}</div>${legend}</div>`;
 }
 function annualChartSvg(){
   const year=currentYear();const md=annualMonthData(year);
@@ -284,7 +298,7 @@ function annualChartSvg(){
   const plan=md.map(m=>Number(m.pianificato||0));
   const totCons=cons.reduce((a,b)=>a+b,0);const totPlan=plan.reduce((a,b)=>a+b,0);
   const hasPlan=totPlan>0.005;
-  const max=Math.max(1,...cons,...plan);
+  const max=niceMax(Math.max(...cons,...plan));
   const X=i=>(i/11*100).toFixed(2);const Y=v=>(52-(Math.max(0,v)/max)*46).toFixed(2);
   const pts=(arr,da,a)=>{const o=[];for(let i=da;i<=a;i++)o.push(X(i)+','+Y(arr[i]));return o.join(' ')};
   const consPts=actualEnd>=0?pts(cons,0,actualEnd):'';
@@ -304,7 +318,7 @@ function annualChartSvg(){
     +'</span></span>').join('');
   const legend='<div class="segLegend" style="margin-top:10px"><span class="li"><span class="sdot" style="background:var(--cCons)"></span>Consuntivato · '+fmtEUR(totCons)+'</span>'
     +(hasPlan?'<span class="li"><span class="sdot" style="background:var(--cPlan)"></span>Pianificato · '+fmtEUR(totPlan)+'</span>':'')+'</div>';
-  return '<div class="annualChartBox"><div class="lineChartWrap"><div class="lineChartY"><span>'+fmtK(max)+'</span><span>'+fmtK(max/2)+'</span><span>0</span></div>'
+  return '<div class="annualChartBox"><div class="lineChartWrap">'+axisY(max)+''
     +'<div class="lineChartCol chPlot"><svg class="lineChart" viewBox="0 0 100 58" preserveAspectRatio="none">'
     +'<line x1="0" y1="6" x2="100" y2="6"></line><line x1="0" y1="29" x2="100" y2="29"></line><line x1="0" y1="52" x2="100" y2="52"></line>'
     +(planPts?'<polyline class="pPlan" points="'+planPts+'" vector-effect="non-scaling-stroke"></polyline>':'')
@@ -312,7 +326,7 @@ function annualChartSvg(){
     +'</svg><div class="chDots">'+dots+'</div><div class="chHit">'+hit+'</div></div></div>'
     +'<div class="chartMonths" style="padding-left:58px">'+monthNames.map((m,i)=>'<span class="'+(i>actualEnd&&!(hasPlan&&plan[i]>0)?'future':'')+'">'+m.slice(0,3)+'</span>').join('')+'</div>'+legend+'</div>';
 }
-function monthChartSvg(){const series=monthSeries();const max=Math.max(...series,1);const pts=series.map((v,i)=>`${(i/(series.length-1||1))*100},${52-(v/max)*46}`).join(' ');return `<div class="lineChartWrap"><div class="lineChartY"><span>${fmtK(max)}</span><span>${fmtK(max/2)}</span><span>0</span></div><div class="lineChartCol"><svg class="lineChart" viewBox="0 0 100 58" preserveAspectRatio="none"><line x1="0" y1="52" x2="100" y2="52"></line><line x1="0" y1="30" x2="100" y2="30"></line><polyline points="${pts}"></polyline></svg></div></div>`}
+function monthChartSvg(){const series=monthSeries();const max=niceMax(Math.max(...series));const pts=series.map((v,i)=>`${(i/(series.length-1||1))*100},${52-(v/max)*46}`).join(' ');return `<div class="lineChartWrap">${axisY(max)}<div class="lineChartCol"><svg class="lineChart" viewBox="0 0 100 58" preserveAspectRatio="none"><line x1="0" y1="52" x2="100" y2="52"></line><line x1="0" y1="30" x2="100" y2="30"></line><polyline points="${pts}"></polyline></svg></div></div>`}
 function homeIncassiCard(){const yr=currentYear();const cur=annualTotals(yr);const daIncassare=Math.max(0,cur.fatturato-cur.incassato);return `<div class="card cardLink" onclick="openAnnualInvoices('collected')" role="button" title="Elenco incassi ${yr}"><b>I tuoi incassi ${yr} <span class="cardLinkArrow">›</span></b><div class="statRow"><div class="stat tint-sage"><div class="statHead"><span class="statDot"></span><span class="statLbl">Incassato</span></div><strong>${fmtEUR(cur.incassato)}</strong></div><div class="stat tint-pink"><div class="statHead"><span class="statDot"></span><span class="statLbl">Da incassare</span></div><strong>${fmtEUR(daIncassare)}</strong></div></div></div>`}
 function forfettarioBarCard(){const yr=currentYear();const ts=currentTaxSetting(yr);const limit=Number(ts.annual_revenue_limit||85000);const incassato=annualTotals(yr).incassato;const pct=limit?Math.min(100,(incassato/limit)*100):0;const remaining=Math.max(0,limit-incassato);const over=incassato>limit;const color=over?'#D9534F':pct>=90?'#D9534F':pct>=70?'#E0A24E':'var(--primary)';return `<div class="card"><div class="threshVals"><strong>${fmtEUR(incassato)}</strong> <span class="threshLimit">/ ${fmtEUR(limit)}</span></div><div class="threshBar"><span style="width:${pct.toFixed(1)}%;background:${color}"></span></div><div class="threshNote">${over?`Hai superato il limite del regime forfettario di <b>${fmtEUR(incassato-limit)}</b>.`:`Puoi incassare ancora <b>${fmtEUR(remaining)}</b> quest'anno per non superare il limite del regime forfettario.`}</div></div>`}
 function homeFatturatoCard(){const yr=currentYear();const cur=annualTotals(yr);const daFatturare=cur.daFatturare;return `<div class="card cardLink" onclick="go('fatturatoDetail')" role="button" title="Come si calcolano fatturato e da fatturare"><b>Il tuo fatturato ${yr} <span class="cardLinkArrow">›</span></b><div class="statRow"><div class="stat tint-blue"><div class="statHead"><span class="statDot"></span><span class="statLbl">Fatturato</span></div><strong>${fmtEUR(cur.fatturato)}</strong></div><div class="stat tint-orange"><div class="statHead"><span class="statDot"></span><span class="statLbl">Da fatturare</span></div><strong>${fmtEUR(daFatturare)}</strong></div></div><div class="small" style="margin-top:10px">Imponibile fatturato ${fmtEUR(cur.fatturatoBase)}</div></div>`}
@@ -1174,7 +1188,7 @@ function settings(){const email=esc(session?.user?.email||'');return appShell(`<
 <h2>Anagrafiche</h2><div class="list">${settingsRow('clients','👤','Clienti','Tariffe e tipo compenso')}${settingsRow('projects','📁','Progetti / Clienti finali','Collegati al cliente principale')}${settingsRow('activities','🏷️','Attività','PM, AMS, Gestione...')}${settingsRow('expenseCategories','🧾','Voci di costo / spesa','Rimborsabili e non rimborsabili')}</div>
 <h2>Fatturazione e fisco</h2><div class="list">${settingsRow('invoiceTemplates','📄','Template fattura','Descrizioni da copiare su Fiscozen')}${settingsRow('taxSettings','%','Configurazione fiscale','Forfettario, ATECO, aliquote e proiezione')}${settingsRow('taxPayments','◈','Pagamenti fiscali','Contributi INPS e versamenti')}</div>
 <h2>Analisi e dati</h2><div class="list">${settingsRow('exportTimesheet','⬇','Export Timesheet Excel','Scarica il dettaglio mensile')}<label class="row" style="cursor:pointer"><div class="roundIcon blue">⬆</div><div><div class="title">Importa da CSV</div><div class="desc">Consuntivi in blocco</div></div><div>›</div><input type="file" accept=".csv,text/csv" style="display:none" onchange="importCsv(event)"></label></div>
-<h2>App</h2><div class="list">${settingsRow('appearance','◐','Aspetto / Tema','Chiaro o scuro')}<div class="row"><div class="roundIcon blue">☁</div><div><div class="title">Database</div><div class="desc">Supabase PostgreSQL · ${email}</div></div><div></div></div></div>
+<h2>App</h2><div class="list">${settingsRow('appearance','◐','Aspetto / Tema','Chiaro o scuro')}<div class="row"><div class="roundIcon blue">☁</div><div><div class="title">Database</div><div class="desc">Supabase PostgreSQL${email?' · '+email:''}</div></div><div></div></div></div>
 <div class="grid" style="margin-top:16px"><button class="secondary" onclick="reload()">Ricarica dati</button><button class="secondary danger" onclick="logout()">Esci</button></div>`)}
 
 function appearance(){return appShell(`<div class="screenTitle">Aspetto / Tema</div><p class="sub">Scegli il template grafico da usare su telefono e PC.</p><div class="card"><div class="themeChoice"><button class="${state.theme==='light'?'active':''}" onclick="saveThemeChoice('light')"><b>Chiaro / Giorno</b><span>sfondo chiaro, card bianche, ideale per uso diurno</span></button><button class="${state.theme==='dark'?'active':''}" onclick="saveThemeChoice('dark')"><b>Scuro / Sera</b><span>sfondo navy, card scure, ideale per smartphone e sera</span></button><button class="${state.theme==='auto'?'active':''}" onclick="saveThemeChoice('auto')"><b>Automatico di sistema</b><span>segue l'impostazione del dispositivo: ora attivo il tema ${systemTheme()==='dark'?'scuro':'chiaro'}</span></button></div></div><button class="secondary" onclick="go('settings')">Indietro</button>`)}
@@ -1350,7 +1364,7 @@ Object.assign(window,{
   signUpDetailed,
   logout,
   monthSeries,
-  annualChartSvg,
+  annualChartSvg,niceMax,fmtAxis,
   monthChartSvg,
   homeIncassiCard,
   homeFatturatoCard,

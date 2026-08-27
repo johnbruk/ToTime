@@ -492,7 +492,9 @@ table.griglia th,table.griglia td{font-size:var(--t-sm)}
   /* margini automatici: con margin:0 il contenuto si incollava a
      sinistra invece di stare al centro dell'area di lettura */
   .app{max-width:1120px;margin-left:auto;margin-right:auto}
-  .primary.cta{max-width:340px}
+  /* stesso errore dell'area di lettura: larghezza limitata ma senza
+     margini automatici, quindi restava incollato a sinistra */
+  .primary.cta{max-width:340px;margin-left:auto;margin-right:auto}
   /* la griglia del mese però vuole tutta la larghezza disponibile:
      trentun colonne non stanno in millecentoventi pixel */
   :root[data-view="griglia"] .app{max-width:none}
@@ -534,3 +536,18 @@ table.griglia th,table.griglia td{font-size:var(--t-sm)}
 .chHit .tip i.dP{border-radius:2px}
 .chHit>span:nth-child(-n+2) .tip{left:0;transform:none}
 .chHit>span:nth-last-child(-n+2) .tip{left:auto;right:0;transform:none}
+
+/* Le tre voci di «Nuovo consuntivo» ereditavano justify-content:center
+   dalla regola che condividono con i pulsanti principali: su telefono
+   non si notava, su desktop il testo finiva in mezzo e la freccia gli
+   restava appiccicata invece di stare al margine destro. */
+.menuBtn{justify-content:space-between;text-align:left;gap:var(--sp-3)}
+.menuBtn>span:first-child{flex:1 1 auto;min-width:0}
+.menuBtn>span:last-child{flex:0 0 auto;color:var(--muted);font-size:var(--t-lg);font-weight:var(--w-reg)}
+.menuBtn .sub{display:inline-block;margin-top:2px}
+
+/* Su desktop un campo data largo mille pixel non si legge e non si usa:
+   i moduli stanno in una colonna della larghezza di una riga di testo. */
+@media(min-width:960px){
+  .form,.form+.actions,form.form>.actions{max-width:620px}
+}
