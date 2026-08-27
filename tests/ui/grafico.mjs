@@ -15,6 +15,7 @@ const TARIFFA=480, STD=8;
 const righe=[];
 ORE.forEach((h,i)=>{if(h)righe.push(`{id:'r${i}',entry_date:'2026-${String(i+1).padStart(2,'0')}-10',client_id:'c1',project_id:'p1',activity_id:'a1',hours:${h},daily_rate_snapshot:${TARIFFA},standard_hours_snapshot:${STD}}`)});
 PIAN.forEach((h,i)=>{if(h)righe.push(`{id:'q${i}',entry_date:'2026-${String(i+1).padStart(2,'0')}-25',client_id:'c1',project_id:'p2',activity_id:'a1',hours:${h},status:'planned',tm_batch_id:'tm_x',daily_rate_snapshot:${TARIFFA},standard_hours_snapshot:${STD}}`)});
+const monthNames=['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const attesoCons=ORE.map(h=>h*TARIFFA/STD);
 const attesoPian=PIAN.map(h=>h*TARIFFA/STD);
 
@@ -80,6 +81,19 @@ ok(/none|^$/.test(stile.cons)&&/\d/.test(stile.plan),'il consuntivato è continu
 ok(stile.rC!==stile.rP,'i punti hanno forme diverse: tondi e quadrati',stile.rC+' vs '+stile.rP);
 ok(stile.legenda===2,'la legenda nomina entrambe le serie',stile.legenda+' voci');
 ok(stile.dotC===8&&stile.dotP===5,'un punto per ogni mese con un valore',stile.dotC+' consuntivati · '+stile.dotP+' pianificati');
+
+// La riga del pianificato non deve strisciare sullo zero da gennaio:
+// parte dal primo mese in cui c'è davvero qualcosa (agosto, indice 7)
+// e finisce sull'ultimo (dicembre, indice 11).
+const planX=await pg.evaluate(()=>{const p=document.querySelector('.lineChart polyline.pPlan');
+  return p?p.getAttribute('points').trim().split(/\s+/).map(t=>Number(t.split(',')[0])):[]});
+const primoPian=PIAN.findIndex(v=>v>0);
+let ultimoPian=-1;PIAN.forEach((v,i)=>{if(v>0)ultimoPian=i});
+const atteso=i=>Number((i/11*100).toFixed(2));
+ok(planX.length===ultimoPian-primoPian+1,'la riga del pianificato copre solo i mesi pianificati',planX.length+' punti invece di 12');
+ok(Math.abs(planX[0]-atteso(primoPian))<0.05,'parte dal primo mese con del pianificato',monthNames[primoPian]);
+ok(Math.abs(planX[planX.length-1]-atteso(ultimoPian))<0.05,'e finisce sull\'ultimo',monthNames[ultimoPian]);
+ok(planX[0]>0.05,'non parte da gennaio strisciando sullo zero','x = '+planX[0]+'%');
 
 console.log('\n=== D. La lettura al passaggio del mouse ===');
 const cols=await pg.$$('.chHit>span');

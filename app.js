@@ -286,9 +286,14 @@ function annualChartSvg(){
   const hasPlan=totPlan>0.005;
   const max=Math.max(1,...cons,...plan);
   const X=i=>(i/11*100).toFixed(2);const Y=v=>(52-(Math.max(0,v)/max)*46).toFixed(2);
-  const pts=(arr,upTo)=>arr.slice(0,upTo+1).map((v,i)=>X(i)+','+Y(v)).join(' ');
-  const consPts=actualEnd>=0?pts(cons,actualEnd):'';
-  const planPts=hasPlan?pts(plan,11):'';
+  const pts=(arr,da,a)=>{const o=[];for(let i=da;i<=a;i++)o.push(X(i)+','+Y(arr[i]));return o.join(' ')};
+  const consPts=actualEnd>=0?pts(cons,0,actualEnd):'';
+  // La riga del pianificato parte dal primo mese in cui c'è davvero
+  // qualcosa e finisce sull'ultimo: prima strisciava sullo zero da
+  // gennaio, disegnando mesi vuoti come se fossero un dato.
+  const p0=plan.findIndex(v=>v>0.005);
+  let p1=-1;for(let i=11;i>=0;i--)if(plan[i]>0.005){p1=i;break}
+  const planPts=(hasPlan&&p0>=0&&p1>p0)?pts(plan,p0,p1):'';
   const dot=(i,v,cls)=>'<i class="'+cls+'" style="left:'+X(i)+'%;top:'+(Number(Y(v))/58*100).toFixed(2)+'%"></i>';
   let dots='';
   for(let i=0;i<=actualEnd;i++)if(cons[i]>0)dots+=dot(i,cons[i],'dC');
