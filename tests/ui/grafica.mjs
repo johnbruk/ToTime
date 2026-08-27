@@ -85,6 +85,16 @@ for(const [larghezza,etichetta] of [[360,'telefono stretto (360px)'],[1440,'desk
   ok(tutteWeights.size<=3,'i pesi del carattere restano tre',tutteWeights.size+' pesi: '+[...tutteWeights].sort().join(' '));
   if(larghezza===360)
     ok(piccoli.length===0,'ogni comando è alto almeno 40px sotto il dito',piccoli.slice(0,3).join(' | ')||'nessuno sotto misura');
+  if(larghezza===1440){
+    // Il contenuto deve stare al centro dell'area di lettura, non
+    // incollato a sinistra: max-width senza margini automatici lo
+    // schiacciava contro il menu laterale.
+    const c=await pg.evaluate(()=>{const a=document.querySelector('.app'),m=a.parentElement;
+      const ra=a.getBoundingClientRect(),rm=m.getBoundingClientRect();
+      return {sx:Math.round(ra.left-rm.left),dx:Math.round(rm.right-ra.right),w:Math.round(ra.width)}});
+    ok(Math.abs(c.sx-c.dx)<=2,'su schermo largo il contenuto è centrato',c.sx+'px a sinistra · '+c.dx+'px a destra');
+    ok(c.w<=1120,'e non si stira oltre la larghezza di lettura',c.w+'px');
+  }
   ok(errs.length===0,'nessun errore JS attraversando tutte le viste',errs.slice(0,2).join(' | ')||'nessuno');
   await pg.close();
 }
