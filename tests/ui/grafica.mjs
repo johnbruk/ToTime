@@ -94,6 +94,31 @@ for(const [larghezza,etichetta] of [[360,'telefono stretto (360px)'],[1440,'desk
       return {sx:Math.round(ra.left-rm.left),dx:Math.round(rm.right-ra.right),w:Math.round(ra.width)}});
     ok(Math.abs(c.sx-c.dx)<=2,'su schermo largo il contenuto è centrato',c.sx+'px a sinistra · '+c.dx+'px a destra');
     ok(c.w<=1120,'e non si stira oltre la larghezza di lettura',c.w+'px');
+    // Il pulsante principale della dashboard: largo 340 ma centrato,
+    // non incollato a sinistra come era rimasto.
+    await pg.evaluate(()=>window.go('home'));await pg.waitForTimeout(250);
+    const cta=await pg.evaluate(()=>{const e=document.querySelector('.primary.cta');
+      if(!e)return null;const r=e.getBoundingClientRect(),p=e.parentElement.getBoundingClientRect();
+      const cs=getComputedStyle(e.parentElement);
+      const sx=r.left-(p.left+parseFloat(cs.paddingLeft)),dx=(p.right-parseFloat(cs.paddingRight))-r.right;
+      return {sx:Math.round(sx),dx:Math.round(dx),w:Math.round(r.width)}});
+    ok(cta&&Math.abs(cta.sx-cta.dx)<=2,'il pulsante «Nuovo consuntivo» è centrato',
+      cta?cta.sx+'px a sinistra · '+cta.dx+'px a destra':'non trovato');
+    // Le voci di «Nuovo consuntivo»: testo a sinistra, freccia a destra
+    await pg.evaluate(()=>window.go('newChoice'));await pg.waitForTimeout(250);
+    const voci=await pg.evaluate(()=>[...document.querySelectorAll('.menuBtn')].map(b=>{
+      const t=b.firstElementChild.getBoundingClientRect(),f=b.lastElementChild.getBoundingClientRect();
+      const r=b.getBoundingClientRect(),cs=getComputedStyle(b);
+      return {sx:Math.round(t.left-(r.left+parseFloat(cs.paddingLeft))),
+              dx:Math.round((r.right-parseFloat(cs.paddingRight))-f.right)}}));
+    ok(voci.length>0&&voci.every(v=>v.sx<=2&&v.dx<=2),
+      'nelle voci di menu il testo parte da sinistra e la freccia sta a destra',
+      voci.map(v=>v.sx+'/'+v.dx).join(' '));
+    // I moduli non sono larghi un metro
+    await pg.evaluate(()=>window.go('dailyForm'));await pg.waitForTimeout(250);
+    const modulo=await pg.evaluate(()=>{const f=document.querySelector('form.form');
+      return f?Math.round(f.getBoundingClientRect().width):0});
+    ok(modulo>0&&modulo<=620,'i moduli stanno in una colonna leggibile',modulo+'px');
   }
   ok(errs.length===0,'nessun errore JS attraversando tutte le viste',errs.slice(0,2).join(' | ')||'nessuno');
   await pg.close();
