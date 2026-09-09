@@ -248,7 +248,7 @@ table.griglia .riga .n{font-weight:750;font-size:14px;letter-spacing:-.1px}
 table.griglia .riga .d{color:var(--muted);font-size:12px;margin-top:2px}
 table.griglia .riga.vuota{color:var(--muted);font-weight:400;text-align:center;padding:24px;min-width:0}
 table.griglia td.gg{width:46px;min-width:46px}
-table.griglia td.gg input,table.griglia td.gg .gCell{width:100%;height:44px;border:0;border-right:1px solid var(--line);background:transparent;text-align:center;font:inherit;font-size:13.5px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums;border-radius:0;box-shadow:none;display:block;padding:0}
+table.griglia td.gg input{width:100%;height:44px;border:0;border-right:1px solid var(--line);background:transparent;text-align:center;font:inherit;font-size:13.5px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums;border-radius:0;box-shadow:none;display:block;padding:0}
 table.griglia td.gg input:focus{outline:2px solid var(--primary);outline-offset:-2px;background:rgba(124,137,166,.10)}
 table.griglia td.gg.we{background:rgba(148,166,196,.10)}
 table.griglia td.gg.festivo{background:rgba(255,107,107,.16)}
@@ -256,18 +256,13 @@ table.griglia td.gg.festivo input{color:#D9534F}
 table.griglia td.gg.assente{background:rgba(190,40,60,.32)}
 table.griglia td.gg.assente input{color:#fff}
 table.griglia td.gg.oggi{box-shadow:inset 0 -3px 0 var(--primary)}
-table.griglia td.gg.pieno input{color:var(--primary2)}
-table.griglia td.gg.bloccata .gCell{color:var(--muted);text-decoration:underline dotted;cursor:pointer}
+table.griglia td.gg.pieno input{color:var(--text)}
 table.griglia .tot{position:sticky;right:0;background:var(--surface2);font-weight:750;min-width:58px;border-left:1px solid var(--line);z-index:2;padding:0 6px}
 table.griglia tfoot td{background:var(--surface2);font-weight:750;padding:10px 4px}
 table.griglia tfoot td.we{background:rgba(148,166,196,.16);color:var(--muted)}
 table.griglia tfoot td.festivo{background:rgba(255,107,107,.16);color:#D9534F}
 table.griglia tfoot td.assente{background:rgba(190,40,60,.32);color:#fff}
 table.griglia tfoot .riga{background:var(--surface2)}
-table.griglia .planRow td{background:rgba(124,137,166,.07)}
-table.griglia .planRow .riga{background:var(--card)}
-table.griglia .planRow .riga .n{color:var(--primary2)}
-table.griglia .planRow span.pl{display:block;height:44px;line-height:44px;font-size:13.5px;font-weight:750;color:var(--primary2);border-right:1px solid var(--line)}
 @media(max-width:520px){.grigliaCard .barra{flex-direction:column;align-items:stretch}table.griglia .riga{min-width:170px}}
 .assForm{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:12px 0 4px}
 .assForm input,.assForm select{width:auto;flex:1 1 120px;min-width:110px;min-height:44px;margin:0}
@@ -551,3 +546,7 @@ table.griglia th,table.griglia td{font-size:var(--t-sm)}
 @media(min-width:960px){
   .form,.form+.actions,form.form>.actions{max-width:620px}
 }
+
+/* Un giorno con più voci per la stessa commessa resta scrivibile: il
+   trattino sotto avvisa che salvando diventeranno una voce sola. */
+table.griglia td.gg.multi input{text-decoration:underline dotted;text-underline-offset:3px}

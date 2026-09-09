@@ -763,7 +763,11 @@ function isoOf(y,m,d){return `${y}-${String(m).padStart(2,'0')}-${String(d).padS
 function gridKey(e){return [e.client_id||'',e.project_id||'',e.activity_id||''].join('|')}
 function gridRows(){
   const map=new Map();
-  rowsForMonth().filter(e=>!isPlanned(e)).forEach(e=>{
+  // Anche il pianificato: sta nella riga della sua commessa ed è una
+  // casella modificabile come le altre. Prima era escluso da qui e
+  // finiva in una riga a parte di sola lettura, quindi sui giorni
+  // futuri si scriveva alla cieca, sopra un valore che non si vedeva.
+  rowsForMonth().forEach(e=>{
     const k=gridKey(e);
     if(!map.has(k))map.set(k,{k,client_id:e.client_id,project_id:e.project_id,activity_id:e.activity_id,hours:{},items:{}});
     const r=map.get(k),d=String(e.entry_date);
@@ -775,7 +779,6 @@ function gridRows(){
     (clientName(a.client_id)||'').localeCompare(clientName(b.client_id)||'','it')||
     (projectName(a.project_id)||'').localeCompare(projectName(b.project_id)||'','it'));
 }
-function gridPlannedByDay(){const o={};rowsForMonth().filter(isPlanned).forEach(e=>{const d=String(e.entry_date);o[d]=(o[d]||0)+Number(e.hours||0)});return o}
 function gridDays(){
   const [y,m]=String(state.month).split('-').map(Number);
   const n=daysInMonth(state.month),t=todayISO(),out=[];
@@ -814,24 +817,29 @@ function gridDayClass(x){const c=[];if(x.holiday)c.push('festivo');else if(x.we)
 function gridDayWhy(x){return [x.holiday||'',(!x.holiday&&x.we)?'weekend':'',x.ass?assenzaLabel(x.ass).toLowerCase():''].filter(Boolean).join(' · ')}
 function gridNum(v){return fmtNum(v, Number(v)%1?2:0)}
 function griglia(){
-  const days=gridDays(),rows=gridRows(),planned=gridPlannedByDay();
+  const days=gridDays(),rows=gridRows();
   const wd=['dom','lun','mar','mer','gio','ven','sab'];
   const rowTot=r=>Object.values(r.hours).reduce((t,v)=>t+Number(v||0),0);
   const total=rows.reduce((t,r)=>t+rowTot(r),0);
-  const plannedTot=Object.values(planned).reduce((t,v)=>t+Number(v||0),0);
 
   const scope=gridScope();
   const weeks=gridWeeks(days);
   const wi=gridWeekIndex(weeks);
   const inWeek=new Set((weeks[wi]||[]).map(d=>d.iso));
   const wk=x=>inWeek.has(x.iso)?' wk':'';
+  // Ogni casella è modificabile, senza eccezioni: quello che c'è scritto
+  // qui è quello che finirà nel database. Anche i giorni con più voci —
+  // prima di sola lettura — si scrivono, e al salvataggio le voci in
+  // eccesso vengono unite in una sola invece di restare indietro.
   const cells=r=>days.map(x=>{
-    const items=r.items[x.iso]||[],v=Number(r.hours[x.iso]||0),locked=items.length>1;
-    const cls=['gg',...gridDayClass(x)];if(v>0)cls.push('pieno');if(locked)cls.push('bloccata');if(inWeek.has(x.iso))cls.push('wk');
+    const items=r.items[x.iso]||[],v=Number(r.hours[x.iso]||0),multi=items.length>1;
+    const cls=['gg',...gridDayClass(x)];if(v>0)cls.push('pieno');if(multi)cls.push('multi');if(inWeek.has(x.iso))cls.push('wk');
     const why=gridDayWhy(x);
+    const nota=[why,
+      multi?items.length+' voci in questo giorno: se cambi il valore diventano una sola':''
+      ].filter(Boolean).join(' · ');
     const who=`${esc(clientName(r.client_id)||'senza cliente')} giorno ${x.d}`;
-    if(locked)return `<td class="${cls.join(' ')}" title="${esc(items.length+' voci in questo giorno: apri il giorno per modificarle')}"><button type="button" class="gCell" onclick="openDay('${x.iso}')" aria-label="${who}, ${items.length} voci">${gridNum(v)}</button></td>`;
-    return `<td class="${cls.join(' ')}"${why?` title="${esc(why)}"`:''}><input inputmode="decimal" data-row="${esc(r.k)}" data-day="${x.iso}" value="${v>0?esc(String(v)):''}" aria-label="${who}${why?', '+esc(why):''}"></td>`;
+    return `<td class="${cls.join(' ')}"${nota?` title="${esc(nota)}"`:''}><input inputmode="decimal" data-row="${esc(r.k)}" data-day="${x.iso}" value="${v>0?esc(String(v)):''}" aria-label="${who}${nota?', '+esc(nota):''}"></td>`;
   }).join('');
 
   const head=days.map(x=>{
@@ -852,22 +860,17 @@ function griglia(){
       ${days.map(x=>`<td class="gg ${gridDayClass(x).join(' ')}${wk(x)}"><span class="ass"${x.ass?` title="${esc(assenzaLabel(x.ass))}"`:''}>${x.ass?gridNum(x.ass.h):''}</span></td>`).join('')}
       <td class="tot">${gridNum(assTot)}</td></tr>`:'';
 
-  const plannedRow=plannedTot>0?`<tr class="planRow">
-      <td class="riga"><div class="n">Pianificato</div><div class="d">Incarichi continuativi sui giorni futuri · non modificabile qui</div></td>
-      ${days.map(x=>`<td class="gg ${gridDayClass(x).join(' ')}${wk(x)}"><span class="pl">${planned[x.iso]?gridNum(planned[x.iso]):''}</span></td>`).join('')}
-      <td class="tot">${gridNum(plannedTot)}</td></tr>`:'';
-
   const body=rows.length
     ? rows.map(r=>`<tr>
         <td class="riga"><div class="n">${esc(clientName(r.client_id)||'Senza cliente')}</div>
-          <div class="d">${esc(projectName(r.project_id)||'Senza progetto')}${r.activity_id?' · '+esc(activityName(r.activity_id)||''):''}</div></td>
+          <div class="d">${esc(projectName(r.project_id)||'Senza progetto')} · ${esc(activityName(r.activity_id)||'Senza attività')}</div></td>
         ${cells(r)}<td class="tot">${gridNum(rowTot(r))}</td></tr>`).join('')
-    : ((plannedRow||assRow)?'':`<tr><td class="riga vuota" colspan="${days.length+2}">Nessuna commessa in questo mese. Aggiungine una qui sotto.</td></tr>`);
+    : (assRow?'':`<tr><td class="riga vuota" colspan="${days.length+2}">Nessuna commessa in questo mese. Aggiungine una qui sotto.</td></tr>`);
 
   const opts=(list,empty)=>`<option value="">${empty}</option>`+list.map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('');
 
   return appShell(`<h1>Consuntivo mensile</h1>
-    <p class="sub">Una riga per commessa, una colonna per giorno. Si compila con la tastiera — Tab per il giorno dopo — e si salva una volta sola.</p>
+    <p class="sub">Una riga per commessa — cliente, progetto e attività — e una colonna per giorno, fino a fine mese. Si compila con la tastiera, Tab per il giorno dopo, e si salva una volta sola.</p>
     ${monthSelector()}
     <div class="card grigliaCard" data-scope="${scope}">
       <div class="barra">
@@ -878,7 +881,7 @@ function griglia(){
       <div class="settimanaNav"><button type="button" onclick="gridWeekShift(-1)"${wi===0?' disabled':''} aria-label="Settimana precedente">‹</button><strong>${wi+1}ª settimana<span>${gridWeekLabel(weeks[wi])} ${esc(monthLabel(state.month).split(' ')[0].toLowerCase())}</span></strong><button type="button" onclick="gridWeekShift(1)"${wi>=weeks.length-1?' disabled':''} aria-label="Settimana successiva">›</button></div>
       <div class="scrollGriglia"><table class="griglia">
         <thead><tr><th class="riga">Commessa</th>${head}<th class="tot"><span class="totMese">Mese</span><span class="totTot">Tot</span></th></tr></thead>
-        <tbody>${body}${assRow}${plannedRow}</tbody>
+        <tbody>${body}${assRow}</tbody>
         <tfoot><tr><td class="riga">Totale giornata</td>${foot}<td class="tot">${gridNum(total+assTot)}</td></tr></tfoot>
       </table></div>
       <div class="nuovaRiga">
@@ -892,7 +895,7 @@ function griglia(){
         <span><i class="sw ferie"></i>Giorno off</span><span><i class="sw worked"></i>Oggi</span>
       </div>
     </div>
-    <div class="metricLine" style="margin-top:12px">${gridNum(total)} h consuntivate <span class="dot">·</span> ${fmtDays(total)} gg/u${assTot>0?` <span class="dot">·</span> <span class="tag ferieTag">Assenze ${gridNum(assTot)} h</span>`:''}${plannedTot>0?` <span class="dot">·</span> <span class="tag blue">Pianificato ${gridNum(plannedTot)} h</span>`:''}</div>`);
+    <div class="metricLine" style="margin-top:12px">${gridNum(total)} h consuntivate <span class="dot">·</span> ${fmtDays(total)} gg/u${assTot>0?` <span class="dot">·</span> <span class="tag ferieTag">Assenze ${gridNum(assTot)} h</span>`:''}</div>`);
 }
 function gridFillProjects(){const c=document.getElementById('g-cliente')?.value||'';const p=document.getElementById('g-progetto');if(p)p.innerHTML=`<option value="">— progetto —</option>`+sortEntities('projects',data.projects.filter(x=>x.active&&x.client_id===c)).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('')}
 function addGridRow(){
@@ -911,9 +914,18 @@ function gridConfirmRed(dates){
   const lines=dates.sort().map(iso=>{const w=gridDayWhy({iso,holiday:holidayName(iso),we:isWeekendISO(iso),off:isFerie(iso)});return fmtDMY(iso)+(w?' — '+w:'')});
   return confirm('Stai registrando ore in giorni non lavorativi:\n\n'+lines.join('\n')+'\n\nVuoi procedere?');
 }
+// Unire più voci di uno stesso giorno in una sola fa perdere le
+// descrizioni e le note delle altre: si chiede prima.
+function gridConfirmMerge(merged){
+  if(!merged.length)return true;
+  const righe=merged.map(m=>fmtDMY(m.iso)+' — '+m.chi+' · '+m.n+' voci diventano 1');
+  const perse=merged.reduce((t,m)=>t+m.n-1,0);
+  return confirm('In questi giorni ci sono più voci per la stessa commessa. Salvando, il valore che hai scritto resta su una sola voce e le altre vengono eliminate:\n\n'
+    +righe.join('\n')+'\n\nSi perdono descrizioni e note di '+(perse===1?'1 voce':perse+' voci')+'.\n\nVuoi procedere?');
+}
 async function saveGrid(){
   const rows=new Map(gridRows().map(r=>[r.k,r]));
-  const toCreate=[],toUpdate=[],toDelete=[];
+  const toCreate=[],toUpdate=[],toDelete=[],merged=[];
   for(const el of document.querySelectorAll('.griglia input:not([disabled])')){
     const r=rows.get(el.dataset.row);if(!r)continue;
     const iso=el.dataset.day,before=Number(r.hours[iso]||0);
@@ -925,13 +937,27 @@ async function saveGrid(){
     if(after===0)toDelete.push(...items.map(e=>e.id));
     else if(!items.length){const c=clientById(r.client_id);
       toCreate.push({entry_date:iso,client_id:r.client_id,project_id:r.project_id||null,activity_id:r.activity_id||null,hours:after,daily_rate_snapshot:Number(c?.daily_rate||0),standard_hours_snapshot:Number(c?.standard_hours||8)});}
-    else toUpdate.push({id:items[0].id,iso,patch:{hours:after}});
+    else{
+      // La casella è l'unica verità: la prima voce prende il valore
+      // scritto e le altre dello stesso giorno spariscono. Altrimenti
+      // la griglia direbbe una cosa e il database ne conterrebbe
+      // un'altra, con le voci in eccesso rimaste indietro.
+      // La griglia ragiona per WBS e ore, non per stato: quello che si
+      // scrive qui è un consuntivo, qualunque sia il giorno.
+      const patch={hours:after};
+      if(items[0].status==='planned')patch.status=null;
+      toUpdate.push({id:items[0].id,iso,patch});
+      if(items.length>1){
+        toDelete.push(...items.slice(1).map(e=>e.id));
+        merged.push({iso,n:items.length,chi:clientName(r.client_id)||'Senza cliente'});
+      }}
   }
   const n=toCreate.length+toUpdate.length+toDelete.length;
   if(!n){const pruned=(state.gridNew||[]).length;state.gridNew=[];return setMsg(pruned?'Non c\'era niente da salvare. Tolte '+(pruned===1?'la riga aggiunta e mai compilata.':pruned+' righe aggiunte e mai compilate.'):'Non c\'è niente da salvare.',4000)||render();}
   const red=[...new Set(toCreate.map(e=>e.entry_date).concat(toUpdate.map(u=>u.iso)))]
     .filter(iso=>holidayName(iso)||isFerie(iso)||isWeekendISO(iso));
   if(!gridConfirmRed(red))return;
+  if(!gridConfirmMerge(merged))return;
   state.busy=true;render();
   try{
     if(toDelete.length){const {error}=await sb.from('timesheet_entries').delete().in('id',toDelete);if(error)throw error;}
