@@ -17,7 +17,7 @@ export async function loadAppData(options = {}) {
   const loadedData = normalizeAppData(result.data || {});
   const errors = result.errors || [];
 
-  errors.forEach(item => tableError(item.table, item.error));
+  errors.forEach(item => tableError(item.table, item.error, item));
 
   return { data: loadedData, errors };
 }

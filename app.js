@@ -200,8 +200,12 @@ async function fetchAll(){
     const loaded=await loadAppData({
       repository,
       ensureUserProfile:ensureUserProfileFromMetadata,
-      tableError:(table,error)=>{
+      tableError:(table,error,info)=>{
         console.error(table,error);
+        // Una tabella della migrazione commesse/WBS non ancora
+        // applicata non e' un errore per chi usa l'app: resta nel
+        // registro tecnico e basta.
+        if(info&&info.optional)return;
         setMsg(`Errore caricamento ${table}: ${error.message}`,7000);
       }
     });

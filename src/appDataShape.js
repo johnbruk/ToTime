@@ -12,7 +12,12 @@ export const APP_DATA_KEYS = [
   'invoiceTemplates',
   'appSettings',
   'taxSettings',
-  'taxPayments'
+  'taxPayments',
+  'engagements',
+  'engagementReferences',
+  'wbsItems',
+  'billingLines',
+  'invoiceAllocations'
 ];
 
 export function createEmptyAppData() {

@@ -12,8 +12,29 @@ const DEFAULT_TABLES = [
   ['invoice_templates', 'invoiceTemplates'],
   ['app_settings', 'appSettings'],
   ['tax_settings', 'taxSettings'],
-  ['tax_payments', 'taxPayments']
+  ['tax_payments', 'taxPayments'],
+  ['engagements', 'engagements'],
+  ['engagement_references', 'engagementReferences'],
+  ['wbs_items', 'wbsItems'],
+  ['billing_lines', 'billingLines'],
+  ['invoice_line_allocations', 'invoiceAllocations']
 ];
+
+// Tabelle introdotte dalla migrazione commesse/WBS. Finche' non e'
+// stata applicata non esistono, e la loro assenza non e' un errore da
+// mostrare all'utente: l'app deve funzionare in entrambi i casi.
+const OPTIONAL_TABLES = new Set([
+  'engagements', 'engagement_references', 'wbs_items',
+  'billing_lines', 'invoice_line_allocations'
+]);
+
+function isMissingTable(error) {
+  const code = String(error && error.code || '');
+  const msg = String(error && error.message || '').toLowerCase();
+  return code === '42P01' || code === 'PGRST205' ||
+    (msg.includes('does not exist') && msg.includes('relation')) ||
+    msg.includes('could not find the table');
+}
 
 function orderedQuery(sb, table) {
   let query = sb.from(table).select('*');
@@ -25,6 +46,10 @@ function orderedQuery(sb, table) {
   if (table === 'invoice_templates') return query.order('sort_order', { ascending: true });
   if (table === 'tax_settings') return query.order('fiscal_year', { ascending: false });
   if (table === 'tax_payments') return query.order('fiscal_year', { ascending: false });
+  if (table === 'engagements' || table === 'wbs_items') return query.order('code', { ascending: true });
+  if (table === 'engagement_references') return query.order('valid_from', { ascending: false });
+  if (table === 'billing_lines') return query.order('sort_order', { ascending: true });
+  if (table === 'invoice_line_allocations') return query.order('created_at', { ascending: true });
 
   return query.order('created_at', { ascending: true });
 }
@@ -75,6 +100,11 @@ export function createRepository(sb) {
     appSettings: tableApi(sb, 'app_settings'),
     taxSettings: tableApi(sb, 'tax_settings'),
     taxPayments: tableApi(sb, 'tax_payments'),
+    engagements: tableApi(sb, 'engagements'),
+    engagementReferences: tableApi(sb, 'engagement_references'),
+    wbsItems: tableApi(sb, 'wbs_items'),
+    billingLines: tableApi(sb, 'billing_lines'),
+    invoiceAllocations: tableApi(sb, 'invoice_line_allocations'),
 
     async loadAll() {
       const result = {};
@@ -84,7 +114,7 @@ export function createRepository(sb) {
         try {
           result[key] = await tableApi(sb, table).list();
         } catch (error) {
-          errors.push({ table, key, error });
+          errors.push({ table, key, error, optional: OPTIONAL_TABLES.has(table) && isMissingTable(error) });
           result[key] = [];
         }
       }

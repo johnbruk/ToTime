@@ -153,6 +153,11 @@ alter table public.projects add column if not exists start_date date;
 alter table public.projects add column if not exists end_date date;
 alter table public.projects add column if not exists status text not null default 'active';
 alter table public.projects add column if not exists billing_unit text not null default 'day';
+-- Nota: la valorizzazione dei consuntivi resta sul CLIENTE
+-- (daily_rate/standard_hours, con snapshot sulla registrazione),
+-- come e' sempre stato. sell_rate qui e' informativa: serve a
+-- documentare la tariffa concordata di progetto, non entra nei
+-- calcoli e non sovrascrive lo storico.
 alter table public.projects add column if not exists sell_rate numeric(14,2);
 alter table public.projects add column if not exists currency text not null default 'EUR';
 alter table public.projects add column if not exists invoice_line_description text;
