@@ -12,9 +12,10 @@ const MIME={'.html':'text/html','.js':'text/javascript','.css':'text/css','.png'
 const ORE =[10,14, 9,17,12,20,11,16, 0, 0, 0, 0];
 const PIAN=[ 0, 0, 0, 0, 0, 0, 0, 6,14,10, 8, 4];
 const TARIFFA=480, STD=8;
+const ANNO=new Date().getFullYear();
 const righe=[];
-ORE.forEach((h,i)=>{if(h)righe.push(`{id:'r${i}',entry_date:'2026-${String(i+1).padStart(2,'0')}-10',client_id:'c1',project_id:'p1',activity_id:'a1',hours:${h},daily_rate_snapshot:${TARIFFA},standard_hours_snapshot:${STD}}`)});
-PIAN.forEach((h,i)=>{if(h)righe.push(`{id:'q${i}',entry_date:'2026-${String(i+1).padStart(2,'0')}-25',client_id:'c1',project_id:'p2',activity_id:'a1',hours:${h},status:'planned',tm_batch_id:'tm_x',daily_rate_snapshot:${TARIFFA},standard_hours_snapshot:${STD}}`)});
+ORE.forEach((h,i)=>{if(h)righe.push(`{id:'r${i}',entry_date:'${ANNO}-${String(i+1).padStart(2,'0')}-10',client_id:'c1',project_id:'p1',activity_id:'a1',hours:${h},daily_rate_snapshot:${TARIFFA},standard_hours_snapshot:${STD}}`)});
+PIAN.forEach((h,i)=>{if(h)righe.push(`{id:'q${i}',entry_date:'${ANNO}-${String(i+1).padStart(2,'0')}-25',client_id:'c1',project_id:'p2',activity_id:'a1',hours:${h},status:'planned',tm_batch_id:'tm_x',daily_rate_snapshot:${TARIFFA},standard_hours_snapshot:${STD}}`)});
 const monthNames=['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const attesoCons=ORE.map(h=>h*TARIFFA/STD);
 const attesoPian=PIAN.map(h=>h*TARIFFA/STD);
@@ -43,7 +44,12 @@ console.log('\n=== A. Il grafico c\'è, ed è mensile ===');
 ok(await pg.$('.annualChartBox')!==null,'il grafico annuale è presente nella dashboard');
 const consY=await pg.evaluate(()=>{const p=document.querySelector('.lineChart polyline.pCons');
   return p?p.getAttribute('points').trim().split(/\s+/).map(t=>Number(t.split(',')[1])):[]});
-ok(consY.length===8,'la spezzata del consuntivato copre i mesi già trascorsi',consY.length+' punti');
+// Quanti mesi sono già trascorsi si ricava dal calendario, non si
+// scrive a mano: un numero fisso qui rende il test valido un mese solo.
+const meseCorrente=new Date().getMonth();
+const mesiTrascorsi=meseCorrente+1;
+ok(consY.length===mesiTrascorsi,'la spezzata del consuntivato copre i mesi già trascorsi',
+  consY.length+' punti, da gennaio a '+monthNames[meseCorrente].toLowerCase());
 // In SVG l'asse y cresce verso il basso: cumulare significherebbe y sempre
 // calante. Se sale e scende, i mesi sono indipendenti.
 const sale=consY.some((v,i)=>i>0&&v>consY[i-1]);
@@ -80,7 +86,12 @@ const stile=await pg.evaluate(()=>{const c=document.querySelector('.pCons'),p=do
 ok(/none|^$/.test(stile.cons)&&/\d/.test(stile.plan),'il consuntivato è continuo, il pianificato tratteggiato',stile.plan||'—');
 ok(stile.rC!==stile.rP,'i punti hanno forme diverse: tondi e quadrati',stile.rC+' vs '+stile.rP);
 ok(stile.legenda===2,'la legenda nomina entrambe le serie',stile.legenda+' voci');
-ok(stile.dotC===8&&stile.dotP===5,'un punto per ogni mese con un valore',stile.dotC+' consuntivati · '+stile.dotP+' pianificati');
+// Un punto per ogni mese che ha davvero un valore, entro i mesi
+// trascorsi per il consuntivato e su tutto l'anno per il pianificato.
+const attesiC=attesoCons.filter((v,i)=>v>0&&i<=meseCorrente).length;
+const attesiP=attesoPian.filter(v=>v>0).length;
+ok(stile.dotC===attesiC&&stile.dotP===attesiP,'un punto per ogni mese con un valore',
+  stile.dotC+'/'+attesiC+' consuntivati · '+stile.dotP+'/'+attesiP+' pianificati');
 
 // La riga del pianificato non deve strisciare sullo zero da gennaio:
 // parte dal primo mese in cui c'è davvero qualcosa (agosto, indice 7)
@@ -106,7 +117,7 @@ const dopo=await pg.evaluate(()=>{const t=document.querySelectorAll('.chHit>span
   return {display:getComputedStyle(t).display,testo:t.textContent.replace(/ /g,' '),
     dentro:r.left>=p.left-1&&r.right<=window.innerWidth}});
 ok(dopo.display!=='none','passandoci sopra compare');
-ok(/Settembre 2026/.test(dopo.testo),'e dice di che mese si tratta',dopo.testo.replace(/\s+/g,' ').slice(0,44));
+ok(new RegExp('Settembre '+ANNO).test(dopo.testo),'e dice di che mese si tratta',dopo.testo.replace(/\s+/g,' ').slice(0,44));
 ok(dopo.dentro,'senza uscire dallo schermo');
 // il mese all'estremo destro è quello che rischia di sfondare
 await cols[11].hover();await pg.waitForTimeout(250);
@@ -115,7 +126,7 @@ const ultimo=await pg.evaluate(()=>{const t=document.querySelectorAll('.chHit>sp
 ok(ultimo,'anche dicembre, all\'estremo destro, resta dentro');
 
 console.log('\n=== E. Anno senza pianificato ===');
-await pg.evaluate(()=>{window.openMonthTimesheet(2024,5);window.go('home')});
+await pg.evaluate(a=>{window.openMonthTimesheet(a-2,5);window.go('home')},ANNO);
 await pg.waitForTimeout(400);
 const senzaPlan=await pg.evaluate(()=>({
   c:!!document.querySelector('.annualChartBox'),
@@ -137,7 +148,7 @@ ok(stretti.length===0,'il massimo dell\'asse non spreca altezza',
   stretti.map(s=>s.v+'/'+s.m).join(' ')||'dal '+Math.round(Math.min(...asse.map(a=>a.uso))*100)+'% in su');
 ok(asse.every(a=>a.m>=a.v),'e non taglia mai il valore più alto');
 // a mese vuoto l'asse diceva «1 € / 1 € / 0»
-await pg.evaluate(()=>{window.openMonthTimesheet(2024,5);window.go('timesheet')});
+await pg.evaluate(a=>{window.openMonthTimesheet(a-2,5);window.go('timesheet')},ANNO);
 await pg.waitForTimeout(350);
 const vuoto=await pg.evaluate(()=>[...document.querySelectorAll('.lineChartY span')].map(e=>e.textContent));
 ok(new Set(vuoto.filter(Boolean)).size===vuoto.filter(Boolean).length,
