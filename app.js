@@ -96,7 +96,7 @@ const MENU=[
   {v:'billing',ic:'€',l:'Fatturazione'},
   {v:'balance',ic:'∑',l:'Bilancio'},
   {main:'tax',ic:'%',l:'Tassazione',sub:[{v:'tasseFuture',l:'Tasse future'},{v:'taxPayments',l:'Pagamenti fiscali (INPS)'},{v:'taxSettings',l:'Configurazione fiscale'}]},
-  {main:'settings',ic:'⚙',l:'Impostazioni',sub:[{v:'clients',l:'Clienti'},{v:'projects',l:'Progetti'},{v:'activities',l:'Attività'},{v:'expenseCategories',l:'Voci di costo/spesa'},{v:'invoiceTemplates',l:'Template fattura'},{v:'appearance',l:'Aspetto / Tema'},{v:'account',l:'Account'}]}
+  {main:'settings',ic:'⚙',l:'Impostazioni',sub:[{v:'clients',l:'Clienti'},{v:'engagements',l:'Commesse'},{v:'projects',l:'Progetti'},{v:'activities',l:'Attività'},{v:'expenseCategories',l:'Voci di costo/spesa'},{v:'invoiceTemplates',l:'Template fattura'},{v:'appearance',l:'Aspetto / Tema'},{v:'account',l:'Account'}]}
 ];
 const NAV_CHILDREN={
   timesheet:['timesheet','newChoice','calendario','tmManage','dailyForm','dailyEdit','monthlyForm','monthlyEdit','manualForm','manualEdit','annualMonths'],
@@ -197,6 +197,7 @@ async function init(){
 async function fetchAll(){
   state.loading=true; render();
   try{
+    state.missingTables=new Set();
     const loaded=await loadAppData({
       repository,
       ensureUserProfile:ensureUserProfileFromMetadata,
@@ -205,7 +206,10 @@ async function fetchAll(){
         // Una tabella della migrazione commesse/WBS non ancora
         // applicata non e' un errore per chi usa l'app: resta nel
         // registro tecnico e basta.
-        if(info&&info.optional)return;
+        if(info&&info.optional){
+          (state.missingTables=state.missingTables||new Set()).add(table);
+          return;
+        }
         setMsg(`Errore caricamento ${table}: ${error.message}`,7000);
       }
     });
@@ -1226,10 +1230,10 @@ function appearance(){return appShell(`<div class="screenTitle">Aspetto / Tema</
 function exportTimesheetViewOptions(){const clients=activeClients();const selected=clients[0]?.id||'';return `<div class="field"><label>Mese</label><input name="month" type="month" value="${state.month}"></div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)"><option value="">Tutti i clienti</option>${clients.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Cliente/Progetto</label><select name="project_id"><option value="">Tutti i progetti</option>${projectOptions(selected)}</select></div><div class="field"><label>Includi importi</label><select name="include_amount"><option value="false">No, solo dettaglio operativo</option><option value="true">Sì, includi importi</option></select></div>`}
 function exportTimesheet(){return appShell(`<div class="screenTitle">Export Timesheet Excel</div><p class="sub">Scarica il dettaglio mensile da inviare al cliente.</p><form class="form" onsubmit="downloadTimesheetExcel(event)">${exportTimesheetViewOptions()}<div class="actions"><button class="primary">Scarica Excel</button><button type="button" class="secondary" onclick="go('settings')">Annulla</button></div></form>`)}
 
-function clients(){return appShell(`<h1>Clienti</h1><form class="form" onsubmit="addClient(event)"><div class="field"><label>Nome cliente</label><input name="name" required></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h">Tariffa giornaliera 8h</option><option value="monthly_flat">Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="0"></div><button class="primary">Aggiungi cliente</button></form>${sortControl('clients')}<div class="list">${sortEntities('clients',data.clients).map(c=>`<div class="row" onclick="editClient('${c.id}')"><div></div><div><div class="title">${esc(c.name)}</div><div class="desc">${c.compensation_type==='daily_rate_8h'?'Tariffa giornaliera 8h · '+fmtEUR(c.daily_rate||0):'Una tantum mensile'} · ${c.active?'Attivo':'Disattivo'}</div></div>${moveBtns('clients',c.id)}</div>`).join('')||emptyForm('Nessun cliente ancora inserito.')}</div>`)}
+function clients(){return appShell(`<h1>Clienti</h1><form class="form" onsubmit="addClient(event)"><div class="field"><label>Nome cliente</label><input name="name" required></div><div class="field"><label>Codice cliente</label><input name="code" maxlength="5" placeholder="Es. SO" oninput="this.value=normCode(this.value)"><div class="small">Da 2 a 5 lettere o cifre. Entra nel codice di ogni commessa: una volta usato non si cambia piu'.</div></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h">Tariffa giornaliera 8h</option><option value="monthly_flat">Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="0"></div><button class="primary">Aggiungi cliente</button></form>${sortControl('clients')}<div class="list">${sortEntities('clients',data.clients).map(c=>`<div class="row" onclick="editClient('${c.id}')"><div></div><div><div class="title">${esc(c.name)}</div><div class="desc">${c.compensation_type==='daily_rate_8h'?'Tariffa giornaliera 8h · '+fmtEUR(c.daily_rate||0):'Una tantum mensile'} · ${c.active?'Attivo':'Disattivo'}</div></div>${moveBtns('clients',c.id)}</div>`).join('')||emptyForm('Nessun cliente ancora inserito.')}</div>`)}
 function editClient(id){navigateTo('clientEdit',{edit:id})}
 function clientPolicyEditor(c){const pol=parsePolicy(c);const typeOf=id=>{const h=pol.find(r=>r.category_id===id);return h?h.type:'own'};const cats=data.expenseCategories.filter(x=>x.active);if(!cats.length)return '<p class="sub">Crea prima delle voci di spesa per definire la policy.</p>';return `<div class="card" style="margin-top:6px">${cats.map(cat=>`<div class="policyRow"><div><div class="title">${esc(cat.name)}</div></div><select name="policy_${cat.id}">${reimbTypeOptions(typeOf(cat.id))}</select></div>`).join('')}</div>`}
-function clientEdit(){const c=clientById(state.edit);if(!c)return clients();return appShell(`<h1>Modifica cliente</h1><form class="form" onsubmit="saveClient(event)"><div class="field"><label>Nome cliente</label><input name="name" value="${esc(c.name)}" required></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h" ${c.compensation_type==='daily_rate_8h'?'selected':''}>Tariffa giornaliera 8h</option><option value="monthly_flat" ${c.compensation_type==='monthly_flat'?'selected':''}>Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="${Number(c.daily_rate||0)}"></div><div class="field"><label>Ore standard giornata</label><input name="standard_hours" type="number" step="0.25" value="${Number(c.standard_hours||8)}"></div><div class="field"><label>Sede operativa (base trasferte)</label><input name="base_city" value="${esc(c.base_city||'')}" placeholder="Es. Milano"></div><div class="field"><label>Attivo</label><select name="active"><option value="true" ${c.active?'selected':''}>Sì</option><option value="false" ${!c.active?'selected':''}>No</option></select></div><h2>Policy rimborsi spese</h2><p class="sub">Per ogni voce di spesa scegli come viene gestita con questo cliente. L'app la proporrà in automatico quando inserisci una spesa.</p>${clientPolicyEditor(c)}<div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteClient('${c.id}')">Elimina cliente</button><button type="button" class="secondary" onclick="go('clients')">Annulla</button></div></form>`)}
+function clientEdit(){const c=clientById(state.edit);if(!c)return clients();return appShell(`<h1>Modifica cliente</h1><form class="form" onsubmit="saveClient(event)"><div class="field"><label>Nome cliente</label><input name="name" value="${esc(c.name)}" required></div><div class="field"><label>Codice cliente</label><input name="code" maxlength="5" value="${esc(c.code||'')}" oninput="this.value=normCode(this.value)"${engagementsOf(c.id).length?' readonly title="Ha gia\' delle commesse: il codice non si cambia"':''}><div class="small">${engagementsOf(c.id).length?'Bloccato: questo cliente ha gia\' delle commesse.':'Da 2 a 5 lettere o cifre.'}</div></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h" ${c.compensation_type==='daily_rate_8h'?'selected':''}>Tariffa giornaliera 8h</option><option value="monthly_flat" ${c.compensation_type==='monthly_flat'?'selected':''}>Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="${Number(c.daily_rate||0)}"></div><div class="field"><label>Ore standard giornata</label><input name="standard_hours" type="number" step="0.25" value="${Number(c.standard_hours||8)}"></div><div class="field"><label>Sede operativa (base trasferte)</label><input name="base_city" value="${esc(c.base_city||'')}" placeholder="Es. Milano"></div><div class="field"><label>Attivo</label><select name="active"><option value="true" ${c.active?'selected':''}>Sì</option><option value="false" ${!c.active?'selected':''}>No</option></select></div><h2>Policy rimborsi spese</h2><p class="sub">Per ogni voce di spesa scegli come viene gestita con questo cliente. L'app la proporrà in automatico quando inserisci una spesa.</p>${clientPolicyEditor(c)}<div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteClient('${c.id}')">Elimina cliente</button><button type="button" class="secondary" onclick="go('clients')">Annulla</button></div></form>`)}
 async function addClient(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const payload={name:norm(f.name),compensation_type:f.compensation_type,daily_rate:Number(f.daily_rate||0),standard_hours:8,active:true};const {error}=await insertResilient('clients',payload);if(error)return setMsg(error.message,7000);await reload();state.view='clients';render()}
 function collectPolicyFromForm(f){const pol=[];data.expenseCategories.forEach(cat=>{const v=f['policy_'+cat.id];if(v&&v!=='own')pol.push({category_id:cat.id,category:cat.name,type:v})});return pol}
 async function saveClient(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const policy=collectPolicyFromForm(f);const payload={name:norm(f.name),compensation_type:f.compensation_type,daily_rate:Number(f.daily_rate||0),standard_hours:Number(f.standard_hours||8),active:f.active==='true',base_city:norm(f.base_city)||null,expense_policy:policy};const {error}=await updateResilient('clients',payload,state.edit,['base_city','expense_policy']);if(error)return setMsg(error.message,7000);await reload();state.view='clients';state.edit=null;render()}
@@ -1276,9 +1280,382 @@ function downloadTimesheetExcel(ev){ev.preventDefault();const f=Object.fromEntri
 async function importCsv(ev){const file=ev.target.files?.[0];if(!file)return;const reader=new FileReader();reader.onload=async()=>{try{const text=reader.result.replace(/^\uFEFF/,'').trim();if(!text)return setMsg('CSV vuoto.');const lines=text.split(/\r?\n/).filter(Boolean);const sep=(lines[0].match(/;/g)||[]).length>=(lines[0].match(/,/g)||[]).length?';':',';const headers=parseCsvLine(lines.shift(),sep).map(canonHeader);const get=(row,names)=>{for(const n of names.map(canonHeader)){const i=headers.indexOf(n);if(i>=0)return row[i]||''}return''};let count=0,updated=0,skipped=0,createdClients=0,createdProjects=0,createdActivities=0;for(const line of lines){const row=parseCsvLine(line,sep);if(!row.some(x=>norm(x))){skipped++;continue}const cliente=norm(get(row,['cliente','client']));if(!cliente){skipped++;continue}const tipoRaw=get(row,['tipo','type']);const tipo=(tipoRaw||'Tariffa giornaliera 8h').toLowerCase();const isMonthly=tipo.includes('mens')||tipo.includes('monthly')||tipo.includes('una tantum');const ore=parseAmount(get(row,['ore','hours']));const amount=parseAmount(get(row,['importo','amount']));let rowRate=amount>0&&ore>0?amount/ore*8:0;const beforeC=data.clients.length;const client=await ensureClient(cliente,isMonthly?'monthly':'daily',rowRate);if(data.clients.length>beforeC)createdClients++;if(!client.daily_rate&&rowRate>0){await updateResilient('clients',{daily_rate:rowRate},client.id);client.daily_rate=rowRate}const progetto=norm(get(row,['cliente/progetto','progetto','cliente finale','project']));const beforeP=data.projects.length;const project=await ensureProject(client.id,progetto);if(data.projects.length>beforeP)createdProjects++;const att=norm(get(row,['attività','attivita','activity']));const beforeA=data.activities.length;const activity=await ensureActivity(att);if(data.activities.length>beforeA)createdActivities++;const descrizione=get(row,['descrizione','description']);const sede=norm(get(row,['sede','work_site','site']));const citta=norm(get(row,['luogo/città','luogo/citta','città','citta','luogo','work_city','city','location']));const luogo=[sede,citta].filter(Boolean).join(' - ');const note=get(row,['note','notes']);const idv=norm(get(row,['id','import_id','riga','key','chiave']));if(isMonthly){const mese=norm(get(row,['mese','month']))||toMonth(get(row,['data','date']))||state.month;const [year,month]=mese.split('-').map(Number);const payload={year,month,client_id:client.id,project_id:project?.id||null,description:descrizione||null,notes:note||null,amount};const key=idv?importKey(['mc',idv]):importKey(['mc',year,month,client.id,project?.id||'']);const {res,updated:u}=await upsertByKey('monthly_compensations',data.monthly,payload,key);if(res.error)throw res.error;if(u)updated++;else count++;}else{const date=toDate(get(row,['data','date']))||new Date().toISOString().slice(0,10);const rate=rowRate||Number(client.daily_rate||0);const payload={entry_date:date,client_id:client.id,project_id:project?.id||null,activity_id:activity?.id||null,work_location:luogo||null,work_site:sede||null,work_city:citta||null,description:descrizione||null,notes:note||null,hours:ore,daily_rate_snapshot:rate,standard_hours_snapshot:8};const key=idv?importKey(['ts',idv]):importKey(['ts',date,client.id,project?.id||'',activity?.id||'',descrizione,ore]);const {res,updated:u}=await upsertByKey('timesheet_entries',data.entries,payload,key);if(res.error)throw res.error;if(u)updated++;else count++;}}
 await fetchAll();state.view='timesheet';setMsg(`Import completato: ${count} inserite, ${updated} aggiornate. Clienti creati: ${createdClients}. Progetti: ${createdProjects}. Attività: ${createdActivities}. Scartate: ${skipped}.`,9000)}catch(e){console.error(e);setMsg('Errore import CSV: '+(e.message||e),9000)}};reader.readAsText(file,'windows-1252')}
 function exportData(){const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='totime-supabase-backup.json';a.click()}
-function render(){document.documentElement.setAttribute('data-view',state.view||'home');if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,newChoice,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,timesheet,griglia,pivot,summary,billing,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,incassi,balance,taxSettings,tasseFuture,fatturatoDetail,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
+/* ==================================================================
+   Commesse, progetti e WBS
+   Gerarchia: Cliente -> Commessa -> Progetto -> WBS -> registrazioni.
+   Regola di fondo: si registra e si controlla sulla WBS, ma si
+   fattura sempre a livello di commessa/progetto. La WBS non diventa
+   mai una riga di fattura.
+   Tutto qui dentro si spegne da solo se la migrazione non e' stata
+   applicata: wbsReady() e' falso e le voci non compaiono.
+   ================================================================== */
+const STATI={draft:'Bozza',active:'Attiva',suspended:'Sospesa',closed:'Chiusa',cancelled:'Annullata'};
+const TIPI_WBS={activity:'Attività',project_management:'Project management',analysis:'Analisi',
+  development:'Sviluppo / supporto',travel:'Trasferta',internal:'Attività interna',expense:'Spesa',other:'Altro'};
+const STATI_APERTI=['draft','active'];
+function normCode(v){return String(v||'').toUpperCase().replace(/[^A-Z0-9]/g,'')}
+function wbsReady(){return !state.missingTables||!state.missingTables.has('wbs_items')}
+function engagementById(id){return (data.engagements||[]).find(e=>e.id===id)}
+function engagementsOf(clientId){return (data.engagements||[]).filter(e=>e.client_id===clientId)}
+function projectsOfEngagement(engId){return (data.projects||[]).filter(p=>p.engagement_id===engId)}
+function wbsById(id){return (data.wbsItems||[]).find(w=>w.id===id)}
+function wbsOfProject(projId){return (data.wbsItems||[]).filter(w=>w.project_id===projId)
+  .sort((a,b)=>(a.sort_order-b.sort_order)||String(a.activity_code).localeCompare(String(b.activity_code),'it'))}
+function wbsAperte(projId){return wbsOfProject(projId).filter(w=>STATI_APERTI.includes(w.status))}
+function engagementLabel(e){return e?`${e.code} · ${e.name}`:''}
+function wbsLabel(w){return w?`${w.code} · ${w.name}`:''}
+function projectFullCode(p){return p&&p.code?p.code:(p?p.name:'')}
+// Quante registrazioni pendono da una WBS: serve prima di chiuderla
+function wbsUsage(id){
+  const t=(data.entries||[]).filter(e=>e.wbs_id===id).length;
+  const m=(data.manualEntries||[]).filter(e=>e.wbs_id===id).length;
+  const x=(data.travelExpenses||[]).filter(e=>e.wbs_id===id).length;
+  return {t,m,x,tot:t+m+x};
+}
+function statoTag(st){const cls=st==='active'?'green':st==='closed'||st==='cancelled'?'gray':'orange';
+  return `<span class="tag ${cls}">${STATI[st]||st}</span>`}
+
+/* ---------- Elenco commesse ---------- */
+function engagementFilters(){
+  const f=state.engFilter||{};
+  const anni=[...new Set((data.engagements||[]).map(e=>e.year))].sort((a,b)=>b-a);
+  return `<div class="miniActions" style="grid-template-columns:1fr 1fr">
+    <select class="miniBtn" onchange="setEngFilter('client_id',this.value)"><option value="">Tutti i clienti</option>
+      ${(data.clients||[]).map(c=>`<option value="${c.id}" ${f.client_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
+    <select class="miniBtn" onchange="setEngFilter('year',this.value)"><option value="">Tutti gli anni</option>
+      ${anni.map(y=>`<option value="${y}" ${String(f.year)===String(y)?'selected':''}>${y}</option>`).join('')}</select>
+    <select class="miniBtn" onchange="setEngFilter('status',this.value)"><option value="">Tutti gli stati</option>
+      ${Object.entries(STATI).map(([k,v])=>`<option value="${k}" ${f.status===k?'selected':''}>${v}</option>`).join('')}</select>
+    <input class="miniBtn" placeholder="Cerca codice o nome" value="${esc(f.q||'')}" oninput="setEngFilter('q',this.value)">
+  </div>`;
+}
+function setEngFilter(k,v){state.engFilter={...(state.engFilter||{}),[k]:v};render()}
+function engagementRows(){
+  const f=state.engFilter||{};
+  return (data.engagements||[]).filter(e=>
+    (!f.client_id||e.client_id===f.client_id)&&
+    (!f.year||String(e.year)===String(f.year))&&
+    (!f.status||e.status===f.status)&&
+    (!f.q||(`${e.code} ${e.name}`).toLowerCase().includes(String(f.q).toLowerCase()))
+  ).sort((a,b)=>String(b.code).localeCompare(String(a.code),'it'));
+}
+function engagements(){
+  if(!wbsReady())return migrazioneMancante('Commesse');
+  const rows=engagementRows();
+  return appShell(`<h1>Commesse</h1>
+    <p class="sub">Una commessa per incarico. Il codice si compone da solo: codice cliente, anno e progressivo.</p>
+    <button class="primary" onclick="go('engagementNew')">+ Nuova commessa</button>
+    ${engagementFilters()}
+    <div class="list">${rows.map(e=>{
+      const prj=projectsOfEngagement(e.id);
+      return `<div class="row" onclick="openEngagement('${e.id}')">
+        <div class="date">${e.year}</div>
+        <div><div class="title">${esc(e.code)} ${statoTag(e.status)}</div>
+          <div class="desc">${esc(clientName(e.client_id))} · ${esc(e.name)}</div>
+          <div class="desc">${prj.length===1?'1 progetto':prj.length+' progetti'}${e.engagement_letter?' · '+esc(e.engagement_letter):''}</div></div>
+        <div class="chev">›</div></div>`}).join('')||
+      '<div class="empty">Nessuna commessa.'+(( data.engagements||[]).length?' Nessuna corrisponde ai filtri.':'')+'</div>'}</div>`);
+}
+function migrazioneMancante(titolo){
+  return appShell(`<h1>${esc(titolo)}</h1>
+    <div class="card"><b>Migrazione non ancora applicata</b>
+    <div class="desc" style="margin-top:6px">Questa sezione richiede le tabelle di commesse e WBS.
+    Esegui nel SQL Editor di Supabase, in quest'ordine:</div>
+    <div class="copybox">migrations/2026-09-09_commesse-progetti-wbs.sql
+migrations/2026-09-09_backfill-a-codici-cliente.sql
+&nbsp;&nbsp;(rivedi i codici cliente proposti)
+migrations/2026-09-09_backfill-b-commesse-wbs.sql</div>
+    <div class="desc">Fino ad allora il resto dell'app funziona normalmente.</div></div>
+    <button type="button" class="secondary" onclick="go('settings')">Torna a Impostazioni</button>`);
+}
+
+/* ---------- Dettaglio commessa ---------- */
+function openEngagement(id){navigateTo('engagementDetail',{edit:id})}
+function engagementDetail(){
+  if(!wbsReady())return migrazioneMancante('Commessa');
+  const e=engagementById(state.edit);if(!e)return engagements();
+  const prj=projectsOfEngagement(e.id);
+  const refs=(data.engagementReferences||[]).filter(r=>r.engagement_id===e.id);
+  return appShell(`<h1>${esc(e.code)}</h1>
+    <p class="sub">${esc(clientName(e.client_id))} · ${esc(e.name)} ${statoTag(e.status)}</p>
+    <div class="card"><b>Dati della commessa</b>
+      <div class="list" style="box-shadow:none;margin:10px 0 0">
+        ${rigaDato('Cliente contrattuale',clientName(e.client_id))}
+        ${rigaDato('Anno / progressivo',e.year+' / '+String(e.seq).padStart(3,'0'))}
+        ${rigaDato("Lettera d'incarico",e.engagement_letter||'—')}
+        ${rigaDato('Riferimento in fattura',e.invoice_reference||'—')}
+        ${rigaDato('Ordine cliente (PO)',e.purchase_order||'—')}
+        ${rigaDato('Periodo',[e.start_date?dateIT(e.start_date):'',e.end_date?dateIT(e.end_date):''].filter(Boolean).join(' → ')||'—')}
+        ${e.budget_amount?rigaDato('Budget',fmtEUR(e.budget_amount)):''}
+      </div>
+      <button type="button" class="secondary" style="margin-top:12px" onclick="go('engagementEdit')">Modifica commessa</button>
+    </div>
+    <h2>Progetti</h2>
+    <p class="sub">Il progetto è il livello a cui si fattura. Le WBS stanno dentro il progetto.</p>
+    <div class="list">${prj.map(p=>{
+      const w=wbsOfProject(p.id);
+      return `<div class="row" onclick="openProjectWbs('${p.id}')">
+        <div></div>
+        <div><div class="title">${esc(p.code||p.name)} ${statoTag(p.status||'active')}</div>
+          <div class="desc">${esc(p.name)}${p.end_client_name?' · cliente finale '+esc(p.end_client_name):''}</div>
+          <div class="desc">${w.length===1?'1 WBS':w.length+' WBS'}</div></div>
+        <div class="chev">›</div></div>`}).join('')||'<div class="empty">Nessun progetto in questa commessa.</div>'}</div>
+    <button type="button" class="secondary" onclick="go('projectNew')">+ Nuovo progetto</button>
+    <h2>Riferimenti contrattuali</h2>
+    <p class="sub">Una proroga non cambia la commessa: aggiunge un riferimento. Lo storico resta.</p>
+    <div class="list">${refs.map(r=>`<div class="row"><div></div>
+      <div><div class="title">${esc(r.engagement_letter||r.purchase_order||'Riferimento')}</div>
+        <div class="desc">${[r.valid_from?dateIT(r.valid_from):'',r.valid_to?dateIT(r.valid_to):''].filter(Boolean).join(' → ')||'senza scadenza'}${r.invoice_reference?' · '+esc(r.invoice_reference):''}</div></div>
+      <div class="value">${STATI_RIF[r.status]||r.status}</div></div>`).join('')||'<div class="empty">Nessun riferimento storicizzato.</div>'}</div>
+    <details class="moreFields"><summary>+ Aggiungi riferimento</summary>
+      <form class="form" onsubmit="addEngagementRef(event)" style="margin-top:10px">
+        <div class="field"><label>Lettera d'incarico</label><input name="engagement_letter" placeholder="Es. LI_202601"></div>
+        <div class="field"><label>Ordine cliente (PO)</label><input name="purchase_order"></div>
+        <div class="field"><label>Riferimento da riportare in fattura</label><input name="invoice_reference" placeholder="Es. LI_202601_Nome_Cognome"></div>
+        <div class="field"><label>Valido dal</label><input name="valid_from" type="date"></div>
+        <div class="field"><label>Valido al</label><input name="valid_to" type="date"></div>
+        <button class="primary">Aggiungi riferimento</button></form></details>
+    <button type="button" class="secondary" onclick="go('engagements')">Torna alle commesse</button>`);
+}
+const STATI_RIF={active:'Attivo',expired:'Scaduto',superseded:'Sostituito',cancelled:'Annullato'};
+function rigaDato(etichetta,valore){return `<div class="row"><div></div><div><div class="title">${esc(etichetta)}</div></div><div class="value">${esc(String(valore))}</div></div>`}
+
+/* ---------- Creazione e modifica commessa ---------- */
+function engagementForm(e){
+  const nuovo=!e;
+  const clientiConCodice=(data.clients||[]).filter(c=>c.code);
+  const senzaCodice=(data.clients||[]).filter(c=>!c.code);
+  if(nuovo&&!clientiConCodice.length)return appShell(`<h1>Nuova commessa</h1>
+    <div class="card"><b>Serve prima un codice cliente</b>
+    <div class="desc" style="margin-top:6px">Il codice della commessa si compone dal codice del cliente.
+    Assegnane uno in Impostazioni → Clienti.</div></div>
+    <button type="button" class="secondary" onclick="go('clients')">Vai ai clienti</button>`);
+  const c0=e?e.client_id:(clientiConCodice[0]||{}).id;
+  return appShell(`<h1>${nuovo?'Nuova commessa':'Modifica '+esc(e.code)}</h1>
+    <p class="sub">Il codice si compone da solo. Lettera d'incarico e PO sono campi a parte: non entrano nel codice.</p>
+    <form class="form" onsubmit="${nuovo?'addEngagement':'saveEngagement'}(event)">
+      <div class="field"><label>Cliente contrattuale</label>
+        <select name="client_id" ${nuovo?'onchange="previewEngCode()"':'disabled'}>
+          ${clientiConCodice.map(c=>`<option value="${c.id}" ${c.id===c0?'selected':''}>${esc(c.code)} · ${esc(c.name)}</option>`).join('')}
+        </select>${senzaCodice.length?`<div class="small">${senzaCodice.length} client${senzaCodice.length===1?'e senza codice non è':'i senza codice non sono'} selezionabil${senzaCodice.length===1?'e':'i'}.</div>`:''}</div>
+      <div class="field"><label>Anno</label><input name="year" type="number" value="${e?e.year:new Date().getFullYear()}" ${nuovo?'onchange="previewEngCode()"':'disabled'}></div>
+      ${nuovo?`<div class="field"><label>Codice che verrà assegnato</label><div class="copybox" id="engCodePreview">—</div>
+        <div class="small">Il progressivo definitivo lo assegna il database al salvataggio.</div></div>`:
+        `<div class="field"><label>Codice</label><div class="copybox">${esc(e.code)}</div></div>`}
+      <div class="field"><label>Nome o descrizione</label><input name="name" value="${e?esc(e.name):''}" required></div>
+      <div class="field"><label>Lettera d'incarico</label><input name="engagement_letter" value="${e?esc(e.engagement_letter||''):''}" placeholder="Es. LI_202601"></div>
+      <div class="field"><label>Riferimento da riportare in fattura</label><input name="invoice_reference" value="${e?esc(e.invoice_reference||''):''}" placeholder="Es. LI_202601_Nome_Cognome"></div>
+      <div class="field"><label>Ordine cliente (PO)</label><input name="purchase_order" value="${e?esc(e.purchase_order||''):''}"></div>
+      <div class="field"><label>Data di inizio</label><input name="start_date" type="date" value="${e?esc(e.start_date||''):''}"></div>
+      <div class="field"><label>Data di fine prevista</label><input name="end_date" type="date" value="${e?esc(e.end_date||''):''}"></div>
+      <div class="field"><label>Budget (facoltativo)</label><input name="budget_amount" type="number" step="0.01" value="${e&&e.budget_amount!=null?e.budget_amount:''}"></div>
+      <div class="field"><label>Stato</label><select name="status">${Object.entries(STATI).map(([k,v])=>`<option value="${k}" ${(e?e.status:'active')===k?'selected':''}>${v}</option>`).join('')}</select></div>
+      <div class="field"><label>Note</label><textarea name="notes">${e?esc(e.notes||''):''}</textarea></div>
+      <div class="actions"><button class="primary">${nuovo?'Crea commessa':'Salva modifiche'}</button>
+        <button type="button" class="secondary" onclick="go('${nuovo?'engagements':'engagementDetail'}')">Annulla</button></div>
+    </form>`);
+}
+function engagementNew(){return wbsReady()?engagementForm(null):migrazioneMancante('Nuova commessa')}
+function engagementEdit(){const e=engagementById(state.edit);return e?engagementForm(e):engagements()}
+// Anteprima del codice mentre si compila: il valore vero lo assegna
+// comunque il database.
+function previewEngCode(){
+  const f=document.querySelector('form.form');if(!f)return;
+  const c=clientById(f.client_id.value);const y=f.year.value||new Date().getFullYear();
+  const usate=engagementsOf(f.client_id.value).filter(e=>String(e.year)===String(y)).length;
+  const box=document.getElementById('engCodePreview');
+  if(box)box.textContent=c&&c.code?`${c.code}-${y}-${String(usate+1).padStart(3,'0')}`:'—';
+}
+
+/* ---------- Progetto: dati e WBS ---------- */
+function openProjectWbs(id){navigateTo('projectWbs',{edit:id})}
+function projectWbs(){
+  if(!wbsReady())return migrazioneMancante("WBS");
+  const p=(data.projects||[]).find(x=>x.id===state.edit);if(!p)return engagements();
+  const e=engagementById(p.engagement_id);
+  const ws=wbsOfProject(p.id);
+  const oreDi=w=>(data.entries||[]).filter(x=>x.wbs_id===w.id).reduce((t,x)=>t+Number(x.hours||0),0);
+  return appShell(`<h1>${esc(p.code||p.name)}</h1>
+    <p class="sub">${e?esc(e.code)+" · ":""}${esc(p.name)}${p.end_client_name?" · cliente finale "+esc(p.end_client_name):""} ${statoTag(p.status||"active")}</p>
+    <div class="card"><b>Il progetto è il livello di fatturazione</b>
+      <div class="desc" style="margin-top:6px">Le ore si registrano sulle WBS qui sotto, ma in fattura confluiscono
+      in una riga sola intestata a questo progetto.</div>
+      <div class="list" style="box-shadow:none;margin:10px 0 0">
+        ${rigaDato("Unità di fatturazione",p.billing_unit==="hour"?"Ore":"Giornate")}
+        ${rigaDato("Descrizione riga fattura",p.invoice_line_description||"— (si usa il nome del progetto)")}
+      </div>
+      <button type="button" class="secondary" style="margin-top:12px" onclick="go('projectEdit')">Modifica progetto</button>
+    </div>
+    <h2>WBS del progetto</h2>
+    <p class="sub">Codici a decine: 10, 20, 30… così puoi inserire una 15 in mezzo senza rinumerare niente.</p>
+    <div class="list">${ws.map(w=>{
+      const ore=oreDi(w);const u=wbsUsage(w.id);
+      return `<div class="row" onclick="editWbs('${w.id}')">
+        <div class="date">${esc(w.activity_code)}</div>
+        <div><div class="title">${esc(w.name)} ${statoTag(w.status)}${w.billable?"":' <span class="tag gray">non fatturabile</span>'}</div>
+          <div class="desc">${esc(w.code)} · ${TIPI_WBS[w.kind]||w.kind}</div>
+          <div class="desc">${fmtNum(ore,1)} h consuntivate${w.budget_hours?" su "+fmtNum(w.budget_hours,1)+" h di budget":""}${u.tot?" · "+u.tot+" registrazion"+(u.tot===1?"e":"i"):""}</div></div>
+        <div class="chev">›</div></div>`}).join("")||'<div class="empty">Nessuna WBS. Aggiungine una qui sotto.</div>'}</div>
+    <details class="moreFields" ${ws.length?"":"open"}><summary>+ Nuova WBS</summary>
+      <form class="form" onsubmit="addWbs(event)" style="margin-top:10px">
+        <div class="field"><label>Codice attività</label>
+          <input name="activity_code" maxlength="6" value="${String((ws.length+1)*10)}" oninput="this.value=normCode(this.value);previewWbsCode()">
+          <div class="small">Anteprima: <span id="wbsCodePreview">${esc(p.code||"")}-${(ws.length+1)*10}</span></div></div>
+        <div class="field"><label>Descrizione</label><input name="name" required placeholder="Es. Project Management"></div>
+        <div class="field"><label>Tipologia</label><select name="kind">${Object.entries(TIPI_WBS).map(([k,v])=>`<option value="${k}">${v}</option>`).join("")}</select></div>
+        <div class="field"><label>Fatturabile</label><select name="billable"><option value="1">Sì, le ore vanno in fattura</option><option value="0">No, attività non fatturabile</option></select></div>
+        <div class="field"><label>Budget ore (facoltativo)</label><input name="budget_hours" type="number" step="0.5"></div>
+        <button class="primary">Aggiungi WBS</button></form></details>
+    <button type="button" class="secondary" onclick="openEngagement('${p.engagement_id||""}')">Torna alla commessa</button>`);
+}
+function previewWbsCode(){
+  const f=document.querySelector("form.form");const p=(data.projects||[]).find(x=>x.id===state.edit);
+  const box=document.getElementById("wbsCodePreview");
+  if(f&&p&&box)box.textContent=(p.code||"")+"-"+normCode(f.activity_code.value);
+}
+function editWbs(id){navigateTo("wbsEdit",{edit:id,parent:state.edit})}
+function wbsEdit(){
+  const w=wbsById(state.edit);if(!w)return engagements();
+  const u=wbsUsage(w.id);const bloccato=u.tot>0;
+  return appShell(`<h1>${esc(w.code)}</h1>
+    <p class="sub">${esc(w.name)} ${statoTag(w.status)}</p>
+    <form class="form" onsubmit="saveWbs(event)">
+      <div class="field"><label>Codice attività</label>
+        <input name="activity_code" value="${esc(w.activity_code)}" ${bloccato?"readonly":'oninput="this.value=normCode(this.value)"'}>
+        <div class="small">${bloccato?"Bloccato: ci sono "+u.tot+" registrazion"+(u.tot===1?"e":"i")+" su questa WBS. La descrizione si può comunque cambiare.":"Ancora modificabile: nessuna registrazione la usa."}</div></div>
+      <div class="field"><label>Descrizione</label><input name="name" value="${esc(w.name)}" required></div>
+      <div class="field"><label>Tipologia</label><select name="kind">${Object.entries(TIPI_WBS).map(([k,v])=>`<option value="${k}" ${w.kind===k?"selected":""}>${v}</option>`).join("")}</select></div>
+      <div class="field"><label>Fatturabile</label><select name="billable"><option value="1" ${w.billable?"selected":""}>Sì, le ore vanno in fattura</option><option value="0" ${w.billable?"":"selected"}>No, attività non fatturabile</option></select></div>
+      <div class="field"><label>Budget ore</label><input name="budget_hours" type="number" step="0.5" value="${w.budget_hours!=null?w.budget_hours:""}"></div>
+      <div class="field"><label>Ordinamento</label><input name="sort_order" type="number" value="${w.sort_order||0}"></div>
+      <div class="field"><label>Stato</label><select name="status">${Object.entries(STATI).map(([k,v])=>`<option value="${k}" ${w.status===k?"selected":""}>${v}</option>`).join("")}</select>
+        <div class="small">Una WBS chiusa non accetta nuove registrazioni, ma resta nello storico e nei report.</div></div>
+      <div class="field"><label>Note</label><textarea name="notes">${esc(w.notes||"")}</textarea></div>
+      <div class="actions"><button class="primary">Salva modifiche</button>
+        ${bloccato?"":`<button type="button" class="secondary danger" onclick="deleteWbs('${w.id}')">Elimina</button>`}
+        <button type="button" class="secondary" onclick="openProjectWbs('${w.project_id}')">Annulla</button></div>
+    </form>`);
+}
+
+/* ---------- Azioni ---------- */
+async function addEngagement(ev){
+  ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));
+  const payload={client_id:f.client_id,year:Number(f.year)||new Date().getFullYear(),name:norm(f.name),
+    engagement_letter:norm(f.engagement_letter)||null,invoice_reference:norm(f.invoice_reference)||null,
+    purchase_order:norm(f.purchase_order)||null,start_date:f.start_date||null,end_date:f.end_date||null,
+    budget_amount:f.budget_amount?Number(f.budget_amount):null,status:f.status||"active",notes:norm(f.notes)||null};
+  const {error}=await insertResilient("engagements",payload);
+  if(error)return setMsg(messaggioCommessa(error),8000);
+  await reload();state.view="engagements";render();
+  setMsg("Commessa creata.",3500);
+}
+async function saveEngagement(ev){
+  ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));
+  const payload={name:norm(f.name),engagement_letter:norm(f.engagement_letter)||null,
+    invoice_reference:norm(f.invoice_reference)||null,purchase_order:norm(f.purchase_order)||null,
+    start_date:f.start_date||null,end_date:f.end_date||null,
+    budget_amount:f.budget_amount?Number(f.budget_amount):null,status:f.status,notes:norm(f.notes)||null};
+  const r=await updateResilient("engagements",payload,state.edit);
+  if(r.error)return setMsg(messaggioCommessa(r.error),8000);
+  await reload();state.view="engagementDetail";render();
+}
+async function addEngagementRef(ev){
+  ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));
+  if(!norm(f.engagement_letter)&&!norm(f.purchase_order))return setMsg("Serve almeno una lettera d'incarico o un PO.",5000);
+  const {error}=await insertResilient("engagement_references",{engagement_id:state.edit,
+    engagement_letter:norm(f.engagement_letter)||null,purchase_order:norm(f.purchase_order)||null,
+    invoice_reference:norm(f.invoice_reference)||null,valid_from:f.valid_from||null,valid_to:f.valid_to||null,
+    reference_type:norm(f.purchase_order)&&!norm(f.engagement_letter)?"purchase_order":"engagement_letter"});
+  if(error)return setMsg(error.message,7000);
+  await reload();render();setMsg("Riferimento aggiunto. Lo storico precedente resta.",4000);
+}
+async function addWbs(ev){
+  ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));
+  const {error}=await insertResilient("wbs_items",{project_id:state.edit,activity_code:normCode(f.activity_code),
+    name:norm(f.name),kind:f.kind||"activity",billable:f.billable==="1",
+    budget_hours:f.budget_hours?Number(f.budget_hours):null,sort_order:Number(normCode(f.activity_code))||0});
+  if(error)return setMsg(messaggioWbs(error),8000);
+  await reload();render();setMsg("WBS aggiunta.",3000);
+}
+async function saveWbs(ev){
+  ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));
+  const w=wbsById(state.edit);if(!w)return;
+  const payload={name:norm(f.name),kind:f.kind,billable:f.billable==="1",
+    budget_hours:f.budget_hours?Number(f.budget_hours):null,sort_order:Number(f.sort_order)||0,
+    status:f.status,notes:norm(f.notes)||null};
+  if(!wbsUsage(w.id).tot)payload.activity_code=normCode(f.activity_code);
+  const r=await updateResilient("wbs_items",payload,w.id);
+  if(r.error)return setMsg(messaggioWbs(r.error),8000);
+  await reload();navigateTo("projectWbs",{edit:w.project_id});
+}
+async function deleteWbs(id){
+  const w=wbsById(id);if(!w)return;
+  if(wbsUsage(id).tot)return setMsg("Questa WBS ha delle registrazioni: si può chiudere, non eliminare.",6000);
+  if(!confirm("Eliminare la WBS "+w.code+"? Non è mai stata usata, quindi non si perde nulla."))return;
+  const {error}=await sb.from("wbs_items").delete().eq("id",id);
+  if(error)return setMsg(error.message,7000);
+  await reload();navigateTo("projectWbs",{edit:w.project_id});
+}
+// Messaggi comprensibili al posto degli errori del database
+function messaggioCommessa(e){
+  const m=String(e&&e.message||e);
+  if(/non ha un codice/.test(m))return "Il cliente non ha un codice: assegnalo prima, in Impostazioni → Clienti.";
+  if(/duplicate key|unique/i.test(m))return "Esiste già una commessa con questo codice.";
+  return m;
+}
+function messaggioWbs(e){
+  const m=String(e&&e.message||e);
+  if(/gia. usato/i.test(m))return "Questa WBS è già usata in consuntivi o spese: il codice non si può più cambiare. La descrizione sì.";
+  if(/duplicate key|unique/i.test(m))return "Esiste già una WBS con questo codice in questo progetto.";
+  if(/non e. attiva/i.test(m))return "La WBS non è attiva: non accetta nuove registrazioni.";
+  if(/non ha un codice completo/.test(m))return "Il progetto non è collegato a una commessa: collegalo prima.";
+  return m;
+}
+
+/* ---------- Nuovo progetto dentro una commessa ---------- */
+function projectNew(){
+  if(!wbsReady())return migrazioneMancante("Nuovo progetto");
+  const e=engagementById(state.edit);if(!e)return engagements();
+  const usati=projectsOfEngagement(e.id).map(p=>p.short_code).filter(Boolean);
+  return appShell(`<h1>Nuovo progetto</h1>
+    <p class="sub">Dentro la commessa ${esc(e.code)}. Il progetto è il livello a cui si fattura.</p>
+    <form class="form" onsubmit="addProjectInEngagement(event)">
+      <div class="field"><label>Codice breve</label>
+        <input name="short_code" maxlength="6" required placeholder="Es. EQU" oninput="this.value=normCode(this.value);previewPrjCode()">
+        <div class="small">Anteprima: <span id="prjCodePreview">${esc(e.code)}-…</span>${usati.length?" · già usati: "+usati.map(esc).join(", "):""}</div></div>
+      <div class="field"><label>Nome del progetto</label><input name="name" required placeholder="Es. EQUANS"></div>
+      <div class="field"><label>Cliente finale</label><input name="end_client_name" placeholder="Se diverso dal cliente contrattuale"></div>
+      <div class="field"><label>Unità di fatturazione</label><select name="billing_unit"><option value="day">Giornate</option><option value="hour">Ore</option></select></div>
+      <div class="field"><label>Descrizione predefinita della riga di fattura</label><input name="invoice_line_description" placeholder="Se vuoto si usa il nome del progetto"></div>
+      <div class="field"><label>Data di inizio</label><input name="start_date" type="date"></div>
+      <div class="field"><label>Data di fine</label><input name="end_date" type="date"></div>
+      <div class="actions"><button class="primary">Crea progetto</button>
+        <button type="button" class="secondary" onclick="openEngagement('${e.id}')">Annulla</button></div>
+    </form>`);
+}
+function previewPrjCode(){
+  const f=document.querySelector("form.form");const e=engagementById(state.edit);
+  const box=document.getElementById("prjCodePreview");
+  if(f&&e&&box)box.textContent=e.code+"-"+(normCode(f.short_code.value)||"…");
+}
+async function addProjectInEngagement(ev){
+  ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));
+  const e=engagementById(state.edit);if(!e)return;
+  const {error}=await insertResilient("projects",{client_id:e.client_id,engagement_id:e.id,
+    short_code:normCode(f.short_code),name:norm(f.name),end_client_name:norm(f.end_client_name)||null,
+    billing_unit:f.billing_unit||"day",invoice_line_description:norm(f.invoice_line_description)||null,
+    start_date:f.start_date||null,end_date:f.end_date||null,status:"active",active:true});
+  if(error)return setMsg(/duplicate key|unique/i.test(String(error.message))?
+    "Esiste già un progetto con questo codice in questa commessa.":error.message,8000);
+  await reload();render();setMsg("Progetto creato.",3000);
+}
+
+function render(){document.documentElement.setAttribute('data-view',state.view||'home');if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,newChoice,engagements,engagementNew,engagementEdit,engagementDetail,projectNew,projectWbs,wbsEdit,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,timesheet,griglia,pivot,summary,billing,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,incassi,balance,taxSettings,tasseFuture,fatturatoDetail,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
 
 Object.assign(window,{
+  normCode,wbsReady,engagementsOf,openEngagement,openProjectWbs,editWbs,setEngFilter,
+  previewEngCode,previewPrjCode,previewWbsCode,addEngagement,saveEngagement,addEngagementRef,
+  addProjectInEngagement,addWbs,saveWbs,deleteWbs,
   setGridScope,
   gridWeekShift,
   openGriglia,
