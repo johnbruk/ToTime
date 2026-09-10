@@ -550,3 +550,9 @@ table.griglia th,table.griglia td{font-size:var(--t-sm)}
 /* Un giorno con più voci per la stessa commessa resta scrivibile: il
    trattino sotto avvisa che salvando diventeranno una voce sola. */
 table.griglia td.gg.multi input{text-decoration:underline dotted;text-underline-offset:3px}
+
+/* Il codice WBS nella riga della griglia: presente ma discreto */
+table.griglia .riga .wbsCode{font-variant-numeric:tabular-nums;opacity:.75}
+/* La cascata sotto la griglia ha quattro tendine invece di tre */
+.nuovaRiga{flex-wrap:wrap}
+.nuovaRiga select[hidden]{display:none!important}

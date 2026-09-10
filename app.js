@@ -768,7 +768,10 @@ function pivot(){
    cambia solo il modo di compilarlo. */
 function daysInMonth(ymStr){const [y,m]=String(ymStr).split('-').map(Number);return new Date(Date.UTC(y,m,0)).getUTCDate()}
 function isoOf(y,m,d){return `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`}
-function gridKey(e){return [e.client_id||'',e.project_id||'',e.activity_id||''].join('|')}
+// La chiave della riga: se la voce ha una WBS quella comanda,
+// altrimenti resta il raggruppamento di sempre. Cosi' una griglia
+// con voci miste, migrate e no, si legge lo stesso.
+function gridKey(e){return e.wbs_id?('w|'+e.wbs_id):[e.client_id||'',e.project_id||'',e.activity_id||''].join('|')}
 function gridRows(){
   const map=new Map();
   // Anche il pianificato: sta nella riga della sua commessa ed è una
@@ -777,7 +780,7 @@ function gridRows(){
   // futuri si scriveva alla cieca, sopra un valore che non si vedeva.
   rowsForMonth().forEach(e=>{
     const k=gridKey(e);
-    if(!map.has(k))map.set(k,{k,client_id:e.client_id,project_id:e.project_id,activity_id:e.activity_id,hours:{},items:{}});
+    if(!map.has(k))map.set(k,{k,client_id:e.client_id,project_id:e.project_id,activity_id:e.activity_id,wbs_id:e.wbs_id||null,hours:{},items:{}});
     const r=map.get(k),d=String(e.entry_date);
     r.hours[d]=(r.hours[d]||0)+Number(e.hours||0);
     (r.items[d]=r.items[d]||[]).push(e);
@@ -870,8 +873,7 @@ function griglia(){
 
   const body=rows.length
     ? rows.map(r=>`<tr>
-        <td class="riga"><div class="n">${esc(clientName(r.client_id)||'Senza cliente')}</div>
-          <div class="d">${esc(projectName(r.project_id)||'Senza progetto')} · ${esc(activityName(r.activity_id)||'Senza attività')}</div></td>
+        <td class="riga">${gridRigaEtichetta(r)}</td>
         ${cells(r)}<td class="tot">${gridNum(rowTot(r))}</td></tr>`).join('')
     : (assRow?'':`<tr><td class="riga vuota" colspan="${days.length+2}">Nessuna commessa in questo mese. Aggiungine una qui sotto.</td></tr>`);
 
@@ -893,9 +895,11 @@ function griglia(){
         <tfoot><tr><td class="riga">Totale giornata</td>${foot}<td class="tot">${gridNum(total+assTot)}</td></tr></tfoot>
       </table></div>
       <div class="nuovaRiga">
-        <select id="g-cliente" onchange="gridFillProjects()" aria-label="Cliente">${opts(activeClients(),'— cliente —')}</select>
-        <select id="g-progetto" aria-label="Progetto"><option value="">— prima scegli il cliente —</option></select>
-        <select id="g-attivita" aria-label="Attività">${opts(sortEntities('activities',data.activities.filter(a=>a.active)),'— attività —')}</select>
+        <select id="g-cliente" onchange="gridClienteCambiato()" aria-label="Cliente">${opts(activeClients(),'— cliente —')}</select>
+        <select id="g-commessa" onchange="gridCommessaCambiata()" aria-label="Commessa"><option value="">— prima scegli il cliente —</option></select>
+        <select id="g-progetto" onchange="gridProgettoCambiato()" aria-label="Progetto"><option value="">— prima scegli la commessa —</option></select>
+        <select id="g-wbs" aria-label="WBS"><option value="">— prima scegli il progetto —</option></select>
+        <select id="g-attivita" aria-label="Attività" hidden>${opts(sortEntities('activities',data.activities.filter(a=>a.active)),'— attività —')}</select>
         <button type="button" class="miniBtn" onclick="addGridRow()">+ Aggiungi riga</button>
       </div>
       <div class="calLegend" style="padding:10px 14px">
@@ -910,11 +914,20 @@ function addGridRow(){
   const c=document.getElementById('g-cliente')?.value||'';
   const p=document.getElementById('g-progetto')?.value||'';
   const a=document.getElementById('g-attivita')?.value||'';
+  const w=document.getElementById('g-wbs')?.value||'';
   if(!c)return setMsg('Scegli almeno il cliente.',5000);
-  const k=[c,p,a].join('|');
+  // dove il cliente ha delle commesse, la WBS e' obbligatoria: e'
+  // quella che dice su cosa si sta lavorando
+  if(wbsReady()&&engagementsOf(c).length&&!w)
+    return setMsg('Scegli commessa, progetto e WBS.',5000);
+  const lin=w?wbsLineage(w):null;
+  const k=w?('w|'+w):[c,p,a].join('|');
   state.gridNew=state.gridNew||[];
-  if(gridRows().some(r=>r.k===k))return setMsg('Questa commessa è già nella griglia.',5000);
-  state.gridNew.push({k,client_id:c,project_id:p||null,activity_id:a||null});
+  if(gridRows().some(r=>r.k===k))return setMsg('Questa riga è già nella griglia.',5000);
+  state.gridNew.push({k,client_id:lin?lin.client_id:c,
+    project_id:(lin?lin.project.id:p)||null,
+    activity_id:(lin&&lin.wbs.activity_id?lin.wbs.activity_id:a)||null,
+    wbs_id:w||null});
   render();
 }
 function gridConfirmRed(dates){
@@ -944,7 +957,7 @@ async function saveGrid(){
     const items=r.items[iso]||[];
     if(after===0)toDelete.push(...items.map(e=>e.id));
     else if(!items.length){const c=clientById(r.client_id);
-      toCreate.push({entry_date:iso,client_id:r.client_id,project_id:r.project_id||null,activity_id:r.activity_id||null,hours:after,daily_rate_snapshot:Number(c?.daily_rate||0),standard_hours_snapshot:Number(c?.standard_hours||8)});}
+      toCreate.push({entry_date:iso,client_id:r.client_id,project_id:r.project_id||null,activity_id:r.activity_id||null,wbs_id:r.wbs_id||null,hours:after,daily_rate_snapshot:Number(c?.daily_rate||0),standard_hours_snapshot:Number(c?.standard_hours||8)});}
     else{
       // La casella è l'unica verità: la prima voce prende il valore
       // scritto e le altre dello stesso giorno spariscono. Altrimenti
@@ -1531,6 +1544,7 @@ function wbsEdit(){
       <div class="field"><label>Stato</label><select name="status">${Object.entries(STATI).map(([k,v])=>`<option value="${k}" ${w.status===k?"selected":""}>${v}</option>`).join("")}</select>
         <div class="small">Una WBS chiusa non accetta nuove registrazioni, ma resta nello storico e nei report.</div></div>
       <div class="field"><label>Note</label><textarea name="notes">${esc(w.notes||"")}</textarea></div>
+      ${bloccato?wbsSpostaOptions(w):""}
       <div class="actions"><button class="primary">Salva modifiche</button>
         ${bloccato?"":`<button type="button" class="secondary danger" onclick="deleteWbs('${w.id}')">Elimina</button>`}
         <button type="button" class="secondary" onclick="openProjectWbs('${w.project_id}')">Annulla</button></div>
@@ -1721,9 +1735,90 @@ function refreshHierForForm(form){
   hierChanged(form,'engagement');
 }
 
+/* ---------- La griglia ragiona per WBS quando c'e' ----------
+   La riga mostra la commessa, non solo cliente e progetto: era
+   l'informazione che mancava per capire su cosa si sta lavorando. */
+function gridRigaEtichetta(r){
+  const w=r.wbs_id?wbsById(r.wbs_id):null;
+  if(w){
+    const lin=wbsLineage(w.id);
+    const commessa=lin&&lin.engagement?lin.engagement.code:'';
+    return `<div class="n">${esc(w.name)}</div>
+      <div class="d">${commessa?esc(commessa)+' · ':''}${esc(lin?lin.project.name:'')}</div>
+      <div class="d wbsCode">${esc(w.code)}${w.billable?'':' · non fatturabile'}</div>`;
+  }
+  return `<div class="n">${esc(clientName(r.client_id)||'Senza cliente')}</div>
+    <div class="d">${esc(projectName(r.project_id)||'Senza progetto')} · ${esc(activityName(r.activity_id)||'Senza attività')}</div>`;
+}
+/* La cascata sotto la griglia */
+function gridClienteCambiato(){
+  const c=document.getElementById('g-cliente').value;
+  const com=document.getElementById('g-commessa');
+  if(wbsReady()&&engagementsOf(c).length){
+    com.hidden=false;
+    com.innerHTML=engagementOptions(c,'');
+  }else{
+    // niente commesse per questo cliente: si torna al percorso di prima
+    com.hidden=true;
+    document.getElementById('g-attivita').hidden=false;
+    document.getElementById('g-wbs').hidden=true;
+    gridFillProjects();return;
+  }
+  document.getElementById('g-attivita').hidden=true;
+  document.getElementById('g-wbs').hidden=false;
+  gridCommessaCambiata();
+}
+function gridCommessaCambiata(){
+  const e=document.getElementById('g-commessa').value;
+  document.getElementById('g-progetto').innerHTML=
+    e?projectOptionsOfEngagement(e,''):'<option value="">— prima scegli la commessa —</option>';
+  gridProgettoCambiato();
+}
+function gridProgettoCambiato(){
+  const p=document.getElementById('g-progetto').value;
+  const w=document.getElementById('g-wbs');
+  if(w)w.innerHTML=p?wbsOptions(p,''):'<option value="">— prima scegli il progetto —</option>';
+}
+
+/* ---------- Spostare le registrazioni da una WBS a un'altra ----------
+   Serve a riorganizzare: le WBS create dalla migrazione portano i nomi
+   delle vecchie attivita', e chi usa l'app vuole le proprie. Si crea
+   la WBS giusta in anagrafica, ci si spostano sopra le registrazioni,
+   e la vecchia si chiude. */
+function wbsSpostaOptions(w){
+  const altre=wbsOfProject(w.project_id).filter(x=>x.id!==w.id&&STATI_APERTI.includes(x.status));
+  if(!altre.length)return '';
+  return `<div class="field"><label>Sposta le registrazioni su un'altra WBS</label>
+    <select id="wbsTarget">${altre.map(x=>`<option value="${x.id}">${esc(x.activity_code)} · ${esc(x.name)}</option>`).join('')}</select>
+    <div class="small">Le ${wbsUsage(w.id).tot} registrazioni passano alla WBS scelta. Importi e date non cambiano.</div>
+    <button type="button" class="secondary" style="margin-top:8px" onclick="spostaWbs('${w.id}')">Sposta e basta</button></div>`;
+}
+async function spostaWbs(daId){
+  const da=wbsById(daId);const aId=document.getElementById('wbsTarget')?.value;
+  const a=wbsById(aId);if(!da||!a)return;
+  const u=wbsUsage(daId);
+  if(!u.tot)return setMsg('Non ci sono registrazioni da spostare.',4000);
+  if(!confirm(`Spostare ${u.tot} registrazion${u.tot===1?'e':'i'} da ${da.code} a ${a.code}?\n\nImporti, date e note non cambiano: cambia solo la WBS.`))return;
+  state.busy=true;render();
+  try{
+    for(const [tabella,chiave] of [['timesheet_entries','entries'],['manual_entries','manualEntries'],['travel_expenses','travelExpenses']]){
+      const ids=(data[chiave]||[]).filter(e=>e.wbs_id===daId).map(e=>e.id);
+      if(!ids.length)continue;
+      const {error}=await sb.from(tabella).update({wbs_id:aId}).in('id',ids);
+      if(error)throw error;
+    }
+  }catch(e){state.busy=false;return setMsg(messaggioWbs(e),8000)||render();}
+  state.busy=false;
+  await reload();
+  navigateTo('projectWbs',{edit:da.project_id});
+  setMsg(`${u.tot} registrazion${u.tot===1?'e spostata':'i spostate'} su ${a.code}. Ora ${da.code} è vuota e si può chiudere o eliminare.`,6000);
+}
+
 function render(){document.documentElement.setAttribute('data-view',state.view||'home');if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,newChoice,engagements,engagementNew,engagementEdit,engagementDetail,projectNew,projectWbs,wbsEdit,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,timesheet,griglia,pivot,summary,billing,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,incassi,balance,taxSettings,tasseFuture,fatturatoDetail,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
 
 Object.assign(window,{
+  spostaWbs,
+  gridClienteCambiato,gridCommessaCambiata,gridProgettoCambiato,
   hierChanged,refreshHierForForm,wbsLineage,hierAvailable,
   normCode,wbsReady,engagementsOf,openEngagement,openProjectWbs,editWbs,setEngFilter,
   previewEngCode,previewPrjCode,previewWbsCode,addEngagement,saveEngagement,addEngagementRef,

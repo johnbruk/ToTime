@@ -201,8 +201,12 @@ ok(await pgw.evaluate(()=>getComputedStyle(document.querySelector('.settimanaNav
 ok(await pgw.evaluate(()=>{const t=[...document.querySelectorAll('.tot')][0];return /Mese/.test(t.textContent)}),'la colonna dei totali dice "Mese", perché conta più della settimana mostrata');
 const alt=await pgw.evaluate(()=>[...document.querySelectorAll('.grigliaCard .barra button')].map(b=>Math.round(b.getBoundingClientRect().height)));
 ok(new Set(alt).size===1&&alt[0]>=44,'i due pulsanti hanno la stessa altezza',JSON.stringify(alt));
-const selH=await pgw.evaluate(()=>[...document.querySelectorAll('.nuovaRiga select,.nuovaRiga button')].map(e=>Math.round(e.getBoundingClientRect().width)));
-ok(new Set(selH).size===1,'i selettori sono incolonnati e larghi uguale',JSON.stringify(selH));
+// solo le tendine visibili: una nascosta ha larghezza zero e non
+// dice niente sull'allineamento
+const selH=await pgw.evaluate(()=>[...document.querySelectorAll('.nuovaRiga select,.nuovaRiga button')]
+  .filter(e=>!e.hidden&&e.getBoundingClientRect().width>0)
+  .map(e=>Math.round(e.getBoundingClientRect().width)));
+ok(new Set(selH).size===1,'i selettori visibili sono incolonnati e larghi uguale',JSON.stringify(selH));
 
 await pgw.evaluate(()=>window.gridWeekShift(1));await pgw.waitForTimeout(400);
 const v2=await vis();
