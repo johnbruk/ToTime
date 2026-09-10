@@ -39,5 +39,8 @@ select 'policy delle tabelle nuove che rivalutano auth.uid() per riga' as contro
 from pg_policies
 where schemaname='public'
   and tablename in ('engagements','engagement_references','wbs_items','engagement_counters','billing_lines','invoice_line_allocations')
-  and (coalesce(qual,'') ~ 'auth\.uid\(\)' and coalesce(qual,'') !~ 'select auth\.uid\(\)'
-       or coalesce(with_check,'') ~ 'auth\.uid\(\)' and coalesce(with_check,'') !~ 'select auth\.uid\(\)');
+  -- ~* e non ~: PostgreSQL memorizza "SELECT" in maiuscolo, e un
+  -- confronto sensibile alle maiuscole direbbe che non e' corretta
+  -- nessuna policy
+  and ((coalesce(qual,'') ~* 'auth\.uid\(\)' and coalesce(qual,'') !~* 'select auth\.uid\(\)')
+    or (coalesce(with_check,'') ~* 'auth\.uid\(\)' and coalesce(with_check,'') !~* 'select auth\.uid\(\)'));
