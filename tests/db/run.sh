@@ -33,7 +33,8 @@ run_db () {                      # $1 = nome db, $2... = file .sql
   # anche le correzioni per gli advisor: si prova quello che finisce in produzione
   for extra in 2026-09-10_advisor-fix.sql \
                2026-09-10_advisor-fix-2-rls-performance.sql \
-               2026-09-10_advisor-fix-3-rls-tabelle-storiche.sql; do
+               2026-09-10_advisor-fix-3-rls-tabelle-storiche.sql \
+               2026-09-10_completamento.sql; do
     psql -h "$RUN" -p "$PORT" -U postgres -d "$db" -q -v ON_ERROR_STOP=1 -f "$ROOT/migrations/$extra" >/dev/null 2>&1
   done
   for f in "$@"; do
@@ -48,6 +49,7 @@ run_db () {                      # $1 = nome db, $2... = file .sql
 
 run_db totime_test "$HERE/wbs-model.sql"
 run_db totime_rls  "$HERE/wbs-rls.sql"
+run_db totime_obbl "$HERE/wbs-obbligo.sql"
 
 echo ""
 echo "RISULTATO: $pass OK / $fail KO"
