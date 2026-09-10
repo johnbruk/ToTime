@@ -896,9 +896,9 @@ function griglia(){
       </table></div>
       <div class="nuovaRiga">
         <select id="g-cliente" onchange="gridClienteCambiato()" aria-label="Cliente">${opts(activeClients(),'— cliente —')}</select>
-        <select id="g-commessa" onchange="gridCommessaCambiata()" aria-label="Commessa"><option value="">— prima scegli il cliente —</option></select>
-        <select id="g-progetto" onchange="gridProgettoCambiato()" aria-label="Progetto"><option value="">— prima scegli la commessa —</option></select>
-        <select id="g-wbs" aria-label="WBS"><option value="">— prima scegli il progetto —</option></select>
+        <select id="g-progetto" onchange="gridProgettoCambiato()" aria-label="Progetto / cliente finale"><option value="">— prima scegli il cliente —</option></select>
+        <select id="g-commessa" onchange="gridCommessaCambiata()" aria-label="Commessa"><option value="">— prima scegli il progetto —</option></select>
+        <select id="g-wbs" aria-label="Attività"><option value="">— prima scegli la commessa —</option></select>
         <select id="g-attivita" aria-label="Attività" hidden>${opts(sortEntities('activities',data.activities.filter(a=>a.active)),'— attività —')}</select>
         <button type="button" class="miniBtn" onclick="addGridRow()">+ Aggiungi riga</button>
       </div>
@@ -1232,7 +1232,8 @@ async function changePassword(ev){ev.preventDefault();const f=Object.fromEntries
 function settingsRow(view,icon,title,desc,onclick){return `<div class="row" onclick="${onclick||`go('${view}')`}"><div class="roundIcon blue">${icon}</div><div><div class="title">${title}</div><div class="desc">${desc}</div></div><div>›</div></div>`}
 function settings(){const email=esc(session?.user?.email||'');return appShell(`<div class="screenTitle">Impostazioni</div>
 <h2>Account</h2><div class="list">${settingsRow('account','◔','Profilo e password',email||'Dati di contatto e accesso')}</div>
-<h2>Anagrafiche</h2><div class="list">${settingsRow('clients','👤','Clienti','Tariffe e tipo compenso')}${settingsRow('projects','📁','Progetti / Clienti finali','Collegati al cliente principale')}${settingsRow('activities','🏷️','Attività','PM, AMS, Gestione...')}${settingsRow('expenseCategories','🧾','Voci di costo / spesa','Rimborsabili e non rimborsabili')}</div>
+<h2>Anagrafiche</h2>${wbsReady()?`<p class="sub">Si parte dal cliente e si scende: <b>Cliente › Progetto / cliente finale › Commessa › Attività</b>.
+    Ogni livello si crea da dentro quello sopra, così non ci sono elenchi separati da tenere allineati a mano.</p>`:''}<div class="list">${settingsRow('clients','👤','Clienti','Da qui si scende a progetti, commesse e attività')}${wbsReady()?settingsRow('projects','📁','Progetti / Clienti finali','Elenco di tutti i progetti, per ritrovarli'):settingsRow('projects','📁','Progetti / Clienti finali','Collegati al cliente principale')}${wbsReady()?settingsRow('engagements','📄','Commesse','Elenco di tutte le commesse, per ritrovarle'):''}${settingsRow('activities','🏷️','Attività','PM, AMS, Gestione... l\'elenco unico da cui pescare')}${settingsRow('expenseCategories','🧾','Voci di costo / spesa','Rimborsabili e non rimborsabili')}</div>
 <h2>Fatturazione e fisco</h2><div class="list">${settingsRow('invoiceTemplates','📄','Template fattura','Descrizioni da copiare su Fiscozen')}${settingsRow('taxSettings','%','Configurazione fiscale','Forfettario, ATECO, aliquote e proiezione')}${settingsRow('taxPayments','◈','Pagamenti fiscali','Contributi INPS e versamenti')}</div>
 <h2>Analisi e dati</h2><div class="list">${settingsRow('exportTimesheet','⬇','Export Timesheet Excel','Scarica il dettaglio mensile')}<label class="row" style="cursor:pointer"><div class="roundIcon blue">⬆</div><div><div class="title">Importa da CSV</div><div class="desc">Consuntivi in blocco</div></div><div>›</div><input type="file" accept=".csv,text/csv" style="display:none" onchange="importCsv(event)"></label></div>
 <h2>App</h2><div class="list">${settingsRow('appearance','◐','Aspetto / Tema','Chiaro o scuro')}<div class="row"><div class="roundIcon blue">☁</div><div><div class="title">Database</div><div class="desc">Supabase PostgreSQL${email?' · '+email:''}</div></div><div></div></div></div>
@@ -1243,15 +1244,37 @@ function appearance(){return appShell(`<div class="screenTitle">Aspetto / Tema</
 function exportTimesheetViewOptions(){const clients=activeClients();const selected=clients[0]?.id||'';return `<div class="field"><label>Mese</label><input name="month" type="month" value="${state.month}"></div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)"><option value="">Tutti i clienti</option>${clients.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Cliente/Progetto</label><select name="project_id"><option value="">Tutti i progetti</option>${projectOptions(selected)}</select></div><div class="field"><label>Includi importi</label><select name="include_amount"><option value="false">No, solo dettaglio operativo</option><option value="true">Sì, includi importi</option></select></div>`}
 function exportTimesheet(){return appShell(`<div class="screenTitle">Export Timesheet Excel</div><p class="sub">Scarica il dettaglio mensile da inviare al cliente.</p><form class="form" onsubmit="downloadTimesheetExcel(event)">${exportTimesheetViewOptions()}<div class="actions"><button class="primary">Scarica Excel</button><button type="button" class="secondary" onclick="go('settings')">Annulla</button></div></form>`)}
 
-function clients(){return appShell(`<h1>Clienti</h1><form class="form" onsubmit="addClient(event)"><div class="field"><label>Nome cliente</label><input name="name" required></div><div class="field"><label>Codice cliente</label><input name="code" maxlength="5" placeholder="Es. SO" oninput="this.value=normCode(this.value)"><div class="small">Da 2 a 5 lettere o cifre. Entra nel codice di ogni commessa: una volta usato non si cambia piu'.</div></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h">Tariffa giornaliera 8h</option><option value="monthly_flat">Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="0"></div><button class="primary">Aggiungi cliente</button></form>${sortControl('clients')}<div class="list">${sortEntities('clients',data.clients).map(c=>`<div class="row" onclick="editClient('${c.id}')"><div></div><div><div class="title">${esc(c.name)}</div><div class="desc">${c.compensation_type==='daily_rate_8h'?'Tariffa giornaliera 8h · '+fmtEUR(c.daily_rate||0):'Una tantum mensile'} · ${c.active?'Attivo':'Disattivo'}</div></div>${moveBtns('clients',c.id)}</div>`).join('')||emptyForm('Nessun cliente ancora inserito.')}</div>`)}
+function clients(){return appShell(`<h1>Clienti</h1><form class="form" onsubmit="addClient(event)"><div class="field"><label>Nome cliente</label><input name="name" required></div><div class="field"><label>Codice cliente</label><input name="code" maxlength="5" placeholder="Es. SO" oninput="this.value=normCode(this.value)"><div class="small">Da 2 a 5 lettere o cifre. Entra nel codice di ogni commessa: una volta usato non si cambia piu'.</div></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h">Tariffa giornaliera 8h</option><option value="monthly_flat">Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="0"></div><button class="primary">Aggiungi cliente</button></form>${sortControl('clients')}<div class="list">${sortEntities('clients',data.clients).map(c=>`<div class="row" onclick="${wbsReady()?`openClient('${c.id}')`:`editClient('${c.id}')`}"><div></div><div><div class="title">${esc(c.name)}</div><div class="desc">${c.compensation_type==='daily_rate_8h'?'Tariffa giornaliera 8h · '+fmtEUR(c.daily_rate||0):'Una tantum mensile'} · ${c.active?'Attivo':'Disattivo'}</div></div>${moveBtns('clients',c.id)}</div>`).join('')||emptyForm('Nessun cliente ancora inserito.')}</div>`)}
 function editClient(id){navigateTo('clientEdit',{edit:id})}
 function clientPolicyEditor(c){const pol=parsePolicy(c);const typeOf=id=>{const h=pol.find(r=>r.category_id===id);return h?h.type:'own'};const cats=data.expenseCategories.filter(x=>x.active);if(!cats.length)return '<p class="sub">Crea prima delle voci di spesa per definire la policy.</p>';return `<div class="card" style="margin-top:6px">${cats.map(cat=>`<div class="policyRow"><div><div class="title">${esc(cat.name)}</div></div><select name="policy_${cat.id}">${reimbTypeOptions(typeOf(cat.id))}</select></div>`).join('')}</div>`}
-function clientEdit(){const c=clientById(state.edit);if(!c)return clients();return appShell(`<h1>Modifica cliente</h1><form class="form" onsubmit="saveClient(event)"><div class="field"><label>Nome cliente</label><input name="name" value="${esc(c.name)}" required></div><div class="field"><label>Codice cliente</label><input name="code" maxlength="5" value="${esc(c.code||'')}" oninput="this.value=normCode(this.value)"${engagementsOf(c.id).length?' readonly title="Ha gia\' delle commesse: il codice non si cambia"':''}><div class="small">${engagementsOf(c.id).length?'Bloccato: questo cliente ha gia\' delle commesse.':'Da 2 a 5 lettere o cifre.'}</div></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h" ${c.compensation_type==='daily_rate_8h'?'selected':''}>Tariffa giornaliera 8h</option><option value="monthly_flat" ${c.compensation_type==='monthly_flat'?'selected':''}>Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="${Number(c.daily_rate||0)}"></div><div class="field"><label>Ore standard giornata</label><input name="standard_hours" type="number" step="0.25" value="${Number(c.standard_hours||8)}"></div><div class="field"><label>Sede operativa (base trasferte)</label><input name="base_city" value="${esc(c.base_city||'')}" placeholder="Es. Milano"></div><div class="field"><label>Attivo</label><select name="active"><option value="true" ${c.active?'selected':''}>Sì</option><option value="false" ${!c.active?'selected':''}>No</option></select></div><h2>Policy rimborsi spese</h2><p class="sub">Per ogni voce di spesa scegli come viene gestita con questo cliente. L'app la proporrà in automatico quando inserisci una spesa.</p>${clientPolicyEditor(c)}<div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteClient('${c.id}')">Elimina cliente</button><button type="button" class="secondary" onclick="go('clients')">Annulla</button></div></form>`)}
+function clientEdit(){const c=clientById(state.edit);if(!c)return clients();return appShell(`<h1>Modifica cliente</h1><form class="form" onsubmit="saveClient(event)"><div class="field"><label>Nome cliente</label><input name="name" value="${esc(c.name)}" required></div><div class="field"><label>Codice cliente</label><input name="code" maxlength="5" value="${esc(c.code||'')}" oninput="this.value=normCode(this.value)"${projectsOfClient(c.id).some(p=>p.code)?' readonly title="Ha gia\' dei progetti: il codice non si cambia"':''}><div class="small">${projectsOfClient(c.id).some(p=>p.code)?'Bloccato: da questo codice dipendono i codici dei progetti.':'Da 2 a 5 lettere o cifre.'}</div></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h" ${c.compensation_type==='daily_rate_8h'?'selected':''}>Tariffa giornaliera 8h</option><option value="monthly_flat" ${c.compensation_type==='monthly_flat'?'selected':''}>Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="${Number(c.daily_rate||0)}"></div><div class="field"><label>Ore standard giornata</label><input name="standard_hours" type="number" step="0.25" value="${Number(c.standard_hours||8)}"></div><div class="field"><label>Sede operativa (base trasferte)</label><input name="base_city" value="${esc(c.base_city||'')}" placeholder="Es. Milano"></div><div class="field"><label>Attivo</label><select name="active"><option value="true" ${c.active?'selected':''}>Sì</option><option value="false" ${!c.active?'selected':''}>No</option></select></div><h2>Policy rimborsi spese</h2><p class="sub">Per ogni voce di spesa scegli come viene gestita con questo cliente. L'app la proporrà in automatico quando inserisci una spesa.</p>${clientPolicyEditor(c)}<div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteClient('${c.id}')">Elimina cliente</button><button type="button" class="secondary" onclick="${wbsReady()?`openClient('${c.id}')`:`go('clients')`}">Annulla</button></div></form>`)}
 async function addClient(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const payload={name:norm(f.name),compensation_type:f.compensation_type,daily_rate:Number(f.daily_rate||0),standard_hours:8,active:true};const {error}=await insertResilient('clients',payload);if(error)return setMsg(error.message,7000);await reload();state.view='clients';render()}
 function collectPolicyFromForm(f){const pol=[];data.expenseCategories.forEach(cat=>{const v=f['policy_'+cat.id];if(v&&v!=='own')pol.push({category_id:cat.id,category:cat.name,type:v})});return pol}
 async function saveClient(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const policy=collectPolicyFromForm(f);const payload={name:norm(f.name),compensation_type:f.compensation_type,daily_rate:Number(f.daily_rate||0),standard_hours:Number(f.standard_hours||8),active:f.active==='true',base_city:norm(f.base_city)||null,expense_policy:policy};const {error}=await updateResilient('clients',payload,state.edit,['base_city','expense_policy']);if(error)return setMsg(error.message,7000);await reload();state.view='clients';state.edit=null;render()}
 async function deleteClient(idv){if(!confirm('Eliminare il cliente? Se esistono consuntivi collegati, il database potrebbe bloccare la cancellazione. In quel caso usa Disattivo.'))return;const {error}=await sb.from('clients').delete().eq('id',idv);if(error)return setMsg(error.message,7000);await reload();state.view='clients';render()}
-function projects(){return appShell(`<h1>Progetti / Clienti finali</h1><form class="form" onsubmit="addProject(event)"><div class="field"><label>Cliente collegato</label><select name="client_id">${data.clients.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Nome progetto / cliente finale</label><input name="name" required></div><button class="primary">Aggiungi progetto</button></form>${sortControl('projects')}<div class="list">${sortEntities('projects',data.projects).map(p=>`<div class="row" onclick="editProject('${p.id}')"><div></div><div><div class="title">${esc(clientName(p.client_id))}</div><div class="desc">${esc(p.name)} · ${p.active?'Attivo':'Disattivo'}</div></div>${moveBtns('projects',p.id)}</div>`).join('')||emptyForm('Nessun progetto.')}</div>`)}
+// Elenco di tutti i progetti. Quando la gerarchia c'e' e' di sola
+// consultazione: un progetto si crea dal cliente, perche' il suo
+// codice viene da li' e perche' il passo dopo e' la commessa. La
+// vecchia maschera, che attaccava il progetto al cliente e basta,
+// resta solo per chi non ha ancora migrato.
+function projects(){
+  if(!wbsReady())return projectsLegacy();
+  const tutti=(data.projects||[]).slice()
+    .sort((a,b)=>String(a.code||a.name).localeCompare(String(b.code||b.name),'it'));
+  return appShell(`<h1>Progetti / Clienti finali</h1>
+    <p class="sub">Tutti i progetti, per ritrovarli. Per crearne uno si passa dal cliente:
+    il codice del progetto viene dal suo, e il passo subito dopo è aprirgli la commessa.</p>
+    <div class="list">${tutti.map(p=>{
+      const eng=engagementsOfProject(p.id);
+      return `<div class="row" onclick="openProject('${p.id}')">
+        <div></div>
+        <div><div class="title">${esc(p.code||p.name)} ${statoTag(p.status||'active')}</div>
+          <div class="desc">${esc(clientName(p.client_id))} › ${esc(p.name)}</div>
+          <div class="desc">${eng.length===1?'1 commessa':eng.length+' commesse'}</div></div>
+        <div class="chev">›</div></div>`}).join('')||emptyForm('Nessun progetto. Aprine uno dal cliente.')}</div>
+    <button type="button" class="secondary" onclick="go('clients')">Vai ai clienti</button>`);
+}
+function projectsLegacy(){return appShell(`<h1>Progetti / Clienti finali</h1><form class="form" onsubmit="addProject(event)"><div class="field"><label>Cliente collegato</label><select name="client_id">${data.clients.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Nome progetto / cliente finale</label><input name="name" required></div><button class="primary">Aggiungi progetto</button></form>${sortControl('projects')}<div class="list">${sortEntities('projects',data.projects).map(p=>`<div class="row" onclick="editProject('${p.id}')"><div></div><div><div class="title">${esc(clientName(p.client_id))}</div><div class="desc">${esc(p.name)} · ${p.active?'Attivo':'Disattivo'}</div></div>${moveBtns('projects',p.id)}</div>`).join('')||emptyForm('Nessun progetto.')}</div>`)}
 function editProject(id){navigateTo('projectEdit',{edit:id})}
 function projectEdit(){const p=projectById(state.edit);if(!p)return projects();return appShell(`<h1>Modifica progetto</h1><form class="form" onsubmit="saveProject(event)"><div class="field"><label>Cliente collegato</label><select name="client_id">${data.clients.map(c=>`<option value="${c.id}" ${c.id===p.client_id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Nome progetto / cliente finale</label><input name="name" value="${esc(p.name)}" required></div><div class="field"><label>Attivo</label><select name="active"><option value="true" ${p.active?'selected':''}>Sì</option><option value="false" ${!p.active?'selected':''}>No</option></select></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteProject('${p.id}')">Elimina progetto</button><button type="button" class="secondary" onclick="go('projects')">Annulla</button></div></form>`)}
 async function addProject(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const {error}=await insertResilient('projects',{client_id:f.client_id,name:norm(f.name),active:true});if(error)return setMsg(error.message,7000);await reload();state.view='projects';render()}
@@ -1307,14 +1330,29 @@ const TIPI_WBS={activity:'Attività',project_management:'Project management',ana
   development:'Sviluppo / supporto',travel:'Trasferta',internal:'Attività interna',expense:'Spesa',other:'Altro'};
 const STATI_APERTI=['draft','active'];
 function normCode(v){return String(v||'').toUpperCase().replace(/[^A-Z0-9]/g,'')}
-function wbsReady(){return !state.missingTables||!state.missingTables.has('wbs_items')}
+function wbsReady(){return (!state.missingTables||!state.missingTables.has('wbs_items'))&&versoNuovo()}
+// Le tabelle possono esserci ma nel verso vecchio, se la migrazione di
+// inversione non e' ancora stata lanciata. In quel caso i collegamenti
+// che l'app cerca non esistono e la gerarchia risulterebbe vuota senza
+// dire perche': meglio accorgersene e dirlo.
+function versoNuovo(){
+  const eng=data.engagements||[];
+  if(!eng.length)return true;                       // niente da giudicare
+  return eng.some(e=>e.project_id);                 // il verso nuovo ha questo campo
+}
 function engagementById(id){return (data.engagements||[]).find(e=>e.id===id)}
 function engagementsOf(clientId){return (data.engagements||[]).filter(e=>e.client_id===clientId)}
-function projectsOfEngagement(engId){return (data.projects||[]).filter(p=>p.engagement_id===engId)}
+// Il verso: Cliente > Progetto (cliente finale) > Commessa > Attivita'.
+// Il progetto e' l'entita' che dura, e sotto ci si appendono le
+// commesse man mano: contratto 2026, contratto 2027, ordini distinti.
+function projectsOfClient(clientId){return (data.projects||[]).filter(p=>p.client_id===clientId)
+  .sort((a,b)=>String(a.code||a.name).localeCompare(String(b.code||b.name),'it'))}
+function engagementsOfProject(projId){return (data.engagements||[]).filter(e=>e.project_id===projId)
+  .sort((a,b)=>(b.year-a.year)||(b.seq-a.seq))}
 function wbsById(id){return (data.wbsItems||[]).find(w=>w.id===id)}
-function wbsOfProject(projId){return (data.wbsItems||[]).filter(w=>w.project_id===projId)
+function wbsOfEngagement(engId){return (data.wbsItems||[]).filter(w=>w.engagement_id===engId)
   .sort((a,b)=>(a.sort_order-b.sort_order)||String(a.activity_code).localeCompare(String(b.activity_code),'it'))}
-function wbsAperte(projId){return wbsOfProject(projId).filter(w=>STATI_APERTI.includes(w.status))}
+function wbsAperte(engId){return wbsOfEngagement(engId).filter(w=>STATI_APERTI.includes(w.status))}
 function engagementLabel(e){return e?`${e.code} · ${e.name}`:''}
 function wbsLabel(w){return w?`${w.code} · ${w.name}`:''}
 function projectFullCode(p){return p&&p.code?p.code:(p?p.name:'')}
@@ -1356,20 +1394,31 @@ function engagements(){
   if(!wbsReady())return migrazioneMancante('Commesse');
   const rows=engagementRows();
   return appShell(`<h1>Commesse</h1>
-    <p class="sub">Una commessa per incarico. Il codice si compone da solo: codice cliente, anno e progressivo.</p>
-    <button class="primary" onclick="go('engagementNew')">+ Nuova commessa</button>
+    <p class="sub">Elenco di tutte le commesse. Per aprirne una nuova si passa dal progetto:
+    Cliente › Progetto › + Nuova commessa. Il codice si compone da solo.</p>
     ${engagementFilters()}
     <div class="list">${rows.map(e=>{
-      const prj=projectsOfEngagement(e.id);
+      const prj=(data.projects||[]).find(x=>x.id===e.project_id);
+      const ws=wbsOfEngagement(e.id);
       return `<div class="row" onclick="openEngagement('${e.id}')">
         <div class="date">${e.year}</div>
         <div><div class="title">${esc(e.code)} ${statoTag(e.status)}</div>
-          <div class="desc">${esc(clientName(e.client_id))} · ${esc(e.name)}</div>
-          <div class="desc">${prj.length===1?'1 progetto':prj.length+' progetti'}${e.engagement_letter?' · '+esc(e.engagement_letter):''}</div></div>
+          <div class="desc">${esc(clientName(e.client_id))}${prj?' › '+esc(prj.name):''} · ${esc(e.name)}</div>
+          <div class="desc">${ws.length===1?'1 attività':ws.length+' attività'}${e.engagement_letter?' · '+esc(e.engagement_letter):''}</div></div>
         <div class="chev">›</div></div>`}).join('')||
       '<div class="empty">Nessuna commessa.'+(( data.engagements||[]).length?' Nessuna corrisponde ai filtri.':'')+'</div>'}</div>`);
 }
 function migrazioneMancante(titolo){
+  if(!versoNuovo())return appShell(`<h1>${esc(titolo)}</h1>
+    <div class="card"><b>Manca l'inversione di progetto e commessa</b>
+    <div class="desc" style="margin-top:6px">Le tabelle ci sono, ma sono ancora nel verso vecchio
+    (Cliente › Commessa › Progetto). Questa versione dell'app lavora nel verso nuovo
+    (Cliente › Progetto › Commessa › Attività). Lancia nel SQL Editor di Supabase, in quest'ordine:</div>
+    <div class="copybox">migrations/2026-09-10_inversione-anteprima.sql
+&nbsp;&nbsp;(sola lettura: mostra cosa cambierà)
+migrations/2026-09-10_inversione-progetto-commessa.sql</div>
+    <div class="desc">Fino ad allora il resto dell'app funziona normalmente.</div></div>
+    <button type="button" class="secondary" onclick="go('settings')">Torna a Impostazioni</button>`);
   return appShell(`<h1>${esc(titolo)}</h1>
     <div class="card"><b>Migrazione non ancora applicata</b>
     <div class="desc" style="margin-top:6px">Questa sezione richiede le tabelle di commesse e WBS.
@@ -1387,10 +1436,12 @@ function openEngagement(id){navigateTo('engagementDetail',{edit:id})}
 function engagementDetail(){
   if(!wbsReady())return migrazioneMancante('Commessa');
   const e=engagementById(state.edit);if(!e)return engagements();
-  const prj=projectsOfEngagement(e.id);
+  const p=(data.projects||[]).find(x=>x.id===e.project_id);
+  const ws=wbsOfEngagement(e.id);
   const refs=(data.engagementReferences||[]).filter(r=>r.engagement_id===e.id);
+  const oreDi=w=>(data.entries||[]).filter(x=>x.wbs_id===w.id).reduce((t,x)=>t+Number(x.hours||0),0);
   return appShell(`<h1>${esc(e.code)}</h1>
-    <p class="sub">${esc(clientName(e.client_id))} · ${esc(e.name)} ${statoTag(e.status)}</p>
+    <p class="sub">${esc(clientName(e.client_id))}${p?' › '+esc(p.name):''} · ${esc(e.name)} ${statoTag(e.status)}</p>
     <div class="card"><b>Dati della commessa</b>
       <div class="list" style="box-shadow:none;margin:10px 0 0">
         ${rigaDato('Cliente contrattuale',clientName(e.client_id))}
@@ -1403,17 +1454,29 @@ function engagementDetail(){
       </div>
       <button type="button" class="secondary" style="margin-top:12px" onclick="go('engagementEdit')">Modifica commessa</button>
     </div>
-    <h2>Progetti</h2>
-    <p class="sub">Il progetto è il livello a cui si fattura. Le WBS stanno dentro il progetto.</p>
-    <div class="list">${prj.map(p=>{
-      const w=wbsOfProject(p.id);
-      return `<div class="row" onclick="openProjectWbs('${p.id}')">
-        <div></div>
-        <div><div class="title">${esc(p.code||p.name)} ${statoTag(p.status||'active')}</div>
-          <div class="desc">${esc(p.name)}${p.end_client_name?' · cliente finale '+esc(p.end_client_name):''}</div>
-          <div class="desc">${w.length===1?'1 WBS':w.length+' WBS'}</div></div>
-        <div class="chev">›</div></div>`}).join('')||'<div class="empty">Nessun progetto in questa commessa.</div>'}</div>
-    <button type="button" class="secondary" onclick="go('projectNew')">+ Nuovo progetto</button>
+    <h2>Attività</h2>
+    <p class="sub">Le ore si registrano sull'attività. In fattura confluiscono tutte in una riga sola di progetto.
+    Codici a decine — 10, 20, 30… — così puoi inserire una 15 in mezzo senza rinumerare niente.</p>
+    <div class="list">${ws.map(w=>{
+      const ore=oreDi(w);const u=wbsUsage(w.id);
+      return `<div class="row" onclick="editWbs('${w.id}')">
+        <div class="date">${esc(w.activity_code)}</div>
+        <div><div class="title">${esc(w.name)} ${statoTag(w.status)}${w.billable?'':' <span class="tag gray">non fatturabile</span>'}</div>
+          <div class="desc">${esc(w.code)} · ${TIPI_WBS[w.kind]||w.kind}</div>
+          <div class="desc">${fmtNum(ore,1)} h consuntivate${w.budget_hours?' su '+fmtNum(w.budget_hours,1)+' h di budget':''}${u.tot?' · '+u.tot+' registrazion'+(u.tot===1?'e':'i'):''}</div></div>
+        <div class="chev">›</div></div>`}).join('')||'<div class="empty">Nessuna attività. Aggiungine una qui sotto.</div>'}</div>
+    <details class="moreFields" ${ws.length?'':'open'}><summary>+ Nuova attività</summary>
+      <form class="form" onsubmit="addWbs(event)" style="margin-top:10px">
+        <div class="field"><label>Codice attività</label>
+          <input name="activity_code" maxlength="6" value="${String((ws.length+1)*10)}" oninput="this.value=normCode(this.value);previewWbsCode()">
+          <div class="small">Anteprima: <span id="wbsCodePreview">${esc(e.code||'')}-${(ws.length+1)*10}</span></div></div>
+        <div class="field"><label>Descrizione</label><input name="name" required placeholder="Es. Project Management"></div>
+        <div class="field"><label>Dall'anagrafica attività</label><select name="activity_id">${activityOptions()}</select>
+          <div class="small">Facoltativo: collega questa voce all'elenco attività, per ritrovarla nei report.</div></div>
+        <div class="field"><label>Tipologia</label><select name="kind">${Object.entries(TIPI_WBS).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select></div>
+        <div class="field"><label>Fatturabile</label><select name="billable"><option value="1">Sì, le ore vanno in fattura</option><option value="0">No, attività non fatturabile</option></select></div>
+        <div class="field"><label>Budget ore (facoltativo)</label><input name="budget_hours" type="number" step="0.5"></div>
+        <button class="primary">Aggiungi attività</button></form></details>
     <h2>Riferimenti contrattuali</h2>
     <p class="sub">Una proroga non cambia la commessa: aggiunge un riferimento. Lo storico resta.</p>
     <div class="list">${refs.map(r=>`<div class="row"><div></div>
@@ -1428,29 +1491,31 @@ function engagementDetail(){
         <div class="field"><label>Valido dal</label><input name="valid_from" type="date"></div>
         <div class="field"><label>Valido al</label><input name="valid_to" type="date"></div>
         <button class="primary">Aggiungi riferimento</button></form></details>
-    <button type="button" class="secondary" onclick="go('engagements')">Torna alle commesse</button>`);
+    <button type="button" class="secondary" onclick="${p?`openProject('${p.id}')`:`go('engagements')`}">${p?'Torna al progetto':'Torna alle commesse'}</button>`);
 }
 const STATI_RIF={active:'Attivo',expired:'Scaduto',superseded:'Sostituito',cancelled:'Annullato'};
 function rigaDato(etichetta,valore){return `<div class="row"><div></div><div><div class="title">${esc(etichetta)}</div></div><div class="value">${esc(String(valore))}</div></div>`}
 
 /* ---------- Creazione e modifica commessa ---------- */
+// Si apre sempre da un progetto: e' il progetto a reggere le commesse.
+function nuovaCommessaDi(projectId){navigateTo('engagementNew',{parent:projectId})}
 function engagementForm(e){
   const nuovo=!e;
-  const clientiConCodice=(data.clients||[]).filter(c=>c.code);
-  const senzaCodice=(data.clients||[]).filter(c=>!c.code);
-  if(nuovo&&!clientiConCodice.length)return appShell(`<h1>Nuova commessa</h1>
-    <div class="card"><b>Serve prima un codice cliente</b>
-    <div class="desc" style="margin-top:6px">Il codice della commessa si compone dal codice del cliente.
-    Assegnane uno in Impostazioni → Clienti.</div></div>
+  const conCodice=(data.projects||[]).filter(p=>p.code);
+  const senzaCodice=(data.projects||[]).filter(p=>!p.code);
+  if(nuovo&&!conCodice.length)return appShell(`<h1>Nuova commessa</h1>
+    <div class="card"><b>Serve prima un progetto con codice</b>
+    <div class="desc" style="margin-top:6px">Il codice della commessa si compone da quello del progetto,
+    che a sua volta viene dal codice del cliente. Apri il cliente e creagli il progetto (o cliente finale).</div></div>
     <button type="button" class="secondary" onclick="go('clients')">Vai ai clienti</button>`);
-  const c0=e?e.client_id:(clientiConCodice[0]||{}).id;
+  const p0=e?e.project_id:(state.parent||(conCodice[0]||{}).id);
   return appShell(`<h1>${nuovo?'Nuova commessa':'Modifica '+esc(e.code)}</h1>
     <p class="sub">Il codice si compone da solo. Lettera d'incarico e PO sono campi a parte: non entrano nel codice.</p>
     <form class="form" onsubmit="${nuovo?'addEngagement':'saveEngagement'}(event)">
-      <div class="field"><label>Cliente contrattuale</label>
-        <select name="client_id" ${nuovo?'onchange="previewEngCode()"':'disabled'}>
-          ${clientiConCodice.map(c=>`<option value="${c.id}" ${c.id===c0?'selected':''}>${esc(c.code)} · ${esc(c.name)}</option>`).join('')}
-        </select>${senzaCodice.length?`<div class="small">${senzaCodice.length} client${senzaCodice.length===1?'e senza codice non è':'i senza codice non sono'} selezionabil${senzaCodice.length===1?'e':'i'}.</div>`:''}</div>
+      <div class="field"><label>Progetto / cliente finale</label>
+        <select name="project_id" ${nuovo?'onchange="previewEngCode()"':'disabled'}>
+          ${conCodice.map(p=>`<option value="${p.id}" ${p.id===p0?'selected':''}>${esc(p.code)} · ${esc(clientName(p.client_id))} › ${esc(p.name)}</option>`).join('')}
+        </select>${senzaCodice.length?`<div class="small">${senzaCodice.length} progett${senzaCodice.length===1?'o senza codice non è selezionabile':'i senza codice non sono selezionabili'}.</div>`:''}</div>
       <div class="field"><label>Anno</label><input name="year" type="number" value="${e?e.year:new Date().getFullYear()}" ${nuovo?'onchange="previewEngCode()"':'disabled'}></div>
       ${nuovo?`<div class="field"><label>Codice che verrà assegnato</label><div class="copybox" id="engCodePreview">—</div>
         <div class="small">Il progressivo definitivo lo assegna il database al salvataggio.</div></div>`:
@@ -1465,7 +1530,7 @@ function engagementForm(e){
       <div class="field"><label>Stato</label><select name="status">${Object.entries(STATI).map(([k,v])=>`<option value="${k}" ${(e?e.status:'active')===k?'selected':''}>${v}</option>`).join('')}</select></div>
       <div class="field"><label>Note</label><textarea name="notes">${e?esc(e.notes||''):''}</textarea></div>
       <div class="actions"><button class="primary">${nuovo?'Crea commessa':'Salva modifiche'}</button>
-        <button type="button" class="secondary" onclick="go('${nuovo?'engagements':'engagementDetail'}')">Annulla</button></div>
+        <button type="button" class="secondary" onclick="${nuovo?(state.parent?`openProject('${state.parent}')`:`go('engagements')`):`go('engagementDetail')`}">Annulla</button></div>
     </form>`);
 }
 function engagementNew(){return wbsReady()?engagementForm(null):migrazioneMancante('Nuova commessa')}
@@ -1474,57 +1539,54 @@ function engagementEdit(){const e=engagementById(state.edit);return e?engagement
 // comunque il database.
 function previewEngCode(){
   const f=document.querySelector('form.form');if(!f)return;
-  const c=clientById(f.client_id.value);const y=f.year.value||new Date().getFullYear();
-  const usate=engagementsOf(f.client_id.value).filter(e=>String(e.year)===String(y)).length;
+  const prj=(data.projects||[]).find(x=>x.id===f.project_id.value);
+  const y=f.year.value||new Date().getFullYear();
+  // il progressivo riparte per progetto e anno, non piu' per cliente
+  const usate=engagementsOfProject(f.project_id.value).filter(e=>String(e.year)===String(y)).length;
   const box=document.getElementById('engCodePreview');
-  if(box)box.textContent=c&&c.code?`${c.code}-${y}-${String(usate+1).padStart(3,'0')}`:'—';
+  if(box)box.textContent=prj&&prj.code?`${prj.code}-${y}-${String(usate+1).padStart(3,'0')}`:'—';
 }
 
 /* ---------- Progetto: dati e WBS ---------- */
-function openProjectWbs(id){navigateTo('projectWbs',{edit:id})}
-function projectWbs(){
-  if(!wbsReady())return migrazioneMancante("WBS");
+function openProject(id){navigateTo('projectDetail',{edit:id})}
+// Compatibilita': i vecchi collegamenti puntavano alla pagina WBS del
+// progetto, che adesso e' la pagina della commessa.
+function openProjectWbs(id){openProject(id)}
+function projectDetail(){
+  if(!wbsReady())return migrazioneMancante('Progetto');
   const p=(data.projects||[]).find(x=>x.id===state.edit);if(!p)return engagements();
-  const e=engagementById(p.engagement_id);
-  const ws=wbsOfProject(p.id);
-  const oreDi=w=>(data.entries||[]).filter(x=>x.wbs_id===w.id).reduce((t,x)=>t+Number(x.hours||0),0);
+  const eng=engagementsOfProject(p.id);
+  const oreDiCommessa=e=>wbsOfEngagement(e.id).reduce((t,w)=>
+    t+(data.entries||[]).filter(x=>x.wbs_id===w.id).reduce((a,x)=>a+Number(x.hours||0),0),0);
   return appShell(`<h1>${esc(p.code||p.name)}</h1>
-    <p class="sub">${e?esc(e.code)+" · ":""}${esc(p.name)}${p.end_client_name?" · cliente finale "+esc(p.end_client_name):""} ${statoTag(p.status||"active")}</p>
-    <div class="card"><b>Il progetto è il livello di fatturazione</b>
-      <div class="desc" style="margin-top:6px">Le ore si registrano sulle WBS qui sotto, ma in fattura confluiscono
-      in una riga sola intestata a questo progetto.</div>
+    <p class="sub">${esc(clientName(p.client_id))} · ${esc(p.name)}${p.end_client_name?' · cliente finale '+esc(p.end_client_name):''} ${statoTag(p.status||'active')}</p>
+    <div class="card"><b>Il progetto è il livello a cui si fattura</b>
+      <div class="desc" style="margin-top:6px">Sotto ci stanno le commesse: un contratto nuovo, un ordine
+      aggiuntivo, l'anno dopo. Le ore si registrano sulle attività dentro la commessa, ma in fattura
+      confluiscono in una riga sola intestata a questo progetto.</div>
       <div class="list" style="box-shadow:none;margin:10px 0 0">
-        ${rigaDato("Unità di fatturazione",p.billing_unit==="hour"?"Ore":"Giornate")}
-        ${rigaDato("Descrizione riga fattura",p.invoice_line_description||"— (si usa il nome del progetto)")}
+        ${rigaDato('Codice',p.code||'—')}
+        ${rigaDato('Unità di fatturazione',p.billing_unit==='hour'?'Ore':'Giornate')}
+        ${rigaDato('Descrizione riga fattura',p.invoice_line_description||'— (si usa il nome del progetto)')}
       </div>
       <button type="button" class="secondary" style="margin-top:12px" onclick="go('projectEdit')">Modifica progetto</button>
     </div>
-    <h2>WBS del progetto</h2>
-    <p class="sub">Codici a decine: 10, 20, 30… così puoi inserire una 15 in mezzo senza rinumerare niente.</p>
-    <div class="list">${ws.map(w=>{
-      const ore=oreDi(w);const u=wbsUsage(w.id);
-      return `<div class="row" onclick="editWbs('${w.id}')">
-        <div class="date">${esc(w.activity_code)}</div>
-        <div><div class="title">${esc(w.name)} ${statoTag(w.status)}${w.billable?"":' <span class="tag gray">non fatturabile</span>'}</div>
-          <div class="desc">${esc(w.code)} · ${TIPI_WBS[w.kind]||w.kind}</div>
-          <div class="desc">${fmtNum(ore,1)} h consuntivate${w.budget_hours?" su "+fmtNum(w.budget_hours,1)+" h di budget":""}${u.tot?" · "+u.tot+" registrazion"+(u.tot===1?"e":"i"):""}</div></div>
-        <div class="chev">›</div></div>`}).join("")||'<div class="empty">Nessuna WBS. Aggiungine una qui sotto.</div>'}</div>
-    <details class="moreFields" ${ws.length?"":"open"}><summary>+ Nuova WBS</summary>
-      <form class="form" onsubmit="addWbs(event)" style="margin-top:10px">
-        <div class="field"><label>Codice attività</label>
-          <input name="activity_code" maxlength="6" value="${String((ws.length+1)*10)}" oninput="this.value=normCode(this.value);previewWbsCode()">
-          <div class="small">Anteprima: <span id="wbsCodePreview">${esc(p.code||"")}-${(ws.length+1)*10}</span></div></div>
-        <div class="field"><label>Descrizione</label><input name="name" required placeholder="Es. Project Management"></div>
-        <div class="field"><label>Tipologia</label><select name="kind">${Object.entries(TIPI_WBS).map(([k,v])=>`<option value="${k}">${v}</option>`).join("")}</select></div>
-        <div class="field"><label>Fatturabile</label><select name="billable"><option value="1">Sì, le ore vanno in fattura</option><option value="0">No, attività non fatturabile</option></select></div>
-        <div class="field"><label>Budget ore (facoltativo)</label><input name="budget_hours" type="number" step="0.5"></div>
-        <button class="primary">Aggiungi WBS</button></form></details>
-    <button type="button" class="secondary" onclick="openEngagement('${p.engagement_id||""}')">Torna alla commessa</button>`);
+    <h2>Commesse</h2>
+    <div class="list">${eng.map(e=>{
+      const ws=wbsOfEngagement(e.id);
+      return `<div class="row" onclick="openEngagement('${e.id}')">
+        <div class="date">${e.year}</div>
+        <div><div class="title">${esc(e.code)} ${statoTag(e.status)}</div>
+          <div class="desc">${esc(e.name)}${e.engagement_letter?' · '+esc(e.engagement_letter):''}</div>
+          <div class="desc">${ws.length===1?'1 attività':ws.length+' attività'} · ${fmtNum(oreDiCommessa(e),1)} h</div></div>
+        <div class="chev">›</div></div>`}).join('')||'<div class="empty">Nessuna commessa su questo progetto.</div>'}</div>
+    <button type="button" class="secondary" onclick="nuovaCommessaDi('${p.id}')">+ Nuova commessa</button>
+    <button type="button" class="secondary" onclick="openClient('${p.client_id}')">Torna al cliente</button>`);
 }
 function previewWbsCode(){
-  const f=document.querySelector("form.form");const p=(data.projects||[]).find(x=>x.id===state.edit);
+  const f=document.querySelector("form.form");const e=engagementById(state.edit);
   const box=document.getElementById("wbsCodePreview");
-  if(f&&p&&box)box.textContent=(p.code||"")+"-"+normCode(f.activity_code.value);
+  if(f&&e&&box)box.textContent=(e.code||"")+"-"+normCode(f.activity_code.value);
 }
 function editWbs(id){navigateTo("wbsEdit",{edit:id,parent:state.edit})}
 function wbsEdit(){
@@ -1547,21 +1609,23 @@ function wbsEdit(){
       ${bloccato?wbsSpostaOptions(w):""}
       <div class="actions"><button class="primary">Salva modifiche</button>
         ${bloccato?"":`<button type="button" class="secondary danger" onclick="deleteWbs('${w.id}')">Elimina</button>`}
-        <button type="button" class="secondary" onclick="openProjectWbs('${w.project_id}')">Annulla</button></div>
+        <button type="button" class="secondary" onclick="openEngagement('${w.engagement_id}')">Annulla</button></div>
     </form>`);
 }
 
 /* ---------- Azioni ---------- */
 async function addEngagement(ev){
   ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));
-  const payload={client_id:f.client_id,year:Number(f.year)||new Date().getFullYear(),name:norm(f.name),
+  const prj=(data.projects||[]).find(x=>x.id===f.project_id);
+  const payload={project_id:f.project_id,client_id:prj?prj.client_id:null,
+    year:Number(f.year)||new Date().getFullYear(),name:norm(f.name),
     engagement_letter:norm(f.engagement_letter)||null,invoice_reference:norm(f.invoice_reference)||null,
     purchase_order:norm(f.purchase_order)||null,start_date:f.start_date||null,end_date:f.end_date||null,
     budget_amount:f.budget_amount?Number(f.budget_amount):null,status:f.status||"active",notes:norm(f.notes)||null};
   const {error}=await insertResilient("engagements",payload);
   if(error)return setMsg(messaggioCommessa(error),8000);
-  await reload();state.view="engagements";render();
-  setMsg("Commessa creata.",3500);
+  await reload();navigateTo("projectDetail",{edit:f.project_id});
+  setMsg("Commessa creata. Ora aggiungici le attività.",4000);
 }
 async function saveEngagement(ev){
   ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));
@@ -1585,11 +1649,12 @@ async function addEngagementRef(ev){
 }
 async function addWbs(ev){
   ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));
-  const {error}=await insertResilient("wbs_items",{project_id:state.edit,activity_code:normCode(f.activity_code),
+  const {error}=await insertResilient("wbs_items",{engagement_id:state.edit,activity_code:normCode(f.activity_code),
     name:norm(f.name),kind:f.kind||"activity",billable:f.billable==="1",
+    activity_id:f.activity_id||null,
     budget_hours:f.budget_hours?Number(f.budget_hours):null,sort_order:Number(normCode(f.activity_code))||0});
   if(error)return setMsg(messaggioWbs(error),8000);
-  await reload();render();setMsg("WBS aggiunta.",3000);
+  await reload();render();setMsg("Attività aggiunta.",3000);
 }
 async function saveWbs(ev){
   ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));
@@ -1600,68 +1665,113 @@ async function saveWbs(ev){
   if(!wbsUsage(w.id).tot)payload.activity_code=normCode(f.activity_code);
   const r=await updateResilient("wbs_items",payload,w.id);
   if(r.error)return setMsg(messaggioWbs(r.error),8000);
-  await reload();navigateTo("projectWbs",{edit:w.project_id});
+  await reload();navigateTo("engagementDetail",{edit:w.engagement_id});
 }
 async function deleteWbs(id){
   const w=wbsById(id);if(!w)return;
-  if(wbsUsage(id).tot)return setMsg("Questa WBS ha delle registrazioni: si può chiudere, non eliminare.",6000);
-  if(!confirm("Eliminare la WBS "+w.code+"? Non è mai stata usata, quindi non si perde nulla."))return;
+  if(wbsUsage(id).tot)return setMsg("Questa attività ha delle registrazioni: si può chiudere, non eliminare.",6000);
+  if(!confirm("Eliminare l'attività "+w.code+"? Non è mai stata usata, quindi non si perde nulla."))return;
   const {error}=await sb.from("wbs_items").delete().eq("id",id);
   if(error)return setMsg(error.message,7000);
-  await reload();navigateTo("projectWbs",{edit:w.project_id});
+  await reload();navigateTo("engagementDetail",{edit:w.engagement_id});
 }
 // Messaggi comprensibili al posto degli errori del database
 function messaggioCommessa(e){
   const m=String(e&&e.message||e);
-  if(/non ha un codice/.test(m))return "Il cliente non ha un codice: assegnalo prima, in Impostazioni → Clienti.";
+  if(/non ha un codice/.test(m))return "Manca un codice a monte: il cliente deve avere il suo (Impostazioni → Clienti) e il progetto il suo codice breve.";
   if(/duplicate key|unique/i.test(m))return "Esiste già una commessa con questo codice.";
   return m;
 }
 function messaggioWbs(e){
   const m=String(e&&e.message||e);
   if(/gia. usato/i.test(m))return "Questa WBS è già usata in consuntivi o spese: il codice non si può più cambiare. La descrizione sì.";
-  if(/duplicate key|unique/i.test(m))return "Esiste già una WBS con questo codice in questo progetto.";
-  if(/non e. attiva/i.test(m))return "La WBS non è attiva: non accetta nuove registrazioni.";
-  if(/non ha un codice completo/.test(m))return "Il progetto non è collegato a una commessa: collegalo prima.";
+  if(/duplicate key|unique/i.test(m))return "Esiste già un'attività con questo codice in questa commessa.";
+  if(/non e. attiva/i.test(m))return "L'attività non è attiva: non accetta nuove registrazioni.";
+  if(/non ha un codice completo/.test(m))return "La commessa non ha un codice completo: controlla il codice del cliente e quello breve del progetto.";
   return m;
 }
 
-/* ---------- Nuovo progetto dentro una commessa ---------- */
+/* ---------- Scheda cliente: la testa della cascata ----------
+   Da qui si scende: progetto (cliente finale) > commessa > attivita'.
+   Non ci sono anagrafiche separate da tenere allineate a mano. */
+function openClient(id){navigateTo('clientDetail',{edit:id})}
+function clientDetail(){
+  const c=clientById(state.edit);if(!c)return clients();
+  if(!wbsReady())return clientEdit();
+  const prj=projectsOfClient(c.id);
+  return appShell(`<h1>${esc(c.name)}</h1>
+    <p class="sub">${c.code?esc(c.code)+' · ':''}${c.compensation_type==='daily_rate_8h'?'Tariffa giornaliera 8h · '+fmtEUR(c.daily_rate||0):'Una tantum mensile'} · ${c.active?'Attivo':'Disattivo'}</p>
+    ${c.code?'':`<div class="card"><b>Manca il codice cliente</b>
+      <div class="desc" style="margin-top:6px">Serve per comporre i codici di progetti e commesse.
+      Assegnalo prima di creare il primo progetto.</div>
+      <button type="button" class="secondary" style="margin-top:12px" onclick="editClient('${c.id}')">Assegna il codice</button></div>`}
+    <h2>Progetti / clienti finali</h2>
+    <p class="sub">Il progetto è quello che dura. Sotto ci si appendono le commesse: il contratto di quest'anno,
+    un ordine aggiuntivo, quello dell'anno prossimo.</p>
+    <div class="list">${prj.map(p=>{
+      const eng=engagementsOfProject(p.id);
+      const att=eng.reduce((t,e)=>t+wbsOfEngagement(e.id).length,0);
+      return `<div class="row" onclick="openProject('${p.id}')">
+        <div></div>
+        <div><div class="title">${esc(p.code||p.name)} ${statoTag(p.status||'active')}</div>
+          <div class="desc">${esc(p.name)}${p.end_client_name?' · cliente finale '+esc(p.end_client_name):''}</div>
+          <div class="desc">${eng.length===1?'1 commessa':eng.length+' commesse'} · ${att===1?'1 attività':att+' attività'}</div></div>
+        <div class="chev">›</div></div>`}).join('')||'<div class="empty">Nessun progetto. Creane uno: è il passo prima della commessa.</div>'}</div>
+    ${c.code?`<button type="button" class="primary cta" onclick="nuovoProgettoDi('${c.id}')">+ Nuovo progetto / cliente finale</button>`:''}
+    <div class="actions" style="margin-top:18px">
+      <button type="button" class="secondary" onclick="editClient('${c.id}')">Modifica dati del cliente</button>
+      <button type="button" class="secondary" onclick="go('clients')">Torna ai clienti</button></div>`);
+}
+
+/* ---------- Nuovo progetto / cliente finale, sotto il cliente ---------- */
+function nuovoProgettoDi(clientId){navigateTo('projectNew',{parent:clientId})}
 function projectNew(){
   if(!wbsReady())return migrazioneMancante("Nuovo progetto");
-  const e=engagementById(state.edit);if(!e)return engagements();
-  const usati=projectsOfEngagement(e.id).map(p=>p.short_code).filter(Boolean);
-  return appShell(`<h1>Nuovo progetto</h1>
-    <p class="sub">Dentro la commessa ${esc(e.code)}. Il progetto è il livello a cui si fattura.</p>
-    <form class="form" onsubmit="addProjectInEngagement(event)">
+  const c=clientById(state.parent||state.edit);
+  if(!c)return clients();
+  if(!c.code)return appShell(`<h1>Nuovo progetto</h1>
+    <div class="card"><b>Serve prima il codice del cliente</b>
+    <div class="desc" style="margin-top:6px">Il codice del progetto si compone da quello del cliente.
+    Assegna un codice a ${esc(c.name)} e poi torna qui.</div></div>
+    <button type="button" class="secondary" onclick="editClient('${c.id}')">Assegna il codice</button>`);
+  const usati=projectsOfClient(c.id).map(p=>p.short_code).filter(Boolean);
+  return appShell(`<h1>Nuovo progetto / cliente finale</h1>
+    <p class="sub">Sotto ${esc(c.code)} · ${esc(c.name)}. È il livello a cui si fattura, e sotto ci andranno
+    le commesse: un contratto nuovo, un ordine aggiuntivo, l'anno dopo.</p>
+    <form class="form" onsubmit="addProjectOfClient(event)">
       <div class="field"><label>Codice breve</label>
         <input name="short_code" maxlength="6" required placeholder="Es. EQU" oninput="this.value=normCode(this.value);previewPrjCode()">
-        <div class="small">Anteprima: <span id="prjCodePreview">${esc(e.code)}-…</span>${usati.length?" · già usati: "+usati.map(esc).join(", "):""}</div></div>
+        <div class="small">Anteprima: <span id="prjCodePreview">${esc(c.code)}-…</span>${usati.length?" · già usati: "+usati.map(esc).join(", "):""}</div></div>
       <div class="field"><label>Nome del progetto</label><input name="name" required placeholder="Es. EQUANS"></div>
-      <div class="field"><label>Cliente finale</label><input name="end_client_name" placeholder="Se diverso dal cliente contrattuale"></div>
+      <div class="field"><label>Cliente finale</label><input name="end_client_name" placeholder="Se diverso dal cliente che paga"></div>
       <div class="field"><label>Unità di fatturazione</label><select name="billing_unit"><option value="day">Giornate</option><option value="hour">Ore</option></select></div>
       <div class="field"><label>Descrizione predefinita della riga di fattura</label><input name="invoice_line_description" placeholder="Se vuoto si usa il nome del progetto"></div>
       <div class="field"><label>Data di inizio</label><input name="start_date" type="date"></div>
       <div class="field"><label>Data di fine</label><input name="end_date" type="date"></div>
       <div class="actions"><button class="primary">Crea progetto</button>
-        <button type="button" class="secondary" onclick="openEngagement('${e.id}')">Annulla</button></div>
+        <button type="button" class="secondary" onclick="openClient('${c.id}')">Annulla</button></div>
     </form>`);
 }
 function previewPrjCode(){
-  const f=document.querySelector("form.form");const e=engagementById(state.edit);
+  const f=document.querySelector("form.form");const c=clientById(state.parent||state.edit);
   const box=document.getElementById("prjCodePreview");
-  if(f&&e&&box)box.textContent=e.code+"-"+(normCode(f.short_code.value)||"…");
+  if(f&&c&&box)box.textContent=(c.code||"")+"-"+(normCode(f.short_code.value)||"…");
 }
-async function addProjectInEngagement(ev){
+async function addProjectOfClient(ev){
   ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));
-  const e=engagementById(state.edit);if(!e)return;
-  const {error}=await insertResilient("projects",{client_id:e.client_id,engagement_id:e.id,
+  const c=clientById(state.parent||state.edit);if(!c)return;
+  const {data:ins,error}=await insertResilient("projects",{client_id:c.id,
     short_code:normCode(f.short_code),name:norm(f.name),end_client_name:norm(f.end_client_name)||null,
     billing_unit:f.billing_unit||"day",invoice_line_description:norm(f.invoice_line_description)||null,
     start_date:f.start_date||null,end_date:f.end_date||null,status:"active",active:true});
   if(error)return setMsg(/duplicate key|unique/i.test(String(error.message))?
-    "Esiste già un progetto con questo codice in questa commessa.":error.message,8000);
-  await reload();render();setMsg("Progetto creato.",3000);
+    "Questo cliente ha già un progetto con questo codice breve.":error.message,8000);
+  await reload();
+  // il passo successivo e' la commessa: ce lo si porta dentro da soli
+  const nuovo=(data.projects||[]).find(p=>p.client_id===c.id&&p.short_code===normCode(f.short_code));
+  if(nuovo)navigateTo("engagementNew",{parent:nuovo.id});
+  else render();
+  setMsg("Progetto creato. Ora aprigli la commessa.",4000);
 }
 
 /* ---------- Selezione gerarchica Cliente > Commessa > Progetto > WBS ----------
@@ -1669,53 +1779,62 @@ async function addProjectInEngagement(ev){
    ancora commesse, il modulo resta quello di prima: cosi' chi non ha
    ancora migrato tutto continua a lavorare. */
 function hierAvailable(clientId){
-  return wbsReady() && engagementsOf(clientId).some(e=>projectsOfEngagement(e.id).some(p=>wbsAperte(p.id).length));
+  return wbsReady() && projectsOfClient(clientId).some(p=>engagementsOfProject(p.id).some(e=>wbsAperte(e.id).length));
 }
-function engagementOptions(clientId,selected=''){
-  const list=engagementsOf(clientId).filter(e=>STATI_APERTI.includes(e.status)||e.id===selected);
+// Distinto da projectOptions() piu' in alto, che serve alle maschere
+// senza WBS: quella elenca i progetti attivi, questa quelli della
+// gerarchia, con il codice davanti.
+function projectOptionsOfClient(clientId,selected=''){
+  const list=projectsOfClient(clientId).filter(p=>!p.status||STATI_APERTI.includes(p.status)||p.id===selected);
+  return `<option value="">— progetto / cliente finale —</option>`+list.map(p=>
+    `<option value="${p.id}" ${p.id===selected?'selected':''}>${esc(p.code||p.name)} · ${esc(p.name)}</option>`).join('');
+}
+function engagementOptionsOfProject(projId,selected=''){
+  const list=engagementsOfProject(projId).filter(e=>STATI_APERTI.includes(e.status)||e.id===selected);
   return `<option value="">— commessa —</option>`+list.map(e=>
     `<option value="${e.id}" ${e.id===selected?'selected':''}>${esc(e.code)} · ${esc(e.name)}</option>`).join('');
 }
-function projectOptionsOfEngagement(engId,selected=''){
-  const list=projectsOfEngagement(engId).filter(p=>!p.status||STATI_APERTI.includes(p.status)||p.id===selected);
-  return `<option value="">— progetto —</option>`+list.map(p=>
-    `<option value="${p.id}" ${p.id===selected?'selected':''}>${esc(p.code||p.name)} · ${esc(p.name)}</option>`).join('');
-}
-function wbsOptions(projId,selected=''){
-  const list=wbsOfProject(projId).filter(w=>STATI_APERTI.includes(w.status)||w.id===selected);
+function wbsOptions(engId,selected=''){
+  const list=wbsOfEngagement(engId).filter(w=>STATI_APERTI.includes(w.status)||w.id===selected);
   return `<option value="">— WBS —</option>`+list.map(w=>
     `<option value="${w.id}" ${w.id===selected?'selected':''}>${esc(w.activity_code)} · ${esc(w.name)}${w.billable?'':' (non fatturabile)'}</option>`).join('');
 }
 // Da una WBS si risale a tutto il resto: non si duplica niente a mano
 function wbsLineage(wbsId){
   const w=wbsById(wbsId);if(!w)return null;
-  const p=(data.projects||[]).find(x=>x.id===w.project_id);if(!p)return null;
-  const e=engagementById(p.engagement_id);
+  const e=engagementById(w.engagement_id);if(!e)return null;
+  const p=(data.projects||[]).find(x=>x.id===e.project_id);if(!p)return null;
   return {wbs:w,project:p,engagement:e,client_id:p.client_id};
 }
 // I tre menu a tendina della gerarchia, per i moduli di consuntivo
 function hierFields(clientId,wbsId){
   const lin=wbsId?wbsLineage(wbsId):null;
-  const engSel=lin&&lin.engagement?lin.engagement.id:'';
   const prjSel=lin?lin.project.id:'';
-  return `<div class="field"><label>Commessa</label>
-      <select name="engagement_id" onchange="hierChanged(this.form,'engagement')">${engagementOptions(clientId,engSel)}</select></div>
-    <div class="field"><label>Progetto</label>
-      <select name="hier_project_id" onchange="hierChanged(this.form,'project')">${engSel?projectOptionsOfEngagement(engSel,prjSel):'<option value="">— prima scegli la commessa —</option>'}</select></div>
-    <div class="field"><label>WBS / attività</label>
-      <select name="wbs_id" onchange="hierChanged(this.form,'wbs')">${prjSel?wbsOptions(prjSel,wbsId||''):'<option value="">— prima scegli il progetto —</option>'}</select>
+  const engSel=lin&&lin.engagement?lin.engagement.id:'';
+  return `<div class="field"><label>Progetto / cliente finale</label>
+      <select name="hier_project_id" onchange="hierChanged(this.form,'project')">${projectOptionsOfClient(clientId,prjSel)}</select></div>
+    <div class="field"><label>Commessa</label>
+      <select name="engagement_id" onchange="hierChanged(this.form,'engagement')">${prjSel?engagementOptionsOfProject(prjSel,engSel):'<option value="">— prima scegli il progetto —</option>'}</select></div>
+    <div class="field"><label>Attività</label>
+      <select name="wbs_id" onchange="hierChanged(this.form,'wbs')">${engSel?wbsOptions(engSel,wbsId||''):'<option value="">— prima scegli la commessa —</option>'}</select>
       <div class="small" id="wbsHint">${lin?esc(lin.wbs.code)+(lin.wbs.billable?'':' · non fatturabile'):'Le ore si registrano sulla WBS. In fattura confluiscono nel progetto.'}</div></div>`;
 }
 function hierChanged(form,livello){
   if(!form)return;
-  if(livello==='client'||livello==='engagement'){
-    const eng=form.engagement_id?form.engagement_id.value:'';
-    if(form.hier_project_id)form.hier_project_id.innerHTML=eng?projectOptionsOfEngagement(eng,''):'<option value="">— prima scegli la commessa —</option>';
-    if(form.wbs_id)form.wbs_id.innerHTML='<option value="">— prima scegli il progetto —</option>';
+  if(livello==='client'){
+    const cli=form.client_id?form.client_id.value:'';
+    if(form.hier_project_id)form.hier_project_id.innerHTML=projectOptionsOfClient(cli,'');
+    if(form.engagement_id)form.engagement_id.innerHTML='<option value="">— prima scegli il progetto —</option>';
+    if(form.wbs_id)form.wbs_id.innerHTML='<option value="">— prima scegli la commessa —</option>';
   }
   if(livello==='project'){
     const prj=form.hier_project_id?form.hier_project_id.value:'';
-    if(form.wbs_id)form.wbs_id.innerHTML=prj?wbsOptions(prj,''):'<option value="">— prima scegli il progetto —</option>';
+    if(form.engagement_id)form.engagement_id.innerHTML=prj?engagementOptionsOfProject(prj,''):'<option value="">— prima scegli il progetto —</option>';
+    if(form.wbs_id)form.wbs_id.innerHTML='<option value="">— prima scegli la commessa —</option>';
+  }
+  if(livello==='engagement'){
+    const eng=form.engagement_id?form.engagement_id.value:'';
+    if(form.wbs_id)form.wbs_id.innerHTML=eng?wbsOptions(eng,''):'<option value="">— prima scegli la commessa —</option>';
   }
   const hint=document.getElementById('wbsHint');
   if(hint){
@@ -1730,9 +1849,9 @@ function hierChanged(form,livello){
 }
 // Quando si sceglie il cliente, si rifanno commessa/progetto/WBS
 function refreshHierForForm(form){
-  if(!form||!form.engagement_id)return;
-  form.engagement_id.innerHTML=engagementOptions(form.client_id.value,'');
-  hierChanged(form,'engagement');
+  if(!form||!form.hier_project_id)return;
+  form.hier_project_id.innerHTML=projectOptionsOfClient(form.client_id.value,'');
+  hierChanged(form,'project');
 }
 
 /* ---------- La griglia ragiona per WBS quando c'e' ----------
@@ -1754,9 +1873,9 @@ function gridRigaEtichetta(r){
 function gridClienteCambiato(){
   const c=document.getElementById('g-cliente').value;
   const com=document.getElementById('g-commessa');
-  if(wbsReady()&&engagementsOf(c).length){
+  if(wbsReady()&&projectsOfClient(c).some(p=>engagementsOfProject(p.id).length)){
     com.hidden=false;
-    com.innerHTML=engagementOptions(c,'');
+    document.getElementById('g-progetto').innerHTML=projectOptionsOfClient(c,'');
   }else{
     // niente commesse per questo cliente: si torna al percorso di prima
     com.hidden=true;
@@ -1766,18 +1885,19 @@ function gridClienteCambiato(){
   }
   document.getElementById('g-attivita').hidden=true;
   document.getElementById('g-wbs').hidden=false;
+  gridProgettoCambiato();
+}
+// Il progetto viene prima: e' lui a reggere le commesse
+function gridProgettoCambiato(){
+  const p=document.getElementById('g-progetto').value;
+  const com=document.getElementById('g-commessa');
+  if(com)com.innerHTML=p?engagementOptionsOfProject(p,''):'<option value="">— prima scegli il progetto —</option>';
   gridCommessaCambiata();
 }
 function gridCommessaCambiata(){
   const e=document.getElementById('g-commessa').value;
-  document.getElementById('g-progetto').innerHTML=
-    e?projectOptionsOfEngagement(e,''):'<option value="">— prima scegli la commessa —</option>';
-  gridProgettoCambiato();
-}
-function gridProgettoCambiato(){
-  const p=document.getElementById('g-progetto').value;
   const w=document.getElementById('g-wbs');
-  if(w)w.innerHTML=p?wbsOptions(p,''):'<option value="">— prima scegli il progetto —</option>';
+  if(w)w.innerHTML=e?wbsOptions(e,''):'<option value="">— prima scegli la commessa —</option>';
 }
 
 /* ---------- Spostare le registrazioni da una WBS a un'altra ----------
@@ -1786,7 +1906,7 @@ function gridProgettoCambiato(){
    la WBS giusta in anagrafica, ci si spostano sopra le registrazioni,
    e la vecchia si chiude. */
 function wbsSpostaOptions(w){
-  const altre=wbsOfProject(w.project_id).filter(x=>x.id!==w.id&&STATI_APERTI.includes(x.status));
+  const altre=wbsOfEngagement(w.engagement_id).filter(x=>x.id!==w.id&&STATI_APERTI.includes(x.status));
   if(!altre.length)return '';
   return `<div class="field"><label>Sposta le registrazioni su un'altra WBS</label>
     <select id="wbsTarget">${altre.map(x=>`<option value="${x.id}">${esc(x.activity_code)} · ${esc(x.name)}</option>`).join('')}</select>
@@ -1810,7 +1930,7 @@ async function spostaWbs(daId){
   }catch(e){state.busy=false;return setMsg(messaggioWbs(e),8000)||render();}
   state.busy=false;
   await reload();
-  navigateTo('projectWbs',{edit:da.project_id});
+  navigateTo('engagementDetail',{edit:da.engagement_id});
   setMsg(`${u.tot} registrazion${u.tot===1?'e spostata':'i spostate'} su ${a.code}. Ora ${da.code} è vuota e si può chiudere o eliminare.`,6000);
 }
 
@@ -1831,7 +1951,8 @@ function oreGiaFatturate(entryId){
 // Il prospetto analitico per WBS di un progetto in un periodo.
 // E' il documento di controllo: dice da dove viene ogni ora.
 function prospettoProgetto(projectId,dal,al){
-  const wbs=wbsOfProject(projectId);
+  // le attivita' di un progetto sono quelle di tutte le sue commesse
+  const wbs=engagementsOfProject(projectId).flatMap(e=>wbsOfEngagement(e.id));
   const righe=wbs.map(w=>{
     const voci=(data.entries||[]).filter(e=>e.wbs_id===w.id
       && String(e.entry_date||'')>=dal && String(e.entry_date||'')<=al);
@@ -1885,26 +2006,26 @@ function toggleProgettoFatt(id){
   if(i>=0)cur.splice(i,1);else cur.push(id);
   state.fatt={...(state.fatt||{}),progetti:cur};render();
 }
+// Un progetto e' fatturabile se ha almeno una commessa sotto: le ore
+// stanno li' dentro. Il progetto resta il livello a cui si fattura.
 function progettiFatturabili(){
   const s=fattCommessaState();
-  if(!s.engagement_id)return [];
-  return projectsOfEngagement(s.engagement_id);
+  const cid=s.client_id||((data.clients||[]).find(c=>projectsOfClient(c.id).some(p=>engagementsOfProject(p.id).length))||{}).id;
+  if(!cid)return [];
+  return projectsOfClient(cid).filter(p=>engagementsOfProject(p.id).length);
 }
 
 function fatturazioneCommessa(){
   if(!wbsReady())return migrazioneMancante('Fatturazione per commessa');
   const s=fattCommessaState();
-  const clienti=(data.clients||[]).filter(c=>engagementsOf(c.id).length);
+  const clienti=(data.clients||[]).filter(c=>projectsOfClient(c.id).some(p=>engagementsOfProject(p.id).length));
   if(!clienti.length)return appShell(`<h1>Fatturazione per commessa</h1>
     <div class="card"><b>Nessuna commessa</b><div class="desc" style="margin-top:6px">
-    Crea prima una commessa in Impostazioni → Commesse.</div></div>
-    <button type="button" class="secondary" onclick="go('engagements')">Vai alle commesse</button>`);
+    Apri un cliente in Impostazioni → Clienti, creagli il progetto e poi la commessa.</div></div>
+    <button type="button" class="secondary" onclick="go('clients')">Vai ai clienti</button>`);
   const cid=s.client_id||clienti[0].id;
-  const comm=engagementsOf(cid);
-  const eid=s.engagement_id||(comm[0]||{}).id||'';
-  const prj=eid?projectsOfEngagement(eid):[];
+  const prj=projectsOfClient(cid).filter(p=>engagementsOfProject(p.id).length);
   const scelti=s.progetti===null?prj.map(p=>p.id):s.progetti;
-  const e=engagementById(eid);
 
   const blocchi=prj.filter(p=>scelti.includes(p.id)).map(p=>{
     const pr=prospettoProgetto(p.id,s.dal,s.al);
@@ -1913,9 +2034,10 @@ function fatturazioneCommessa(){
     const q=quantitaInUnita(p,pr.tot.daFatturare,cid);
     const imp=importoDaOre(cid,pr.tot.daFatturare);
     return `<div class="card"><b>${esc(p.code||p.name)} · ${esc(p.name)}</b>
-      <div class="desc" style="margin-top:2px">${esc(p.end_client_name||'')}${p.end_client_name?' · ':''}il dettaglio per WBS resta qui, in fattura va una riga sola</div>
+      <div class="desc" style="margin-top:2px">${esc(p.end_client_name||'')}${p.end_client_name?' · ':''}${engagementsOfProject(p.id).map(x=>esc(x.code)).join(', ')||'nessuna commessa'}</div>
+      <div class="desc">Il dettaglio per attività resta qui: in fattura va una riga sola.</div>
       <div class="scrollGriglia" style="margin-top:12px"><table class="griglia prospetto">
-        <thead><tr><th class="riga">WBS</th><th>Consuntivato</th><th>Fatturabile</th><th>Già fatturato</th><th>Da fatturare</th></tr></thead>
+        <thead><tr><th class="riga">Attività</th><th>Consuntivato</th><th>Fatturabile</th><th>Già fatturato</th><th>Da fatturare</th></tr></thead>
         <tbody>${pr.righe.map(r=>`<tr>
           <td class="riga"><div class="n">${esc(r.wbs.activity_code)} · ${esc(r.wbs.name)}</div>
             <div class="d">${esc(r.wbs.code)}${r.wbs.billable?'':' · non fatturabile'}</div></td>
@@ -1930,7 +2052,7 @@ function fatturazioneCommessa(){
           <td class="num">${fmtNum(pr.tot.fatturate,1)} h</td>
           <td class="num spicca">${fmtNum(pr.tot.daFatturare,1)} h</td></tr></tfoot>
       </table></div>
-      ${pr.tot.escluse>0?`<div class="metricLine" style="margin-top:10px"><span class="tag gray">Escluse</span> ${fmtNum(pr.tot.escluse,1)} h su WBS non fatturabili</div>`:''}
+      ${pr.tot.escluse>0?`<div class="metricLine" style="margin-top:10px"><span class="tag gray">Escluse</span> ${fmtNum(pr.tot.escluse,1)} h su attività non fatturabili</div>`:''}
       <div class="metricLine" style="margin-top:10px">
         <b>Andrà in fattura:</b> ${fmtNum(q,2)} ${unitaProgetto(p)} <span class="dot">·</span> <b>${fmtEUR(imp)}</b></div>
       ${pr.tot.daFatturare>0?`<button type="button" class="primary" style="margin-top:12px" onclick="generaRigaFattura('${p.id}')">Genera la riga di fattura per questo progetto</button>`:
@@ -1939,18 +2061,15 @@ function fatturazioneCommessa(){
   }).join('');
 
   return appShell(`<h1>Fatturazione per commessa</h1>
-    <p class="sub">Si registra sulla WBS, si fattura sul progetto. Il dettaglio per WBS è il prospetto di controllo, non finisce in fattura.</p>
+    <p class="sub">Si registra sull'attività, si fattura sul progetto. Un progetto raccoglie tutte le sue commesse: il dettaglio qui sotto è il prospetto di controllo, non finisce in fattura.</p>
     <div class="card"><b>Cosa fatturare</b>
       <div class="field" style="margin-top:12px"><label>Cliente contrattuale</label>
         <select onchange="setFatt('client_id',this.value)">${clienti.map(c=>`<option value="${c.id}" ${c.id===cid?'selected':''}>${esc(c.code||'')} · ${esc(c.name)}</option>`).join('')}</select></div>
-      <div class="field"><label>Commessa</label>
-        <select onchange="setFatt('engagement_id',this.value)">${comm.map(x=>`<option value="${x.id}" ${x.id===eid?'selected':''}>${esc(x.code)} · ${esc(x.name)}</option>`).join('')}</select></div>
       <div class="field"><label>Dal</label><input type="date" value="${esc(s.dal)}" onchange="setFatt('dal',this.value)"></div>
       <div class="field"><label>Al</label><input type="date" value="${esc(s.al)}" onchange="setFatt('al',this.value)"></div>
       ${prj.length>1?`<div class="field"><label>Progetti da includere</label>
-        <div class="miniActions">${prj.map(p=>`<button type="button" class="miniBtn ${scelti.includes(p.id)?'active':''}" onclick="toggleProgettoFatt('${p.id}')">${scelti.includes(p.id)?'☑':'☐'} ${esc(p.code||p.name)}</button>`).join('')}</div></div>`:''}
-      ${e&&(e.invoice_reference||e.engagement_letter)?`<div class="metricLine" style="margin-top:10px">
-        <span class="tag blue">Riferimento in fattura</span> ${esc(e.invoice_reference||e.engagement_letter)}</div>`:''}
+        <div class="miniActions">${prj.map(p=>`<button type="button" class="miniBtn ${scelti.includes(p.id)?'active':''}" onclick="toggleProgettoFatt('${p.id}')">${scelti.includes(p.id)?'☑':'☐'} ${esc(p.code||p.name)}</button>`).join('')}</div>
+        <div class="small">Ogni progetto raccoglie le ore di tutte le sue commesse nel periodo.</div></div>`:''}
     </div>
     ${blocchi||'<div class="empty">Scegli almeno un progetto.</div>'}
     <button type="button" class="secondary" onclick="go('billing')">Vai alla fatturazione mensile di sempre</button>`);
@@ -1962,7 +2081,11 @@ function fatturazioneCommessa(){
 async function generaRigaFattura(projectId){
   const s=fattCommessaState();
   const p=(data.projects||[]).find(x=>x.id===projectId);if(!p)return;
-  const e=engagementById(p.engagement_id);
+  // la commessa da citare in fattura e' quella delle ore che si stanno
+  // fatturando: se ne toccano piu' d'una si prende la piu' recente
+  const prospetto=prospettoProgetto(projectId,fattCommessaState().dal,fattCommessaState().al);
+  const coinvolte=[...new Set(prospetto.righe.filter(r=>r.daFatturare>0).map(r=>r.wbs.engagement_id))];
+  const e=coinvolte.length?engagementById(coinvolte[0]):engagementsOfProject(p.id)[0];
   const cid=s.client_id||(e?e.client_id:null);
   const c=clientById(cid)||{};
   const pr=prospettoProgetto(projectId,s.dal,s.al);
@@ -2102,51 +2225,55 @@ function reportWbs(){
         ||`<tr><td class="riga vuota" colspan="6">Nessun consuntivo nel periodo.</td></tr>`}</tbody>
     </table></div>`);
 }
-// Il report economico: aggregato per cliente, commessa, progetto.
-// Nessuna WBS: non e' una dimensione del documento fiscale.
+// Il report economico: aggregato per cliente, progetto e commessa.
+// Nessuna attivita': non e' una dimensione del documento fiscale.
 function reportEconomico(){
   if(!wbsReady())return migrazioneMancante('Report economico');
   const r=repState();
-  const blocchi=(data.engagements||[]).filter(e=>!r.client_id||e.client_id===r.client_id)
-    .map(e=>{
-      const prj=projectsOfEngagement(e.id).map(p=>{
-        const pr=prospettoProgetto(p.id,r.dal,r.al);
-        const val=importoDaOre(e.client_id,pr.tot.fatturate);
-        const res=importoDaOre(e.client_id,pr.tot.daFatturare);
-        const spese=(data.travelExpenses||[]).filter(x=>x.project_id===p.id
-          && String(x.expense_date||'')>=r.dal && String(x.expense_date||'')<=r.al)
-          .reduce((t,x)=>t+Number(x.amount||0),0);
-        return {p,pr,val,res,spese};
-      }).filter(x=>x.pr.tot.consuntivate>0||x.spese>0);
-      if(!prj.length)return '';
-      const t=prj.reduce((a,x)=>({val:a.val+x.val,res:a.res+x.res,spese:a.spese+x.spese,
-        cons:a.cons+x.pr.tot.consuntivate,daF:a.daF+x.pr.tot.daFatturare}),{val:0,res:0,spese:0,cons:0,daF:0});
-      return `<div class="card"><b>${esc(e.code)} · ${esc(e.name)}</b>
-        <div class="desc" style="margin-top:2px">${esc(clientName(e.client_id))}${e.invoice_reference?' · '+esc(e.invoice_reference):''}</div>
+  const blocchi=(data.projects||[]).filter(p=>(!r.client_id||p.client_id===r.client_id)&&engagementsOfProject(p.id).length)
+    .map(p=>{
+      const pr=prospettoProgetto(p.id,r.dal,r.al);
+      const spese=(data.travelExpenses||[]).filter(x=>x.project_id===p.id
+        && String(x.expense_date||'')>=r.dal && String(x.expense_date||'')<=r.al)
+        .reduce((t,x)=>t+Number(x.amount||0),0);
+      // una riga per commessa: le attivita' della stessa commessa si sommano
+      const comm=engagementsOfProject(p.id).map(e=>{
+        const righe=pr.righe.filter(x=>x.wbs.engagement_id===e.id);
+        const cons=righe.reduce((t,x)=>t+x.consuntivate,0);
+        const daF=righe.reduce((t,x)=>t+x.daFatturare,0);
+        const fatt=righe.reduce((t,x)=>t+x.fatturate,0);
+        return {e,cons,daF,val:importoDaOre(p.client_id,fatt),res:importoDaOre(p.client_id,daF)};
+      }).filter(x=>x.cons>0);
+      if(!comm.length&&!spese)return '';
+      const t=comm.reduce((a,x)=>({cons:a.cons+x.cons,daF:a.daF+x.daF,val:a.val+x.val,res:a.res+x.res}),
+        {cons:0,daF:0,val:0,res:0});
+      const budget=comm.reduce((a,x)=>a+Number(x.e.budget_amount||0),0);
+      return `<div class="card"><b>${esc(p.code||p.name)} · ${esc(p.name)}</b>
+        <div class="desc" style="margin-top:2px">${esc(clientName(p.client_id))}${p.end_client_name?' · cliente finale '+esc(p.end_client_name):''}</div>
         <div class="scrollGriglia" style="margin-top:12px"><table class="griglia prospetto">
-          <thead><tr><th class="riga">Progetto</th><th>Consuntivato</th><th>Da fatturare</th><th>Fatturato</th><th>Residuo</th><th>Spese</th></tr></thead>
-          <tbody>${prj.map(x=>`<tr>
-            <td class="riga"><div class="n">${esc(x.p.name)}</div><div class="d wbsCode">${esc(x.p.code||'')}</div></td>
-            <td class="num">${fmtNum(x.pr.tot.consuntivate,1)} h</td>
-            <td class="num">${fmtNum(x.pr.tot.daFatturare,1)} h</td>
+          <thead><tr><th class="riga">Commessa</th><th>Consuntivato</th><th>Da fatturare</th><th>Fatturato</th><th>Residuo</th></tr></thead>
+          <tbody>${comm.map(x=>`<tr>
+            <td class="riga"><div class="n">${esc(x.e.name)}</div><div class="d wbsCode">${esc(x.e.code)}${x.e.invoice_reference?' · '+esc(x.e.invoice_reference):''}</div></td>
+            <td class="num">${fmtNum(x.cons,1)} h</td>
+            <td class="num">${fmtNum(x.daF,1)} h</td>
             <td class="num">${fmtEUR(x.val)}</td>
-            <td class="num${x.res>0?' spicca':''}">${fmtEUR(x.res)}</td>
-            <td class="num">${x.spese?fmtEUR(x.spese):'—'}</td></tr>`).join('')}</tbody>
-          <tfoot><tr><td class="riga">Totale commessa</td>
+            <td class="num${x.res>0?' spicca':''}">${fmtEUR(x.res)}</td></tr>`).join('')
+            ||`<tr><td class="riga vuota" colspan="5">Nessun consuntivo nel periodo.</td></tr>`}</tbody>
+          <tfoot><tr><td class="riga">Totale progetto</td>
             <td class="num">${fmtNum(t.cons,1)} h</td><td class="num">${fmtNum(t.daF,1)} h</td>
-            <td class="num">${fmtEUR(t.val)}</td><td class="num spicca">${fmtEUR(t.res)}</td>
-            <td class="num">${t.spese?fmtEUR(t.spese):'—'}</td></tr></tfoot>
+            <td class="num">${fmtEUR(t.val)}</td><td class="num spicca">${fmtEUR(t.res)}</td></tr></tfoot>
         </table></div>
-        ${e.budget_amount?`<div class="metricLine" style="margin-top:10px"><span class="tag blue">Budget</span> ${fmtEUR(e.budget_amount)} <span class="dot">·</span> impegnato ${fmtEUR(t.val+t.res)}</div>`:''}
+        ${spese?`<div class="metricLine" style="margin-top:10px"><span class="tag gray">Spese</span> ${fmtEUR(spese)}</div>`:''}
+        ${budget?`<div class="metricLine" style="margin-top:10px"><span class="tag blue">Budget delle commesse</span> ${fmtEUR(budget)} <span class="dot">·</span> impegnato ${fmtEUR(t.val+t.res)}</div>`:''}
       </div>`;
     }).join('');
   return appShell(`<h1>Report economico</h1>
-    <p class="sub">Aggregato per cliente, commessa e progetto: è il livello a cui si fattura. Il dettaglio per WBS sta nel report analitico.</p>
+    <p class="sub">Aggregato per cliente, progetto e commessa: è il livello a cui si fattura. Il dettaglio per attività sta nel report analitico.</p>
     ${repFiltri()}
-    ${blocchi||'<div class="empty">Nessuna commessa con movimenti nel periodo.</div>'}`);
+    ${blocchi||'<div class="empty">Nessun progetto con movimenti nel periodo.</div>'}`);
 }
 
-function render(){document.documentElement.setAttribute('data-view',state.view||'home');if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,newChoice,reportWbs,reportEconomico,fatturazioneCommessa,engagements,engagementNew,engagementEdit,engagementDetail,projectNew,projectWbs,wbsEdit,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,timesheet,griglia,pivot,summary,billing,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,incassi,balance,taxSettings,tasseFuture,fatturatoDetail,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
+function render(){document.documentElement.setAttribute('data-view',state.view||'home');if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,newChoice,reportWbs,reportEconomico,fatturazioneCommessa,engagements,engagementNew,engagementEdit,engagementDetail,projectNew,projectDetail,projectWbs:projectDetail,clientDetail,wbsEdit,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,timesheet,griglia,pivot,summary,billing,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,incassi,balance,taxSettings,tasseFuture,fatturatoDetail,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
 
 Object.assign(window,{
   setRep,
@@ -2156,8 +2283,9 @@ Object.assign(window,{
   gridClienteCambiato,gridCommessaCambiata,gridProgettoCambiato,
   hierChanged,refreshHierForForm,wbsLineage,hierAvailable,
   normCode,wbsReady,engagementsOf,openEngagement,openProjectWbs,editWbs,setEngFilter,
+  openClient,openProject,nuovoProgettoDi,nuovaCommessaDi,
   previewEngCode,previewPrjCode,previewWbsCode,addEngagement,saveEngagement,addEngagementRef,
-  addProjectInEngagement,addWbs,saveWbs,deleteWbs,
+  addProjectOfClient,addWbs,saveWbs,deleteWbs,
   setGridScope,
   gridWeekShift,
   openGriglia,

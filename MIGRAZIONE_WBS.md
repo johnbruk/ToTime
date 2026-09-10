@@ -176,6 +176,64 @@ tre righe di controllo:
 Dopo averlo lanciato, fai un giro nell'app: apri il timesheet, le
 spese e le fatture, e controlla di vedere i tuoi dati come prima.
 
+## Passo 8 — l'inversione di progetto e commessa
+
+```
+migrations/2026-09-10_inversione-anteprima.sql          (sola lettura)
+migrations/2026-09-10_inversione-progetto-commessa.sql
+```
+
+Il modello nasceva come **Cliente › Commessa › Progetto › WBS**. Ma un
+cliente finale è un'entità che dura, e sotto ci vanno appese le
+commesse man mano: il contratto di quest'anno, un ordine aggiuntivo,
+quello dell'anno prossimo. Nel verso vecchio non era esprimibile senza
+duplicare il cliente finale a ogni contratto.
+
+Adesso è **Cliente › Progetto › Commessa › Attività**, e i codici lo
+seguono:
+
+| | prima | dopo |
+| --- | --- | --- |
+| progetto | `SO-2026-001-EQU` | `SO-EQU` |
+| commessa | `SO-2026-001` | `SO-EQU-2026-001` |
+| attività | `SO-2026-001-EQU-10` | `SO-EQU-2026-001-10` |
+
+**Lancia prima l'anteprima.** È in sola lettura e mostra sui dati veri
+quante commesse verranno sdoppiate, quali codici brevi collidono e che
+codice avrà ogni riga dopo. Applica le stesse regole della migrazione,
+rinomina dei codici e rinumerazione dei progressivi comprese: se lì
+leggi `SO-EQU2`, dopo sarà `SO-EQU2`.
+
+Cosa fa la migrazione ai dati:
+
+- i progetti passano sotto il cliente;
+- una commessa che copriva **più progetti viene sdoppiata**, una per
+  progetto: nel verso nuovo non può stare sotto due;
+- una commessa **senza progetti** ne riceve uno omonimo: nel verso
+  nuovo deve averne uno;
+- le attività passano dal progetto alla commessa;
+- consuntivi, spese e fatture **non vengono toccati**: si aggiornano
+  solo i collegamenti derivati.
+
+Quando due progetti si contendono lo stesso codice breve, **lo tiene
+quello su cui c'è già lavoro registrato** — è quello il cui codice può
+essere già uscito — e a parità vince l'ordine alfabetico del nome. Non
+è un dettaglio: prima quella scelta la decideva un UUID casuale, e su
+un identificativo di business non va bene.
+
+**I codici vengono ricalcolati tutti.** Lanciala solo se i codici
+attuali non sono ancora usciti dall'app — fatture, contratti,
+comunicazioni. Se lo fossero, fermati e conservali prima.
+
+### L'ordine conta
+
+L'app della v1.14.0 lavora nel verso nuovo. Se la rilasci prima di
+lanciare la migrazione, non si rompe e non resta muta: si accorge che
+il database è ancora nel verso vecchio e te lo dice, indicando lo
+script da lanciare. Ma la sezione di commesse e attività resta
+inagibile finché non l'hai lanciata. **Prima la migrazione, poi il
+rilascio.**
+
 ## Se qualcosa va storto
 
 ```
@@ -200,9 +258,13 @@ Provato su PostgreSQL 16 in locale, ricostruendo lo schema di TOTIME:
 - ciclo completo migrazione → backfill → rollback → backfill, con i
   dati originali verificati identici a ogni giro tramite impronte del
   contenuto, non solo conteggi;
-- 49 controlli sul modello, compreso l'isolamento fra due utenti, i
+- 69 controlli sul modello, compreso l'isolamento fra due utenti, i
   cinque sull'obbligo della WBS — che provano tanto il divieto quanto
-  l'eccezione — e dieci sulla riscrittura delle policy storiche;
+  l'eccezione — dieci sulla riscrittura delle policy storiche e
+  diciotto sull'inversione, di cui il principale verifica che **ogni
+  consuntivo punti allo stesso cliente e progetto di prima**: una
+  migrazione che perde l'aggancio dei dati storici non è una
+  migrazione;
 - venti creazioni di commessa in parallelo: venti codici distinti,
   nessun buco e nessun duplicato;
 - `completamento.sql` rilanciato su un database dove il trigger di
@@ -216,9 +278,10 @@ Provato su PostgreSQL 16 in locale, ricostruendo lo schema di TOTIME:
   le policy le normalizzava a modo suo, va in rosso perché quella
   versione rendeva visibile una riga che prima era nascosta.
 
-Lato applicazione, 259 controlli di interfaccia su Chromium: griglia,
-grafico, assenze, funzionamento offline, regressione, WBS e
-fatturazione per commessa.
+Lato applicazione, 283 controlli di interfaccia su Chromium: griglia,
+grafico, assenze, funzionamento offline, regressione, WBS,
+fatturazione per commessa e la cascata delle anagrafiche — compreso il
+caso in cui l'app venga aperta su un database non ancora invertito.
 
 **Non provato**, perché non ho accesso al progetto Supabase:
 
