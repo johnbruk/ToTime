@@ -50,6 +50,7 @@ run_db () {                      # $1 = nome db, $2... = file .sql
 run_db totime_test "$HERE/wbs-model.sql"
 run_db totime_rls  "$HERE/wbs-rls.sql"
 run_db totime_obbl "$HERE/wbs-obbligo.sql"
+run_db totime_stor "$HERE/rls-storiche.sql"
 
 echo ""
 echo "RISULTATO: $pass OK / $fail KO"

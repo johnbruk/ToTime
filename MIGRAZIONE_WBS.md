@@ -130,14 +130,51 @@ Alla fine lo script stampa quattro righe di esito:
 
 Restano due cose fuori da questo script:
 
-- `2026-09-10_advisor-fix-3-rls-tabelle-storiche.sql` — la stessa
-  correzione di policy sulle 14 tabelle preesistenti. È **facoltativa**:
-  tocca tabelle che oggi funzionano, e il guadagno è di prestazioni,
-  non di sicurezza. Da lanciare quando hai tempo di ricontrollare l'app
-  dopo.
+- `2026-09-10_advisor-fix-3-rls-tabelle-storiche.sql` — vedi il passo 7.
 - **Leaked password protection**, da attivare a mano in Supabase:
   *Authentication → Providers → Email*. È l'unica segnalazione degli
   advisor che non si chiude da SQL.
+
+## Passo 7 — le prestazioni sulle tabelle storiche
+
+```
+migrations/2026-09-10_advisor-fix-3-rls-tabelle-storiche.sql
+```
+
+Stessa correzione del passo 6, ma sulle tabelle che c'erano già:
+`auth.uid()` valutato una volta per query invece che una volta per
+riga. Il guadagno è di prestazioni, non di sicurezza.
+
+Vale la pena spiegare come è fatto, perché è la parte che conta. Le
+policy di queste tabelle **non sono mai state scritte in questo
+repository**: sono nate a mano in Supabase, e qui non si sa né come si
+chiamano né che condizione hanno. Uno script che le riscrivesse «a
+modo suo» sarebbe pericoloso: se una policy fosse più stretta di
+`user_id = auth.uid()`, riscriverla in forma standard la
+allargherebbe, e da quel momento vedresti righe che prima erano
+nascoste.
+
+Questo script quindi **non riscrive niente a modo suo**. Legge la
+policy che c'è, ci sostituisce dentro il solo `auth.uid()`, e la
+ricrea identica in tutto il resto: nome, comando, ruoli, permissiva o
+restrittiva, e ogni altro pezzo della condizione. Le policy che non
+nominano `auth.uid()` non le guarda nemmeno; quelle già corrette le
+salta, quindi rilanciarlo non le annida.
+
+Alla fine restituisce **l'elenco delle policy che ha toccato** — come
+risultato, non come messaggio, perché nell'editor SQL di Supabase i
+messaggi `NOTICE` non si vedono e uno script che riscrive policy senza
+dire quali non è una cosa da lanciare al buio. Sopra l'elenco ci sono
+tre righe di controllo:
+
+| controllo | atteso |
+| --- | --- |
+| policy che rivalutano `auth.uid()` per riga | `0` |
+| tabelle con RLS attiva ma senza nemmeno una policy | `0` |
+| tabelle con RLS spenta | `nessuna` |
+
+Dopo averlo lanciato, fai un giro nell'app: apri il timesheet, le
+spese e le fatture, e controlla di vedere i tuoi dati come prima.
 
 ## Se qualcosa va storto
 
@@ -163,13 +200,21 @@ Provato su PostgreSQL 16 in locale, ricostruendo lo schema di TOTIME:
 - ciclo completo migrazione → backfill → rollback → backfill, con i
   dati originali verificati identici a ogni giro tramite impronte del
   contenuto, non solo conteggi;
-- 39 controlli sul modello, compreso l'isolamento fra due utenti e i
-  cinque sull'obbligo della WBS, che provano tanto il divieto quanto
-  l'eccezione;
+- 49 controlli sul modello, compreso l'isolamento fra due utenti, i
+  cinque sull'obbligo della WBS — che provano tanto il divieto quanto
+  l'eccezione — e dieci sulla riscrittura delle policy storiche;
 - venti creazioni di commessa in parallelo: venti codici distinti,
   nessun buco e nessun duplicato;
 - `completamento.sql` rilanciato su un database dove il trigger di
-  coerenza delle spese era stato tolto: arriva in fondo lo stesso.
+  coerenza delle spese era stato tolto: arriva in fondo lo stesso;
+- la riscrittura delle policy storiche messa alla prova su policy
+  scomode apposta — nome fuori convenzione, condizione più stretta del
+  solito, una restrittiva, una già corretta, una che `auth.uid()` non
+  lo nomina — verificando non solo che l'advisor si zittisca, ma che
+  **chi vede cosa non cambi di una riga**. La verifica non è di
+  facciata: rilanciata contro una versione precedente dello script, che
+  le policy le normalizzava a modo suo, va in rosso perché quella
+  versione rendeva visibile una riga che prima era nascosta.
 
 Lato applicazione, 259 controlli di interfaccia su Chromium: griglia,
 grafico, assenze, funzionamento offline, regressione, WBS e
