@@ -91,9 +91,9 @@ function back(){if(!guardUnsavedChanges())return;const prev=state.history.pop()|
 function toggleMainMenu(){if(!guardUnsavedChanges())return;state.menuOpen=!state.menuOpen;render()}
 const MENU=[
   {v:'home',ic:'⌂',l:'Dashboard'},
-  {main:'timesheet',ic:'◷',l:'Timesheet',sub:[{v:'newChoice',l:'Nuovo consuntivo'},{v:'calendario',l:'Calendario'},{v:'griglia',l:'Consuntivo mensile'},{v:'pivot',l:'Analisi consuntivi'},{v:'tmManage',l:'Incarichi continuativi'}]},
+  {main:'timesheet',ic:'◷',l:'Timesheet',sub:[{v:'newChoice',l:'Nuovo consuntivo'},{v:'calendario',l:'Calendario'},{v:'griglia',l:'Consuntivo mensile'},{v:'pivot',l:'Analisi consuntivi'},{v:'reportWbs',l:'Report analitico WBS'},{v:'tmManage',l:'Incarichi continuativi'}]},
   {main:'expenses',ic:'▦',l:'Spese',sub:[{v:'expenseForm',l:'Nuova spesa'}]},
-  {main:'billing',ic:'€',l:'Fatturazione',sub:[{v:'billing',l:'Mensile per cliente'},{v:'fatturazioneCommessa',l:'Per commessa'}]},
+  {main:'billing',ic:'€',l:'Fatturazione',sub:[{v:'billing',l:'Mensile per cliente'},{v:'fatturazioneCommessa',l:'Per commessa'},{v:'reportEconomico',l:'Report economico'}]},
   {v:'balance',ic:'∑',l:'Bilancio'},
   {main:'tax',ic:'%',l:'Tassazione',sub:[{v:'tasseFuture',l:'Tasse future'},{v:'taxPayments',l:'Pagamenti fiscali (INPS)'},{v:'taxSettings',l:'Configurazione fiscale'}]},
   {main:'settings',ic:'⚙',l:'Impostazioni',sub:[{v:'clients',l:'Clienti'},{v:'engagements',l:'Commesse'},{v:'projects',l:'Progetti'},{v:'activities',l:'Attività'},{v:'expenseCategories',l:'Voci di costo/spesa'},{v:'invoiceTemplates',l:'Template fattura'},{v:'appearance',l:'Aspetto / Tema'},{v:'account',l:'Account'}]}
@@ -2039,9 +2039,117 @@ function messaggioFattura(e){
   return m;
 }
 
-function render(){document.documentElement.setAttribute('data-view',state.view||'home');if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,newChoice,fatturazioneCommessa,engagements,engagementNew,engagementEdit,engagementDetail,projectNew,projectWbs,wbsEdit,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,timesheet,griglia,pivot,summary,billing,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,incassi,balance,taxSettings,tasseFuture,fatturatoDetail,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
+/* ==================================================================
+   Report
+   Due livelli distinti, come devono restare: quello analitico ragiona
+   per WBS, quello economico aggrega per cliente, commessa e progetto.
+   La WBS non e' una dimensione del documento fiscale.
+   ================================================================== */
+function repState(){const r=state.rep||{};return {dal:r.dal||(currentYear()+'-01-01'),al:r.al||(currentYear()+'-12-31'),client_id:r.client_id||''}}
+function setRep(k,v){state.rep={...(state.rep||{}),[k]:v};render()}
+function repFiltri(){
+  const r=repState();
+  return `<div class="card"><b>Periodo</b>
+    <div class="field" style="margin-top:12px"><label>Dal</label><input type="date" value="${esc(r.dal)}" onchange="setRep('dal',this.value)"></div>
+    <div class="field"><label>Al</label><input type="date" value="${esc(r.al)}" onchange="setRep('al',this.value)"></div>
+    <div class="field"><label>Cliente</label><select onchange="setRep('client_id',this.value)">
+      <option value="">Tutti i clienti</option>
+      ${(data.clients||[]).map(c=>`<option value="${c.id}" ${r.client_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}
+    </select></div></div>`;
+}
+// Le righe analitiche: una per WBS, con budget e scostamento
+function repRigheWbs(){
+  const r=repState();
+  return (data.wbsItems||[]).map(w=>{
+    const lin=wbsLineage(w.id);if(!lin)return null;
+    if(r.client_id&&lin.client_id!==r.client_id)return null;
+    const voci=(data.entries||[]).filter(e=>e.wbs_id===w.id
+      && String(e.entry_date||'')>=r.dal && String(e.entry_date||'')<=r.al);
+    const ore=voci.reduce((t,e)=>t+Number(e.hours||0),0);
+    const fatturate=voci.reduce((t,e)=>t+oreGiaFatturate(e.id),0);
+    if(!ore&&!w.budget_hours)return null;
+    const budget=Number(w.budget_hours||0);
+    return {w,lin,ore,fatturate,budget,
+      scostamento:budget?ore-budget:null,
+      fatturabili:w.billable?ore:0};
+  }).filter(Boolean).sort((a,b)=>String(a.w.code).localeCompare(String(b.w.code),'it'));
+}
+function reportWbs(){
+  if(!wbsReady())return migrazioneMancante('Report analitico WBS');
+  const righe=repRigheWbs();
+  const tot=righe.reduce((a,x)=>({ore:a.ore+x.ore,fatturabili:a.fatturabili+x.fatturabili,
+    fatturate:a.fatturate+x.fatturate,budget:a.budget+x.budget}),{ore:0,fatturabili:0,fatturate:0,budget:0});
+  return appShell(`<h1>Report analitico WBS</h1>
+    <p class="sub">Dove è finito il tempo, WBS per WBS. È il livello di controllo, non quello di fatturazione.</p>
+    ${repFiltri()}
+    <div class="card"><b>Totale periodo</b>
+      <div class="kpiGrid three" style="margin-top:14px">
+        <div><span>Consuntivato</span><strong>${fmtNum(tot.ore,1)} h</strong><small>${fmtNum(tot.ore/8,2)} gg/u</small></div>
+        <div><span>Fatturabile</span><strong>${fmtNum(tot.fatturabili,1)} h</strong><small>${tot.ore>tot.fatturabili?fmtNum(tot.ore-tot.fatturabili,1)+' h non fatturabili':'tutto fatturabile'}</small></div>
+        <div><span>Già fatturato</span><strong>${fmtNum(tot.fatturate,1)} h</strong><small>${fmtNum(Math.max(0,tot.fatturabili-tot.fatturate),1)} h da fatturare</small></div>
+      </div></div>
+    <div class="scrollGriglia"><table class="griglia prospetto">
+      <thead><tr><th class="riga">WBS</th><th>Consuntivato</th><th>Fatturabile</th><th>Fatturato</th><th>Budget</th><th>Scostamento</th></tr></thead>
+      <tbody>${righe.map(x=>`<tr>
+        <td class="riga"><div class="n">${esc(x.w.name)} ${statoTag(x.w.status)}</div>
+          <div class="d">${esc(x.lin.engagement?x.lin.engagement.code:'')} · ${esc(x.lin.project.name)}</div>
+          <div class="d wbsCode">${esc(x.w.code)}${x.w.billable?'':' · non fatturabile'}</div></td>
+        <td class="num">${fmtNum(x.ore,1)} h</td>
+        <td class="num">${x.w.billable?fmtNum(x.fatturabili,1)+' h':'—'}</td>
+        <td class="num">${x.fatturate>0?fmtNum(x.fatturate,1)+' h':'—'}</td>
+        <td class="num">${x.budget?fmtNum(x.budget,1)+' h':'—'}</td>
+        <td class="num${x.scostamento>0?' spicca':''}">${x.scostamento===null?'—':(x.scostamento>0?'+':'')+fmtNum(x.scostamento,1)+' h'}</td></tr>`).join('')
+        ||`<tr><td class="riga vuota" colspan="6">Nessun consuntivo nel periodo.</td></tr>`}</tbody>
+    </table></div>`);
+}
+// Il report economico: aggregato per cliente, commessa, progetto.
+// Nessuna WBS: non e' una dimensione del documento fiscale.
+function reportEconomico(){
+  if(!wbsReady())return migrazioneMancante('Report economico');
+  const r=repState();
+  const blocchi=(data.engagements||[]).filter(e=>!r.client_id||e.client_id===r.client_id)
+    .map(e=>{
+      const prj=projectsOfEngagement(e.id).map(p=>{
+        const pr=prospettoProgetto(p.id,r.dal,r.al);
+        const val=importoDaOre(e.client_id,pr.tot.fatturate);
+        const res=importoDaOre(e.client_id,pr.tot.daFatturare);
+        const spese=(data.travelExpenses||[]).filter(x=>x.project_id===p.id
+          && String(x.expense_date||'')>=r.dal && String(x.expense_date||'')<=r.al)
+          .reduce((t,x)=>t+Number(x.amount||0),0);
+        return {p,pr,val,res,spese};
+      }).filter(x=>x.pr.tot.consuntivate>0||x.spese>0);
+      if(!prj.length)return '';
+      const t=prj.reduce((a,x)=>({val:a.val+x.val,res:a.res+x.res,spese:a.spese+x.spese,
+        cons:a.cons+x.pr.tot.consuntivate,daF:a.daF+x.pr.tot.daFatturare}),{val:0,res:0,spese:0,cons:0,daF:0});
+      return `<div class="card"><b>${esc(e.code)} · ${esc(e.name)}</b>
+        <div class="desc" style="margin-top:2px">${esc(clientName(e.client_id))}${e.invoice_reference?' · '+esc(e.invoice_reference):''}</div>
+        <div class="scrollGriglia" style="margin-top:12px"><table class="griglia prospetto">
+          <thead><tr><th class="riga">Progetto</th><th>Consuntivato</th><th>Da fatturare</th><th>Fatturato</th><th>Residuo</th><th>Spese</th></tr></thead>
+          <tbody>${prj.map(x=>`<tr>
+            <td class="riga"><div class="n">${esc(x.p.name)}</div><div class="d wbsCode">${esc(x.p.code||'')}</div></td>
+            <td class="num">${fmtNum(x.pr.tot.consuntivate,1)} h</td>
+            <td class="num">${fmtNum(x.pr.tot.daFatturare,1)} h</td>
+            <td class="num">${fmtEUR(x.val)}</td>
+            <td class="num${x.res>0?' spicca':''}">${fmtEUR(x.res)}</td>
+            <td class="num">${x.spese?fmtEUR(x.spese):'—'}</td></tr>`).join('')}</tbody>
+          <tfoot><tr><td class="riga">Totale commessa</td>
+            <td class="num">${fmtNum(t.cons,1)} h</td><td class="num">${fmtNum(t.daF,1)} h</td>
+            <td class="num">${fmtEUR(t.val)}</td><td class="num spicca">${fmtEUR(t.res)}</td>
+            <td class="num">${t.spese?fmtEUR(t.spese):'—'}</td></tr></tfoot>
+        </table></div>
+        ${e.budget_amount?`<div class="metricLine" style="margin-top:10px"><span class="tag blue">Budget</span> ${fmtEUR(e.budget_amount)} <span class="dot">·</span> impegnato ${fmtEUR(t.val+t.res)}</div>`:''}
+      </div>`;
+    }).join('');
+  return appShell(`<h1>Report economico</h1>
+    <p class="sub">Aggregato per cliente, commessa e progetto: è il livello a cui si fattura. Il dettaglio per WBS sta nel report analitico.</p>
+    ${repFiltri()}
+    ${blocchi||'<div class="empty">Nessuna commessa con movimenti nel periodo.</div>'}`);
+}
+
+function render(){document.documentElement.setAttribute('data-view',state.view||'home');if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,newChoice,reportWbs,reportEconomico,fatturazioneCommessa,engagements,engagementNew,engagementEdit,engagementDetail,projectNew,projectWbs,wbsEdit,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,timesheet,griglia,pivot,summary,billing,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,incassi,balance,taxSettings,tasseFuture,fatturatoDetail,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
 
 Object.assign(window,{
+  setRep,
   generaRigaFattura,
   setFatt,toggleProgettoFatt,prospettoProgetto,
   spostaWbs,

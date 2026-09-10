@@ -82,6 +82,25 @@ ok(/56,0/.test(piede2[3]),'ora risultano 56 h già fatturate',piede2[3]);
 ok(/^0,0|—/.test(piede2[4]),'e zero da fatturare',piede2[4]);
 const bottone=await pg.evaluate(()=>!![...document.querySelectorAll('button')].find(x=>/Genera la riga/.test(x.textContent)));
 ok(!bottone,'il pulsante per generare non c\'è più');
+
+console.log('\n=== E. I due report, su due livelli diversi ===');
+await pg.evaluate(()=>window.go('reportWbs'));await pg.waitForTimeout(500);
+const rw=await pg.evaluate(()=>[...document.querySelectorAll('table.prospetto tbody tr')]
+  .map(tr=>tr.querySelector('.riga')?.textContent.replace(/\s+/g,' ').trim()));
+ok(rw.length===3,'il report analitico elenca le WBS una per una',rw.length+' righe');
+ok(rw.some(x=>/Interne/.test(x)),'comprese quelle non fatturabili');
+const kpi=await pg.evaluate(()=>[...document.querySelectorAll('.kpiGrid strong')].map(e=>e.textContent.trim()));
+ok(/72,0/.test(kpi[0]||''),'con il consuntivato totale',kpi[0]);
+ok(/56,0/.test(kpi[1]||''),'e il fatturabile separato dal consuntivato',kpi[1]);
+
+await pg.evaluate(()=>window.go('reportEconomico'));await pg.waitForTimeout(500);
+const re=await pg.evaluate(()=>[...document.querySelectorAll('table.prospetto tbody tr')]
+  .map(tr=>tr.querySelector('.riga')?.textContent.replace(/\s+/g,' ').trim()));
+ok(re.length===1,'il report economico aggrega per progetto, una riga sola',re.length+' righe');
+ok(!re.some(x=>/Project Management|Process Mapping|Interne/.test(x)),
+  'e non usa la WBS come dimensione: nessun nome di WBS compare',re.join(' | '));
+ok(/SO-2026-001-EQU/.test(re[0]||''),'ma il codice progetto c\'è',re[0]);
+
 ok(errs.length===0,'nessun errore JS',errs.slice(0,2).join(' | ')||'nessuno');
 await b.close();srv.close();
 console.log(`\nRISULTATO: ${pass} OK / ${fail} KO`);
