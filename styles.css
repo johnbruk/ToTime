@@ -556,3 +556,11 @@ table.griglia .riga .wbsCode{font-variant-numeric:tabular-nums;opacity:.75}
 /* La cascata sotto la griglia ha quattro tendine invece di tre */
 .nuovaRiga{flex-wrap:wrap}
 .nuovaRiga select[hidden]{display:none!important}
+
+/* Il prospetto di controllo per WBS: numeri a destra, incolonnati */
+table.griglia.prospetto th{text-align:right;padding:8px 10px;white-space:nowrap}
+table.griglia.prospetto th.riga{text-align:left}
+table.griglia.prospetto td.num{text-align:right;padding:10px;font-variant-numeric:tabular-nums;white-space:nowrap}
+table.griglia.prospetto td.num.spicca{font-weight:var(--w-bold);color:var(--text)}
+table.griglia.prospetto tfoot td{font-weight:var(--w-bold);background:var(--surface2)}
+table.griglia.prospetto td.riga{padding:10px;text-align:left}

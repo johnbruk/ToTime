@@ -93,7 +93,7 @@ const MENU=[
   {v:'home',ic:'⌂',l:'Dashboard'},
   {main:'timesheet',ic:'◷',l:'Timesheet',sub:[{v:'newChoice',l:'Nuovo consuntivo'},{v:'calendario',l:'Calendario'},{v:'griglia',l:'Consuntivo mensile'},{v:'pivot',l:'Analisi consuntivi'},{v:'tmManage',l:'Incarichi continuativi'}]},
   {main:'expenses',ic:'▦',l:'Spese',sub:[{v:'expenseForm',l:'Nuova spesa'}]},
-  {v:'billing',ic:'€',l:'Fatturazione'},
+  {main:'billing',ic:'€',l:'Fatturazione',sub:[{v:'billing',l:'Mensile per cliente'},{v:'fatturazioneCommessa',l:'Per commessa'}]},
   {v:'balance',ic:'∑',l:'Bilancio'},
   {main:'tax',ic:'%',l:'Tassazione',sub:[{v:'tasseFuture',l:'Tasse future'},{v:'taxPayments',l:'Pagamenti fiscali (INPS)'},{v:'taxSettings',l:'Configurazione fiscale'}]},
   {main:'settings',ic:'⚙',l:'Impostazioni',sub:[{v:'clients',l:'Clienti'},{v:'engagements',l:'Commesse'},{v:'projects',l:'Progetti'},{v:'activities',l:'Attività'},{v:'expenseCategories',l:'Voci di costo/spesa'},{v:'invoiceTemplates',l:'Template fattura'},{v:'appearance',l:'Aspetto / Tema'},{v:'account',l:'Account'}]}
@@ -1814,9 +1814,236 @@ async function spostaWbs(daId){
   setMsg(`${u.tot} registrazion${u.tot===1?'e spostata':'i spostate'} su ${a.code}. Ora ${da.code} è vuota e si può chiudere o eliminare.`,6000);
 }
 
-function render(){document.documentElement.setAttribute('data-view',state.view||'home');if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,newChoice,engagements,engagementNew,engagementEdit,engagementDetail,projectNew,projectWbs,wbsEdit,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,timesheet,griglia,pivot,summary,billing,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,incassi,balance,taxSettings,tasseFuture,fatturatoDetail,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
+/* ==================================================================
+   Fatturazione per commessa
+   Si registra sulla WBS, si fattura sul PROGETTO. Le WBS servono a
+   sapere cosa e' stato fatto e a controllarlo; in fattura confluiscono
+   in una riga sola per progetto.
+   Questo flusso si aggiunge a quello esistente, non lo sostituisce.
+   ================================================================== */
+
+// Quanto di una registrazione risulta gia' fatturato
+function oreGiaFatturate(entryId){
+  return (data.invoiceAllocations||[])
+    .filter(a=>a.source_table==='timesheet_entries'&&a.source_id===entryId)
+    .reduce((t,a)=>t+Number(a.quantity||0),0);
+}
+// Il prospetto analitico per WBS di un progetto in un periodo.
+// E' il documento di controllo: dice da dove viene ogni ora.
+function prospettoProgetto(projectId,dal,al){
+  const wbs=wbsOfProject(projectId);
+  const righe=wbs.map(w=>{
+    const voci=(data.entries||[]).filter(e=>e.wbs_id===w.id
+      && String(e.entry_date||'')>=dal && String(e.entry_date||'')<=al);
+    const consuntivate=voci.reduce((t,e)=>t+Number(e.hours||0),0);
+    const fatturate=voci.reduce((t,e)=>t+oreGiaFatturate(e.id),0);
+    const daFatturare=w.billable?Math.max(0,consuntivate-fatturate):0;
+    return {wbs:w,voci,consuntivate,fatturate,daFatturare,
+      fatturabili:w.billable?consuntivate:0,
+      escluse:w.billable?0:consuntivate};
+  }).filter(r=>r.consuntivate>0);
+  const tot=righe.reduce((a,r)=>({
+    consuntivate:a.consuntivate+r.consuntivate,
+    fatturabili:a.fatturabili+r.fatturabili,
+    fatturate:a.fatturate+r.fatturate,
+    daFatturare:a.daFatturare+r.daFatturare,
+    escluse:a.escluse+r.escluse
+  }),{consuntivate:0,fatturabili:0,fatturate:0,daFatturare:0,escluse:0});
+  return {righe,tot};
+}
+// L'importo si calcola sulla tariffa del CLIENTE, come e' sempre stato.
+// La tariffa di progetto resta documentale e non entra nei conti.
+function importoDaOre(clientId,ore){
+  const c=clientById(clientId)||{};
+  const std=Number(c.standard_hours||8)||8;
+  return Number(c.daily_rate||0)/std*Number(ore||0);
+}
+function unitaProgetto(p){return (p&&p.billing_unit==='hour')?'ore':'giornate'}
+function quantitaInUnita(p,ore,clientId){
+  if(p&&p.billing_unit==='hour')return Number(ore||0);
+  const c=clientById(clientId)||{};
+  return Number(ore||0)/(Number(c.standard_hours||8)||8);
+}
+
+function fattCommessaState(){
+  const s=state.fatt||{};
+  return {client_id:s.client_id||'',engagement_id:s.engagement_id||'',
+    dal:s.dal||primoDelMese(),al:s.al||ultimoDelMese(),
+    progetti:s.progetti||null};
+}
+function primoDelMese(){return state.month+'-01'}
+function ultimoDelMese(){const [y,m]=state.month.split('-').map(Number);
+  return `${state.month}-${String(new Date(y,m,0).getDate()).padStart(2,'0')}`}
+function setFatt(k,v){state.fatt={...(state.fatt||{}),[k]:v};
+  if(k==='client_id')state.fatt.engagement_id='';
+  if(k==='client_id'||k==='engagement_id')state.fatt.progetti=null;
+  render()}
+function toggleProgettoFatt(id){
+  const s=fattCommessaState();
+  const cur=s.progetti===null?progettiFatturabili().map(p=>p.id):s.progetti.slice();
+  const i=cur.indexOf(id);
+  if(i>=0)cur.splice(i,1);else cur.push(id);
+  state.fatt={...(state.fatt||{}),progetti:cur};render();
+}
+function progettiFatturabili(){
+  const s=fattCommessaState();
+  if(!s.engagement_id)return [];
+  return projectsOfEngagement(s.engagement_id);
+}
+
+function fatturazioneCommessa(){
+  if(!wbsReady())return migrazioneMancante('Fatturazione per commessa');
+  const s=fattCommessaState();
+  const clienti=(data.clients||[]).filter(c=>engagementsOf(c.id).length);
+  if(!clienti.length)return appShell(`<h1>Fatturazione per commessa</h1>
+    <div class="card"><b>Nessuna commessa</b><div class="desc" style="margin-top:6px">
+    Crea prima una commessa in Impostazioni → Commesse.</div></div>
+    <button type="button" class="secondary" onclick="go('engagements')">Vai alle commesse</button>`);
+  const cid=s.client_id||clienti[0].id;
+  const comm=engagementsOf(cid);
+  const eid=s.engagement_id||(comm[0]||{}).id||'';
+  const prj=eid?projectsOfEngagement(eid):[];
+  const scelti=s.progetti===null?prj.map(p=>p.id):s.progetti;
+  const e=engagementById(eid);
+
+  const blocchi=prj.filter(p=>scelti.includes(p.id)).map(p=>{
+    const pr=prospettoProgetto(p.id,s.dal,s.al);
+    if(!pr.righe.length)return `<div class="card"><b>${esc(p.code||p.name)}</b>
+      <div class="desc" style="margin-top:6px">Nessun consuntivo nel periodo.</div></div>`;
+    const q=quantitaInUnita(p,pr.tot.daFatturare,cid);
+    const imp=importoDaOre(cid,pr.tot.daFatturare);
+    return `<div class="card"><b>${esc(p.code||p.name)} · ${esc(p.name)}</b>
+      <div class="desc" style="margin-top:2px">${esc(p.end_client_name||'')}${p.end_client_name?' · ':''}il dettaglio per WBS resta qui, in fattura va una riga sola</div>
+      <div class="scrollGriglia" style="margin-top:12px"><table class="griglia prospetto">
+        <thead><tr><th class="riga">WBS</th><th>Consuntivato</th><th>Fatturabile</th><th>Già fatturato</th><th>Da fatturare</th></tr></thead>
+        <tbody>${pr.righe.map(r=>`<tr>
+          <td class="riga"><div class="n">${esc(r.wbs.activity_code)} · ${esc(r.wbs.name)}</div>
+            <div class="d">${esc(r.wbs.code)}${r.wbs.billable?'':' · non fatturabile'}</div></td>
+          <td class="num">${fmtNum(r.consuntivate,1)} h</td>
+          <td class="num">${r.wbs.billable?fmtNum(r.fatturabili,1)+' h':'—'}</td>
+          <td class="num">${r.fatturate>0?fmtNum(r.fatturate,1)+' h':'—'}</td>
+          <td class="num${r.daFatturare>0?' spicca':''}">${r.daFatturare>0?fmtNum(r.daFatturare,1)+' h':'—'}</td></tr>`).join('')}
+        </tbody>
+        <tfoot><tr><td class="riga">Totale progetto</td>
+          <td class="num">${fmtNum(pr.tot.consuntivate,1)} h</td>
+          <td class="num">${fmtNum(pr.tot.fatturabili,1)} h</td>
+          <td class="num">${fmtNum(pr.tot.fatturate,1)} h</td>
+          <td class="num spicca">${fmtNum(pr.tot.daFatturare,1)} h</td></tr></tfoot>
+      </table></div>
+      ${pr.tot.escluse>0?`<div class="metricLine" style="margin-top:10px"><span class="tag gray">Escluse</span> ${fmtNum(pr.tot.escluse,1)} h su WBS non fatturabili</div>`:''}
+      <div class="metricLine" style="margin-top:10px">
+        <b>Andrà in fattura:</b> ${fmtNum(q,2)} ${unitaProgetto(p)} <span class="dot">·</span> <b>${fmtEUR(imp)}</b></div>
+      ${pr.tot.daFatturare>0?`<button type="button" class="primary" style="margin-top:12px" onclick="generaRigaFattura('${p.id}')">Genera la riga di fattura per questo progetto</button>`:
+        '<div class="desc" style="margin-top:10px">Niente da fatturare in questo periodo.</div>'}
+    </div>`;
+  }).join('');
+
+  return appShell(`<h1>Fatturazione per commessa</h1>
+    <p class="sub">Si registra sulla WBS, si fattura sul progetto. Il dettaglio per WBS è il prospetto di controllo, non finisce in fattura.</p>
+    <div class="card"><b>Cosa fatturare</b>
+      <div class="field" style="margin-top:12px"><label>Cliente contrattuale</label>
+        <select onchange="setFatt('client_id',this.value)">${clienti.map(c=>`<option value="${c.id}" ${c.id===cid?'selected':''}>${esc(c.code||'')} · ${esc(c.name)}</option>`).join('')}</select></div>
+      <div class="field"><label>Commessa</label>
+        <select onchange="setFatt('engagement_id',this.value)">${comm.map(x=>`<option value="${x.id}" ${x.id===eid?'selected':''}>${esc(x.code)} · ${esc(x.name)}</option>`).join('')}</select></div>
+      <div class="field"><label>Dal</label><input type="date" value="${esc(s.dal)}" onchange="setFatt('dal',this.value)"></div>
+      <div class="field"><label>Al</label><input type="date" value="${esc(s.al)}" onchange="setFatt('al',this.value)"></div>
+      ${prj.length>1?`<div class="field"><label>Progetti da includere</label>
+        <div class="miniActions">${prj.map(p=>`<button type="button" class="miniBtn ${scelti.includes(p.id)?'active':''}" onclick="toggleProgettoFatt('${p.id}')">${scelti.includes(p.id)?'☑':'☐'} ${esc(p.code||p.name)}</button>`).join('')}</div></div>`:''}
+      ${e&&(e.invoice_reference||e.engagement_letter)?`<div class="metricLine" style="margin-top:10px">
+        <span class="tag blue">Riferimento in fattura</span> ${esc(e.invoice_reference||e.engagement_letter)}</div>`:''}
+    </div>
+    ${blocchi||'<div class="empty">Scegli almeno un progetto.</div>'}
+    <button type="button" class="secondary" onclick="go('billing')">Vai alla fatturazione mensile di sempre</button>`);
+}
+
+/* Genera UNA riga di fattura per il progetto, e la collega alle
+   registrazioni che la compongono. E' l'allocazione che impedisce di
+   fatturare due volte la stessa ora, non un contrassegno sulla WBS. */
+async function generaRigaFattura(projectId){
+  const s=fattCommessaState();
+  const p=(data.projects||[]).find(x=>x.id===projectId);if(!p)return;
+  const e=engagementById(p.engagement_id);
+  const cid=s.client_id||(e?e.client_id:null);
+  const c=clientById(cid)||{};
+  const pr=prospettoProgetto(projectId,s.dal,s.al);
+  if(pr.tot.daFatturare<=0)return setMsg('Non c\'è niente da fatturare in questo periodo.',5000);
+
+  const q=quantitaInUnita(p,pr.tot.daFatturare,cid);
+  const imp=importoDaOre(cid,pr.tot.daFatturare);
+  const dettaglio=pr.righe.filter(r=>r.daFatturare>0)
+    .map(r=>`${r.wbs.activity_code} ${r.wbs.name}: ${fmtNum(r.daFatturare,1)} h`).join('\n');
+  if(!confirm(`Generare la riga di fattura per ${p.code||p.name}?\n\n`
+    +`${fmtNum(q,2)} ${unitaProgetto(p)} · ${fmtEUR(imp)}\n\n`
+    +`Composta da:\n${dettaglio}\n\n`
+    +`Le registrazioni verranno segnate come fatturate e non potranno essere fatturate di nuovo.`))return;
+
+  state.busy=true;render();
+  try{
+    // Una testata per cliente e mese, come fa gia' il resto dell'app
+    const [anno,mese]=s.al.split('-').map(Number);
+    let hdr=(data.billingHeaders||[]).find(h=>h.client_id===cid&&Number(h.year)===anno&&Number(h.month)===mese);
+    if(!hdr){
+      const r=await insertResilient('billing_headers',{client_id:cid,year:anno,month:mese,status:'draft'});
+      if(r.error)throw r.error;
+      await reload();
+      hdr=(data.billingHeaders||[]).find(h=>h.client_id===cid&&Number(h.year)===anno&&Number(h.month)===mese);
+    }
+    // La riga punta al progetto, mai alla WBS. Gli snapshot congelano
+    // il valore: cambiare poi tariffa o riferimenti non la tocca.
+    const riga={billing_header_id:hdr?hdr.id:null,client_id:cid,engagement_id:e?e.id:null,project_id:p.id,
+      line_type:'daily_rate_8h',
+      description:p.invoice_line_description||`${p.name}${p.end_client_name?' — '+p.end_client_name:''}`,
+      period_from:s.dal,period_to:s.al,
+      quantity:Number(q.toFixed(2)),unit:p.billing_unit==='hour'?'hour':'day',
+      unit_rate:Number(c.daily_rate||0),currency:p.currency||'EUR',amount:Number(imp.toFixed(2)),
+      snapshot_client_name:c.name||null,snapshot_client_code:c.code||null,
+      snapshot_engagement_code:e?e.code:null,snapshot_project_code:p.code||null,
+      snapshot_project_name:p.name||null,snapshot_end_client:p.end_client_name||null,
+      snapshot_engagement_letter:e?e.engagement_letter:null,
+      snapshot_purchase_order:e?e.purchase_order:null,
+      snapshot_invoice_reference:e?e.invoice_reference:null};
+    const ins=await insertResilient('billing_lines',riga);
+    if(ins.error)throw ins.error;
+    await reload();
+    const linea=(data.billingLines||[]).slice().sort((a,b)=>
+      String(b.created_at||'').localeCompare(String(a.created_at||'')))[0];
+    if(!linea)throw new Error('Riga di fattura non trovata dopo il salvataggio');
+
+    // Le allocazioni: da quali registrazioni arriva la quantita'
+    const alloc=[];
+    for(const r of pr.righe){
+      if(r.daFatturare<=0)continue;
+      for(const v of r.voci){
+        const resto=Number(v.hours||0)-oreGiaFatturate(v.id);
+        if(resto<=0.0001)continue;
+        alloc.push({billing_line_id:linea.id,source_table:'timesheet_entries',source_id:v.id,
+          wbs_id:r.wbs.id,quantity:Number(resto.toFixed(2)),
+          amount:Number(importoDaOre(cid,resto).toFixed(2))});
+      }
+    }
+    if(alloc.length){
+      const a=await insertManyResilient('invoice_line_allocations',alloc);
+      if(a.error)throw a.error;
+    }
+  }catch(err){state.busy=false;return setMsg(messaggioFattura(err),9000)||render();}
+  state.busy=false;
+  await reload();render();
+  setMsg(`Riga di fattura creata per ${p.code||p.name}. Le ore che la compongono non sono più fatturabili.`,6000);
+}
+function messaggioFattura(e){
+  const m=String(e&&e.message||e);
+  if(/gia. fatturata|fatturare due volte/i.test(m))
+    return 'Alcune di queste ore risultano già fatturate: ricarica la pagina e rifai il prospetto.';
+  if(/does not exist|could not find the table/i.test(m))
+    return 'Manca la migrazione delle commesse: esegui prima gli script in migrations/.';
+  return m;
+}
+
+function render(){document.documentElement.setAttribute('data-view',state.view||'home');if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,newChoice,fatturazioneCommessa,engagements,engagementNew,engagementEdit,engagementDetail,projectNew,projectWbs,wbsEdit,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,timesheet,griglia,pivot,summary,billing,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,incassi,balance,taxSettings,tasseFuture,fatturatoDetail,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
 
 Object.assign(window,{
+  generaRigaFattura,
+  setFatt,toggleProgettoFatt,prospettoProgetto,
   spostaWbs,
   gridClienteCambiato,gridCommessaCambiata,gridProgettoCambiato,
   hierChanged,refreshHierForForm,wbsLineage,hierAvailable,
