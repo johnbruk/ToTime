@@ -30,6 +30,8 @@ run_db () {                      # $1 = nome db, $2... = file .sql
   createdb -h "$RUN" -p "$PORT" -U postgres "$db"
   psql -h "$RUN" -p "$PORT" -U postgres -d "$db" -q -v ON_ERROR_STOP=1 -f "$HERE/base-schema.sql" >/dev/null
   psql -h "$RUN" -p "$PORT" -U postgres -d "$db" -q -v ON_ERROR_STOP=1 -f "$ROOT/migrations/2026-09-09_commesse-progetti-wbs.sql" >/dev/null 2>&1
+  # anche le correzioni per gli advisor: si prova quello che finisce in produzione
+  psql -h "$RUN" -p "$PORT" -U postgres -d "$db" -q -v ON_ERROR_STOP=1 -f "$ROOT/migrations/2026-09-10_advisor-fix.sql" >/dev/null 2>&1
   for f in "$@"; do
     out=$(psql -h "$RUN" -p "$PORT" -U postgres -d "$db" -q -f "$f" 2>&1 |
           sed 's/^psql.*NOTICE:  //;s/^psql.*ERROR:/  KO  ERRORE SQL:/' |
