@@ -22,6 +22,7 @@ set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
 
 do $$
 declare
+  p_acm uuid; p_bet uuid; e_acm uuid;
   u1 uuid := '11111111-1111-1111-1111-111111111111';
   u2 uuid := '22222222-2222-2222-2222-222222222222';
   c_so uuid; c_al uuid; e1 uuid; e2 uuid; e3 uuid; e_alt uuid;
@@ -52,45 +53,61 @@ end;
 insert into public.clients(user_id,name,code,daily_rate,standard_hours) values (u1,'Alfa S.p.A.','AL',400,8) returning id into c_al;
 
 raise notice '';
-raise notice '=== B. Progressivo di commessa ===';
-insert into public.engagements(user_id,client_id,year,name) values (u1,c_so,2026,'Incarico 2026') returning id,code into e1,v;
-perform pg_temp.ok(v='SO-2026-001','la prima commessa Solution del 2026 e'' SO-2026-001',v);
-insert into public.engagements(user_id,client_id,year,name) values (u1,c_so,2026,'Secondo incarico') returning id,code into e2,v;
-perform pg_temp.ok(v='SO-2026-002','la seconda e'' SO-2026-002',v);
-insert into public.engagements(user_id,client_id,year,name) values (u1,c_so,2027,'Incarico 2027') returning id,code into e3,v;
-perform pg_temp.ok(v='SO-2027-001','il 2027 riparte da 001',v);
-insert into public.engagements(user_id,client_id,year,name) values (u1,c_al,2026,'Incarico Alfa') returning id,code into e_alt,v;
-perform pg_temp.ok(v='AL-2026-001','un altro cliente ha il progressivo indipendente',v);
-
-raise notice '';
-raise notice '=== C. Progetto e WBS ===';
-insert into public.projects(user_id,client_id,engagement_id,short_code,name,end_client_name,billing_unit,sell_rate)
-  values (u1,c_so,e1,'equ','EQUANS','EQUANS','day',480) returning id,code into p_equ,v;
-perform pg_temp.ok(v='SO-2026-001-EQU','il progetto diventa SO-2026-001-EQU',v);
-
-insert into public.wbs_items(user_id,project_id,activity_code,name,kind) values (u1,p_equ,'10','Project Management','project_management') returning id,code into w10,v;
-perform pg_temp.ok(v='SO-2026-001-EQU-10','la WBS diventa SO-2026-001-EQU-10',v);
-insert into public.wbs_items(user_id,project_id,activity_code,name) values (u1,p_equ,'20','Process Mapping') returning id into w20;
-insert into public.wbs_items(user_id,project_id,activity_code,name) values (u1,p_equ,'15','Analisi intermedia') returning id,code into w15,v;
-perform pg_temp.ok(v='SO-2026-001-EQU-15','si puo'' inserire una WBS 15 fra la 10 e la 20 senza rinumerare',v);
-insert into public.wbs_items(user_id,project_id,activity_code,name,kind,billable) values (u1,p_equ,'90','Trasferte e spese','travel',false) returning id into w90;
+raise notice '=== B. Progetto sotto il cliente ===';
+insert into public.projects(user_id,client_id,short_code,name,end_client_name,billing_unit,sell_rate)
+  values (u1,c_so,'equ','EQUANS','EQUANS','day',480) returning id,code into p_equ,v;
+perform pg_temp.ok(v='SO-EQU','il progetto si codifica sotto il cliente: SO-EQU',v);
+insert into public.projects(user_id,client_id,short_code,name) values (u1,c_so,'ACM','ACME') returning id into p_acm;
+insert into public.projects(user_id,client_id,short_code,name) values (u1,c_al,'BET','Beta') returning id into p_bet;
 
 begin
-  insert into public.wbs_items(user_id,project_id,activity_code,name) values (u1,p_equ,'10','Doppione');
-  perform pg_temp.ok(false,'due WBS non possono avere lo stesso codice nel progetto');
+  insert into public.projects(user_id,client_id,short_code,name) values (u1,c_so,'EQU','Doppione');
+  perform pg_temp.ok(false,'due progetti dello stesso cliente non possono avere lo stesso codice breve');
 exception when unique_violation then
-  perform pg_temp.ok(true,'due WBS non possono avere lo stesso codice nel progetto');
+  perform pg_temp.ok(true,'due progetti dello stesso cliente non possono avere lo stesso codice breve');
 end;
 
 raise notice '';
-raise notice '=== D. Consuntivi sulla WBS ===';
+raise notice '=== C. Progressivo di commessa, per progetto e anno ===';
+insert into public.engagements(user_id,client_id,project_id,year,name) values (u1,c_so,p_equ,2026,'Incarico 2026') returning id,code into e1,v;
+perform pg_temp.ok(v='SO-EQU-2026-001','la prima commessa di EQUANS nel 2026 e'' SO-EQU-2026-001',v);
+insert into public.engagements(user_id,client_id,project_id,year,name) values (u1,c_so,p_equ,2026,'Ordine aggiuntivo') returning id,code into e2,v;
+perform pg_temp.ok(v='SO-EQU-2026-002','lo stesso cliente finale ne accetta una seconda: SO-EQU-2026-002',v);
+insert into public.engagements(user_id,client_id,project_id,year,name) values (u1,c_so,p_equ,2027,'Contratto 2027') returning id,code into e3,v;
+perform pg_temp.ok(v='SO-EQU-2027-001','il 2027 riparte da 001',v);
+insert into public.engagements(user_id,client_id,project_id,year,name) values (u1,c_so,p_acm,2026,'Incarico ACME') returning id,code into e_acm,v;
+perform pg_temp.ok(v='SO-ACM-2026-001','un altro cliente finale dello stesso cliente ha il progressivo suo',v);
+insert into public.engagements(user_id,client_id,project_id,year,name) values (u1,c_al,p_bet,2026,'Incarico Beta') returning id,code into e_alt,v;
+perform pg_temp.ok(v='AL-BET-2026-001','e un altro cliente pure',v);
+
+raise notice '';
+raise notice '=== D. Attivita'' sotto la commessa ===';
+insert into public.wbs_items(user_id,engagement_id,activity_code,name,kind) values (u1,e1,'10','Project Management','project_management') returning id,code into w10,v;
+perform pg_temp.ok(v='SO-EQU-2026-001-10','l''attivita'' si codifica sotto la commessa: SO-EQU-2026-001-10',v);
+insert into public.wbs_items(user_id,engagement_id,activity_code,name) values (u1,e1,'20','Process Mapping') returning id into w20;
+insert into public.wbs_items(user_id,engagement_id,activity_code,name) values (u1,e1,'15','Analisi intermedia') returning id,code into w15,v;
+perform pg_temp.ok(v='SO-EQU-2026-001-15','si puo'' inserire una 15 fra la 10 e la 20 senza rinumerare',v);
+insert into public.wbs_items(user_id,engagement_id,activity_code,name,kind,billable) values (u1,e1,'90','Trasferte e spese','travel',false) returning id into w90;
+
+begin
+  insert into public.wbs_items(user_id,engagement_id,activity_code,name) values (u1,e1,'10','Doppione');
+  perform pg_temp.ok(false,'due attivita'' non possono avere lo stesso codice nella commessa');
+exception when unique_violation then
+  perform pg_temp.ok(true,'due attivita'' non possono avere lo stesso codice nella commessa');
+end;
+
+raise notice '';
+raise notice '=== E. Consuntivi sulla WBS ===';
 insert into public.timesheet_entries(user_id,entry_date,wbs_id,hours,daily_rate_snapshot,standard_hours_snapshot)
   values (u1,'2026-03-02',w10,32,480,8) returning id into t1;
 select client_id, project_id into c_so, p_equ from public.timesheet_entries where id=t1;
 perform pg_temp.ok(c_so is not null and p_equ is not null,'cliente e progetto si ricavano dalla WBS, non si scrivono a mano');
-select count(*) into n from public.timesheet_entries e join public.wbs_items w on w.id=e.wbs_id
-  join public.projects p on p.id=w.project_id where e.id=t1 and p.code='SO-2026-001-EQU';
-perform pg_temp.ok(n=1,'la registrazione risale a progetto e commessa per relazione');
+select count(*) into n from public.timesheet_entries te
+  join public.wbs_items w on w.id=te.wbs_id
+  join public.engagements en on en.id=w.engagement_id
+  join public.projects p on p.id=en.project_id
+  where te.id=t1 and p.code='SO-EQU' and en.code='SO-EQU-2026-001';
+perform pg_temp.ok(n=1,'la registrazione risale a commessa, progetto e cliente per relazione');
 
 insert into public.timesheet_entries(user_id,entry_date,wbs_id,hours,daily_rate_snapshot,standard_hours_snapshot)
   values (u1,'2026-03-03',w20,24,480,8) returning id into t2;
@@ -108,7 +125,7 @@ select count(*) into n from public.wbs_items where id=w15;
 perform pg_temp.ok(n=1,'ma la WBS chiusa resta visibile nello storico');
 
 raise notice '';
-raise notice '=== E. Immutabilita'' dei codici usati ===';
+raise notice '=== F. Immutabilita'' dei codici usati ===';
 begin
   update public.wbs_items set activity_code='11' where id=w10;
   perform pg_temp.ok(false,'il codice di una WBS gia'' usata non si puo'' cambiare');
@@ -126,15 +143,15 @@ exception when others then
 end;
 
 raise notice '';
-raise notice '=== F. Fatturazione aggregata per progetto ===';
+raise notice '=== G. Fatturazione aggregata per progetto ===';
 insert into public.billing_headers(user_id,year,month,client_id,status)
   select u1,2026,3,client_id,'draft' from public.engagements where id=e1 returning id into hdr;
-select p.id into p_equ from public.projects p where p.code='SO-2026-001-EQU';
+select p.id into p_equ from public.projects p where p.code='SO-EQU';
 insert into public.billing_lines(user_id,billing_header_id,client_id,engagement_id,project_id,line_type,
    description,period_from,period_to,quantity,unit,unit_rate,amount,
    snapshot_project_code,snapshot_engagement_code,snapshot_invoice_reference)
   select u1,hdr,e.client_id,e1,p_equ,'daily_rate_8h','Attivita'' EQUANS marzo 2026','2026-03-01','2026-03-31',
-         7,'day',480,3360,'SO-2026-001-EQU','SO-2026-001','LI_202601_Giovanni_Brucculeri'
+         7,'day',480,3360,'SO-EQU','SO-EQU-2026-001','LI_202601_Giovanni_Brucculeri'
   from public.engagements e where e.id=e1 returning id into bl;
 -- le tre WBS confluiscono in UNA riga di progetto
 insert into public.invoice_line_allocations(user_id,billing_line_id,source_table,source_id,wbs_id,quantity,amount)
@@ -171,11 +188,11 @@ exception when others then
 end;
 
 raise notice '';
-raise notice '=== G. Snapshot: lo storico non cambia ===';
+raise notice '=== H. Snapshot: lo storico non cambia ===';
 update public.projects set sell_rate=600, name='EQUANS rinominato' where id=p_equ;
 update public.engagements set invoice_reference='LI_NUOVO' where id=e1;
 select snapshot_project_code||' / '||snapshot_invoice_reference into v
   from public.billing_lines where billing_header_id=hdr and snapshot_project_code is not null limit 1;
-perform pg_temp.ok(v='SO-2026-001-EQU / LI_202601_Giovanni_Brucculeri',
+perform pg_temp.ok(v='SO-EQU / LI_202601_Giovanni_Brucculeri',
   'cambiare tariffa, nome e riferimento non tocca la fattura gia'' emessa',v);
 end $$;

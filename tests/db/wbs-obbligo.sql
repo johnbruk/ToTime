@@ -21,9 +21,9 @@ raise notice '';
 raise notice '=== L. Obbligo della WBS ===';
 insert into public.clients(user_id,name,code,daily_rate,standard_hours) values (u,'Con commessa','SO',480,8) returning id into c_con;
 insert into public.clients(user_id,name,code,daily_rate,standard_hours) values (u,'Senza commessa','NC',400,8) returning id into c_senza;
-insert into public.engagements(user_id,client_id,year,name) values (u,c_con,2026,'Incarico') returning id into e;
-insert into public.projects(user_id,client_id,engagement_id,short_code,name) values (u,c_con,e,'EQU','EQUANS') returning id into p;
-insert into public.wbs_items(user_id,project_id,activity_code,name) values (u,p,'10','PM') returning id into w;
+insert into public.projects(user_id,client_id,short_code,name) values (u,c_con,'EQU','EQUANS') returning id into p;
+insert into public.engagements(user_id,client_id,project_id,year,name) values (u,c_con,p,2026,'Incarico') returning id into e;
+insert into public.wbs_items(user_id,engagement_id,activity_code,name) values (u,e,'10','PM') returning id into w;
 
 begin
   insert into public.timesheet_entries(user_id,entry_date,client_id,hours) values (u,'2026-03-10',c_con,8);
