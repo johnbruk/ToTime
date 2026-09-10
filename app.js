@@ -91,12 +91,12 @@ function back(){if(!guardUnsavedChanges())return;const prev=state.history.pop()|
 function toggleMainMenu(){if(!guardUnsavedChanges())return;state.menuOpen=!state.menuOpen;render()}
 const MENU=[
   {v:'home',ic:'⌂',l:'Dashboard'},
-  {main:'timesheet',ic:'◷',l:'Timesheet',sub:[{v:'newChoice',l:'Nuovo consuntivo'},{v:'calendario',l:'Calendario'},{v:'griglia',l:'Consuntivo mensile'},{v:'pivot',l:'Analisi consuntivi'},{v:'tmManage',l:'Incarichi continuativi'}]},
+  {main:'timesheet',ic:'◷',l:'Timesheet',sub:[{v:'newChoice',l:'Nuovo consuntivo'},{v:'calendario',l:'Calendario'},{v:'griglia',l:'Consuntivo mensile'},{v:'pivot',l:'Analisi consuntivi'},{v:'reportWbs',l:'Report analitico WBS'},{v:'tmManage',l:'Incarichi continuativi'}]},
   {main:'expenses',ic:'▦',l:'Spese',sub:[{v:'expenseForm',l:'Nuova spesa'}]},
-  {v:'billing',ic:'€',l:'Fatturazione'},
+  {main:'billing',ic:'€',l:'Fatturazione',sub:[{v:'billing',l:'Mensile per cliente'},{v:'fatturazioneCommessa',l:'Per commessa'},{v:'reportEconomico',l:'Report economico'}]},
   {v:'balance',ic:'∑',l:'Bilancio'},
   {main:'tax',ic:'%',l:'Tassazione',sub:[{v:'tasseFuture',l:'Tasse future'},{v:'taxPayments',l:'Pagamenti fiscali (INPS)'},{v:'taxSettings',l:'Configurazione fiscale'}]},
-  {main:'settings',ic:'⚙',l:'Impostazioni',sub:[{v:'clients',l:'Clienti'},{v:'projects',l:'Progetti'},{v:'activities',l:'Attività'},{v:'expenseCategories',l:'Voci di costo/spesa'},{v:'invoiceTemplates',l:'Template fattura'},{v:'appearance',l:'Aspetto / Tema'},{v:'account',l:'Account'}]}
+  {main:'settings',ic:'⚙',l:'Impostazioni',sub:[{v:'clients',l:'Clienti'},{v:'engagements',l:'Commesse'},{v:'projects',l:'Progetti'},{v:'activities',l:'Attività'},{v:'expenseCategories',l:'Voci di costo/spesa'},{v:'invoiceTemplates',l:'Template fattura'},{v:'appearance',l:'Aspetto / Tema'},{v:'account',l:'Account'}]}
 ];
 const NAV_CHILDREN={
   timesheet:['timesheet','newChoice','calendario','tmManage','dailyForm','dailyEdit','monthlyForm','monthlyEdit','manualForm','manualEdit','annualMonths'],
@@ -197,11 +197,19 @@ async function init(){
 async function fetchAll(){
   state.loading=true; render();
   try{
+    state.missingTables=new Set();
     const loaded=await loadAppData({
       repository,
       ensureUserProfile:ensureUserProfileFromMetadata,
-      tableError:(table,error)=>{
+      tableError:(table,error,info)=>{
         console.error(table,error);
+        // Una tabella della migrazione commesse/WBS non ancora
+        // applicata non e' un errore per chi usa l'app: resta nel
+        // registro tecnico e basta.
+        if(info&&info.optional){
+          (state.missingTables=state.missingTables||new Set()).add(table);
+          return;
+        }
         setMsg(`Errore caricamento ${table}: ${error.message}`,7000);
       }
     });
@@ -352,7 +360,7 @@ function sediOptions(selected=''){const sedi=['Remoto','Casa','Ufficio','Sede cl
 function projectOptions(clientId,selected=''){return `<option value=""></option>${sortEntities('projects',data.projects.filter(p=>p.active&&p.client_id===clientId)).map(p=>`<option value="${p.id}" ${p.id===selected?'selected':''}>${esc(p.name)}</option>`).join('')}`}
 function activityOptions(selected=''){return `<option value=""></option>${sortEntities('activities',data.activities.filter(a=>a.active)).map(a=>`<option value="${a.id}" ${a.id===selected?'selected':''}>${esc(a.name)}</option>`).join('')}`}
 function expenseOptions(selected=''){return `<option value=""></option>${sortEntities('expenseCategories',data.expenseCategories.filter(x=>x.active)).map(x=>`<option value="${x.id}" ${x.id===selected?'selected':''}>${esc(x.name)}</option>`).join('')}`}
-function refreshProjectsForForm(form){const client=form.client_id.value;const project=form.project_id;if(project)project.innerHTML=projectOptions(client,'')}
+function refreshProjectsForForm(form){const client=form.client_id.value;const project=form.project_id;if(project)project.innerHTML=projectOptions(client,'');refreshHierForForm(form)}
 async function saveSetting(key,value){const existing=data.appSettings?.find(s=>s.setting_key===key);const payload={setting_key:key,setting_value:String(value)};return existing?updateResilient('app_settings',payload,existing.id):insertResilient('app_settings',payload)}
 function entitiesOf(kind){return kind==='clients'?(data.clients||[]):kind==='projects'?(data.projects||[]):kind==='expenseCategories'?(data.expenseCategories||[]):(data.activities||[])}
 function entityLabel(kind,e){return kind==='projects'?`${clientName(e.client_id)} · ${e.name||''}`:(e.name||'')}
@@ -577,10 +585,10 @@ function tmBatches(){const map={};(data.entries||[]).filter(isTM).forEach(e=>{co
 function tmManage(){const batches=tmBatches();return appShell(`<h1>Incarichi continuativi</h1><p class="sub">Un incarico genera in un colpo solo i consuntivi dei giorni lavorativi di un periodo. Da qui li crei, e puoi eliminare un intero periodo senza toccare i singoli giorni.</p>${batches.length?`<div class="list">${batches.map((b,i)=>`<div class="row"><div></div><div><div class="title">${esc(clientName(b.client_id))}${b.project_id?' / '+esc(projectName(b.project_id)):''}${b.planned?' <span class="tag blue">'+b.planned+' pianif.</span>':''}</div><div class="desc">${esc(activityName(b.activity_id)||'')}${b.desc?' · '+esc(b.desc):''}</div><div class="desc">Dal ${fmtDMY(b.start)} al ${fmtDMY(b.end)} · ${b.days} giorni · ${fmtNum(b.hoursSum,1)} h totali · ${fmtNum(b.hours,2)} h/giorno</div><button class="secondary danger" style="margin-top:10px" onclick="deleteTMBatch(${i})">Elimina intero periodo</button></div><div class="value"></div></div>`).join('')}</div>`:emptyState('Nessun incarico continuativo generato.','+ Crea un incarico continuativo',"go('tmForm')")}<div class="actions"><button class="primary" onclick="go('tmForm')">+ Nuovo incarico continuativo</button><button type="button" class="secondary" onclick="go('timesheet')">Torna al timesheet</button></div>`);}
 async function deleteTMBatch(i){const b=tmBatches()[i];if(!b)return;if(!confirm('Eliminare l\'intero periodo Time & Material?\n'+b.days+' consuntivi dal '+fmtDMY(b.start)+' al '+fmtDMY(b.end)+'.'))return;const {error}=await sb.from('timesheet_entries').delete().in('id',b.ids);if(error)return setMsg(error.message,7000);await reload();setMsg(b.days+' consuntivi Time & Material eliminati.',4000);state.view='tmManage';render();}
 function prefillDate(){const v=state.editType;return (typeof v==='string'&&v.length===10&&v.charAt(4)==='-')?v:new Date().toISOString().slice(0,10)}
-function dailyForm(){const clients=dailyClients();const selected=clients[0]?.id||'';return appShell(`<h1>Consuntivo giornaliero</h1><p class="sub">Ore effettivamente lavorate, valorizzate secondo tariffa (tariffa oraria = tariffa giornaliera / 8h).</p>${clients.length?`<form class="form" onsubmit="saveDaily(event)"><div class="field"><label>Data</label><input name="entry_date" type="date" value="${prefillDate()}"></div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)">${clients.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Cliente/Progetto</label><select name="project_id">${projectOptions(selected)}</select></div><div class="field"><label>Attività</label><select name="activity_id">${activityOptions()}</select></div><details class="moreFields"><summary>Altri dettagli (sede, luogo, descrizione)</summary><div class="field"><label>Sede</label><select name="work_site">${sediOptions()}</select></div><div class="field"><label>Luogo/Città</label><input name="work_city" placeholder="Es. Verona, Milano, Canicattì"></div><div class="field"><label>Descrizione</label><textarea name="description"></textarea></div></details><div class="field"><label>Ore consuntivate</label><input name="hours" type="number" step="0.25" value="8"></div><div class="field"><label>Note</label><textarea name="notes" placeholder="Note interne opzionali"></textarea></div><div class="actions"><button class="primary" data-busy="Salvataggio…">Salva</button><button type="button" class="secondary" onclick="go('home')">Annulla</button></div></form>`:`<div class="card">Crea prima un cliente con tariffa giornaliera in Configurazione.</div>`}`)}
-async function saveDaily(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));if(!guardDay(f.entry_date))return;const c=clientById(f.client_id);const payload={entry_date:f.entry_date,client_id:f.client_id,project_id:f.project_id||null,activity_id:f.activity_id||null,work_location:[norm(f.work_site),norm(f.work_city)].filter(Boolean).join(' - ')||null,work_site:norm(f.work_site)||null,work_city:norm(f.work_city)||null,description:f.description||null,notes:f.notes||null,hours:Number(f.hours||0),daily_rate_snapshot:Number(c?.daily_rate||0),standard_hours_snapshot:Number(c?.standard_hours||8)};const {error}=await insertResilient('timesheet_entries',payload);if(error)return setMsg(error.message,7000);await reload();state.view='timesheet';render()}
-function dailyEdit(){const e=data.entries.find(x=>x.id===state.edit);if(!e)return timesheet();const clients=dailyClients();return appShell(`<h1>Modifica consuntivo</h1><form class="form" onsubmit="saveDailyEdit(event)"><div class="field"><label>Data</label><input name="entry_date" type="date" value="${esc(e.entry_date)}"></div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)">${clients.map(c=>`<option value="${c.id}" ${c.id===e.client_id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Cliente/Progetto</label><select name="project_id">${projectOptions(e.client_id,e.project_id||'')}</select></div><div class="field"><label>Attività</label><select name="activity_id">${activityOptions(e.activity_id||'')}</select></div><div class="field"><label>Sede</label><select name="work_site">${sediOptions(e.work_site||'')}</select></div><div class="field"><label>Luogo/Città</label><input name="work_city" value="${esc(e.work_city||'')}" placeholder="Es. Verona, Milano, Canicattì"></div><div class="field"><label>Descrizione</label><textarea name="description">${esc(e.description||'')}</textarea></div><div class="field"><label>Ore consuntivate</label><input name="hours" type="number" step="0.25" value="${Number(e.hours||0)}"></div><div class="field"><label>Note</label><textarea name="notes">${esc(e.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary" onclick="duplicateDaily('${e.id}')">Duplica</button><button type="button" class="secondary danger" onclick="deleteDaily('${e.id}')">Elimina</button><button type="button" class="secondary" onclick="go('timesheet')">Annulla</button></div></form>`)}
-async function saveDailyEdit(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));if(!guardDay(f.entry_date))return;const c=clientById(f.client_id);const payload={entry_date:f.entry_date,client_id:f.client_id,project_id:f.project_id||null,activity_id:f.activity_id||null,work_location:[norm(f.work_site),norm(f.work_city)].filter(Boolean).join(' - ')||null,work_site:norm(f.work_site)||null,work_city:norm(f.work_city)||null,description:f.description||null,notes:f.notes||null,hours:Number(f.hours||0),daily_rate_snapshot:Number(c?.daily_rate||0),standard_hours_snapshot:Number(c?.standard_hours||8)};const {error}=await updateResilient('timesheet_entries',payload,state.edit);if(error)return setMsg(error.message,7000);await reload();state.view='timesheet';state.edit=null;render()}
+function dailyForm(){const clients=dailyClients();const selected=clients[0]?.id||'';return appShell(`<h1>Consuntivo giornaliero</h1><p class="sub">Ore effettivamente lavorate, valorizzate secondo tariffa (tariffa oraria = tariffa giornaliera / 8h).</p>${clients.length?`<form class="form" onsubmit="saveDaily(event)"><div class="field"><label>Data</label><input name="entry_date" type="date" value="${prefillDate()}"></div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)">${clients.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div>${hierAvailable(selected)?hierFields(selected,'')+'<input type="hidden" name="project_id" value="">':`<div class="field"><label>Cliente/Progetto</label><select name="project_id">${projectOptions(selected)}</select></div><div class="field"><label>Attività</label><select name="activity_id">${activityOptions()}</select></div>`}<details class="moreFields"><summary>Altri dettagli (sede, luogo, descrizione)</summary><div class="field"><label>Sede</label><select name="work_site">${sediOptions()}</select></div><div class="field"><label>Luogo/Città</label><input name="work_city" placeholder="Es. Verona, Milano, Canicattì"></div><div class="field"><label>Descrizione</label><textarea name="description"></textarea></div></details><div class="field"><label>Ore consuntivate</label><input name="hours" type="number" step="0.25" value="8"></div><div class="field"><label>Note</label><textarea name="notes" placeholder="Note interne opzionali"></textarea></div><div class="actions"><button class="primary" data-busy="Salvataggio…">Salva</button><button type="button" class="secondary" onclick="go('home')">Annulla</button></div></form>`:`<div class="card">Crea prima un cliente con tariffa giornaliera in Configurazione.</div>`}`)}
+async function saveDaily(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));if(!guardDay(f.entry_date))return;const c=clientById(f.client_id);const lin=f.wbs_id?wbsLineage(f.wbs_id):null;if(hierAvailable(f.client_id)&&!f.wbs_id)return setMsg('Scegli la WBS su cui registrare le ore.',5000);const payload={entry_date:f.entry_date,client_id:f.client_id,project_id:(lin?lin.project.id:f.project_id)||null,activity_id:(lin&&lin.wbs.activity_id?lin.wbs.activity_id:f.activity_id)||null,wbs_id:f.wbs_id||null,work_location:[norm(f.work_site),norm(f.work_city)].filter(Boolean).join(' - ')||null,work_site:norm(f.work_site)||null,work_city:norm(f.work_city)||null,description:f.description||null,notes:f.notes||null,hours:Number(f.hours||0),daily_rate_snapshot:Number(c?.daily_rate||0),standard_hours_snapshot:Number(c?.standard_hours||8)};const {error}=await insertResilient('timesheet_entries',payload);if(error)return setMsg(error.message,7000);await reload();state.view='timesheet';render()}
+function dailyEdit(){const e=data.entries.find(x=>x.id===state.edit);if(!e)return timesheet();const clients=dailyClients();return appShell(`<h1>Modifica consuntivo</h1><form class="form" onsubmit="saveDailyEdit(event)"><div class="field"><label>Data</label><input name="entry_date" type="date" value="${esc(e.entry_date)}"></div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)">${clients.map(c=>`<option value="${c.id}" ${c.id===e.client_id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>${hierAvailable(e.client_id)?hierFields(e.client_id,e.wbs_id||'')+'<input type="hidden" name="project_id" value="'+(e.project_id||'')+'">':`<div class="field"><label>Cliente/Progetto</label><select name="project_id">${projectOptions(e.client_id,e.project_id||'')}</select></div><div class="field"><label>Attività</label><select name="activity_id">${activityOptions(e.activity_id||'')}</select></div>`}<div class="field"><label>Sede</label><select name="work_site">${sediOptions(e.work_site||'')}</select></div><div class="field"><label>Luogo/Città</label><input name="work_city" value="${esc(e.work_city||'')}" placeholder="Es. Verona, Milano, Canicattì"></div><div class="field"><label>Descrizione</label><textarea name="description">${esc(e.description||'')}</textarea></div><div class="field"><label>Ore consuntivate</label><input name="hours" type="number" step="0.25" value="${Number(e.hours||0)}"></div><div class="field"><label>Note</label><textarea name="notes">${esc(e.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary" onclick="duplicateDaily('${e.id}')">Duplica</button><button type="button" class="secondary danger" onclick="deleteDaily('${e.id}')">Elimina</button><button type="button" class="secondary" onclick="go('timesheet')">Annulla</button></div></form>`)}
+async function saveDailyEdit(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));if(!guardDay(f.entry_date))return;const c=clientById(f.client_id);const lin=f.wbs_id?wbsLineage(f.wbs_id):null;if(hierAvailable(f.client_id)&&!f.wbs_id)return setMsg('Scegli la WBS su cui registrare le ore.',5000);const payload={entry_date:f.entry_date,client_id:f.client_id,project_id:(lin?lin.project.id:f.project_id)||null,activity_id:(lin&&lin.wbs.activity_id?lin.wbs.activity_id:f.activity_id)||null,wbs_id:f.wbs_id||null,work_location:[norm(f.work_site),norm(f.work_city)].filter(Boolean).join(' - ')||null,work_site:norm(f.work_site)||null,work_city:norm(f.work_city)||null,description:f.description||null,notes:f.notes||null,hours:Number(f.hours||0),daily_rate_snapshot:Number(c?.daily_rate||0),standard_hours_snapshot:Number(c?.standard_hours||8)};const {error}=await updateResilient('timesheet_entries',payload,state.edit);if(error)return setMsg(error.message,7000);await reload();state.view='timesheet';state.edit=null;render()}
 async function duplicateDaily(idv){const e=data.entries.find(x=>x.id===idv);if(!e)return;const copy={entry_date:new Date().toISOString().slice(0,10),client_id:e.client_id,project_id:e.project_id,activity_id:e.activity_id,work_location:e.work_location,work_site:e.work_site,work_city:e.work_city,description:e.description,notes:e.notes,hours:e.hours,daily_rate_snapshot:e.daily_rate_snapshot,standard_hours_snapshot:e.standard_hours_snapshot};const {error}=await insertResilient('timesheet_entries',copy);if(error)return setMsg(error.message,7000);await reload();state.view='timesheet';render()}
 async function deleteDaily(idv){if(!confirm('Eliminare questo consuntivo?'))return;const {error}=await sb.from('timesheet_entries').delete().eq('id',idv);if(error)return setMsg(error.message,7000);await reload();state.view='timesheet';render()}
 
@@ -760,12 +768,19 @@ function pivot(){
    cambia solo il modo di compilarlo. */
 function daysInMonth(ymStr){const [y,m]=String(ymStr).split('-').map(Number);return new Date(Date.UTC(y,m,0)).getUTCDate()}
 function isoOf(y,m,d){return `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`}
-function gridKey(e){return [e.client_id||'',e.project_id||'',e.activity_id||''].join('|')}
+// La chiave della riga: se la voce ha una WBS quella comanda,
+// altrimenti resta il raggruppamento di sempre. Cosi' una griglia
+// con voci miste, migrate e no, si legge lo stesso.
+function gridKey(e){return e.wbs_id?('w|'+e.wbs_id):[e.client_id||'',e.project_id||'',e.activity_id||''].join('|')}
 function gridRows(){
   const map=new Map();
-  rowsForMonth().filter(e=>!isPlanned(e)).forEach(e=>{
+  // Anche il pianificato: sta nella riga della sua commessa ed è una
+  // casella modificabile come le altre. Prima era escluso da qui e
+  // finiva in una riga a parte di sola lettura, quindi sui giorni
+  // futuri si scriveva alla cieca, sopra un valore che non si vedeva.
+  rowsForMonth().forEach(e=>{
     const k=gridKey(e);
-    if(!map.has(k))map.set(k,{k,client_id:e.client_id,project_id:e.project_id,activity_id:e.activity_id,hours:{},items:{}});
+    if(!map.has(k))map.set(k,{k,client_id:e.client_id,project_id:e.project_id,activity_id:e.activity_id,wbs_id:e.wbs_id||null,hours:{},items:{}});
     const r=map.get(k),d=String(e.entry_date);
     r.hours[d]=(r.hours[d]||0)+Number(e.hours||0);
     (r.items[d]=r.items[d]||[]).push(e);
@@ -775,7 +790,6 @@ function gridRows(){
     (clientName(a.client_id)||'').localeCompare(clientName(b.client_id)||'','it')||
     (projectName(a.project_id)||'').localeCompare(projectName(b.project_id)||'','it'));
 }
-function gridPlannedByDay(){const o={};rowsForMonth().filter(isPlanned).forEach(e=>{const d=String(e.entry_date);o[d]=(o[d]||0)+Number(e.hours||0)});return o}
 function gridDays(){
   const [y,m]=String(state.month).split('-').map(Number);
   const n=daysInMonth(state.month),t=todayISO(),out=[];
@@ -814,24 +828,29 @@ function gridDayClass(x){const c=[];if(x.holiday)c.push('festivo');else if(x.we)
 function gridDayWhy(x){return [x.holiday||'',(!x.holiday&&x.we)?'weekend':'',x.ass?assenzaLabel(x.ass).toLowerCase():''].filter(Boolean).join(' · ')}
 function gridNum(v){return fmtNum(v, Number(v)%1?2:0)}
 function griglia(){
-  const days=gridDays(),rows=gridRows(),planned=gridPlannedByDay();
+  const days=gridDays(),rows=gridRows();
   const wd=['dom','lun','mar','mer','gio','ven','sab'];
   const rowTot=r=>Object.values(r.hours).reduce((t,v)=>t+Number(v||0),0);
   const total=rows.reduce((t,r)=>t+rowTot(r),0);
-  const plannedTot=Object.values(planned).reduce((t,v)=>t+Number(v||0),0);
 
   const scope=gridScope();
   const weeks=gridWeeks(days);
   const wi=gridWeekIndex(weeks);
   const inWeek=new Set((weeks[wi]||[]).map(d=>d.iso));
   const wk=x=>inWeek.has(x.iso)?' wk':'';
+  // Ogni casella è modificabile, senza eccezioni: quello che c'è scritto
+  // qui è quello che finirà nel database. Anche i giorni con più voci —
+  // prima di sola lettura — si scrivono, e al salvataggio le voci in
+  // eccesso vengono unite in una sola invece di restare indietro.
   const cells=r=>days.map(x=>{
-    const items=r.items[x.iso]||[],v=Number(r.hours[x.iso]||0),locked=items.length>1;
-    const cls=['gg',...gridDayClass(x)];if(v>0)cls.push('pieno');if(locked)cls.push('bloccata');if(inWeek.has(x.iso))cls.push('wk');
+    const items=r.items[x.iso]||[],v=Number(r.hours[x.iso]||0),multi=items.length>1;
+    const cls=['gg',...gridDayClass(x)];if(v>0)cls.push('pieno');if(multi)cls.push('multi');if(inWeek.has(x.iso))cls.push('wk');
     const why=gridDayWhy(x);
+    const nota=[why,
+      multi?items.length+' voci in questo giorno: se cambi il valore diventano una sola':''
+      ].filter(Boolean).join(' · ');
     const who=`${esc(clientName(r.client_id)||'senza cliente')} giorno ${x.d}`;
-    if(locked)return `<td class="${cls.join(' ')}" title="${esc(items.length+' voci in questo giorno: apri il giorno per modificarle')}"><button type="button" class="gCell" onclick="openDay('${x.iso}')" aria-label="${who}, ${items.length} voci">${gridNum(v)}</button></td>`;
-    return `<td class="${cls.join(' ')}"${why?` title="${esc(why)}"`:''}><input inputmode="decimal" data-row="${esc(r.k)}" data-day="${x.iso}" value="${v>0?esc(String(v)):''}" aria-label="${who}${why?', '+esc(why):''}"></td>`;
+    return `<td class="${cls.join(' ')}"${nota?` title="${esc(nota)}"`:''}><input inputmode="decimal" data-row="${esc(r.k)}" data-day="${x.iso}" value="${v>0?esc(String(v)):''}" aria-label="${who}${nota?', '+esc(nota):''}"></td>`;
   }).join('');
 
   const head=days.map(x=>{
@@ -852,22 +871,16 @@ function griglia(){
       ${days.map(x=>`<td class="gg ${gridDayClass(x).join(' ')}${wk(x)}"><span class="ass"${x.ass?` title="${esc(assenzaLabel(x.ass))}"`:''}>${x.ass?gridNum(x.ass.h):''}</span></td>`).join('')}
       <td class="tot">${gridNum(assTot)}</td></tr>`:'';
 
-  const plannedRow=plannedTot>0?`<tr class="planRow">
-      <td class="riga"><div class="n">Pianificato</div><div class="d">Incarichi continuativi sui giorni futuri · non modificabile qui</div></td>
-      ${days.map(x=>`<td class="gg ${gridDayClass(x).join(' ')}${wk(x)}"><span class="pl">${planned[x.iso]?gridNum(planned[x.iso]):''}</span></td>`).join('')}
-      <td class="tot">${gridNum(plannedTot)}</td></tr>`:'';
-
   const body=rows.length
     ? rows.map(r=>`<tr>
-        <td class="riga"><div class="n">${esc(clientName(r.client_id)||'Senza cliente')}</div>
-          <div class="d">${esc(projectName(r.project_id)||'Senza progetto')}${r.activity_id?' · '+esc(activityName(r.activity_id)||''):''}</div></td>
+        <td class="riga">${gridRigaEtichetta(r)}</td>
         ${cells(r)}<td class="tot">${gridNum(rowTot(r))}</td></tr>`).join('')
-    : ((plannedRow||assRow)?'':`<tr><td class="riga vuota" colspan="${days.length+2}">Nessuna commessa in questo mese. Aggiungine una qui sotto.</td></tr>`);
+    : (assRow?'':`<tr><td class="riga vuota" colspan="${days.length+2}">Nessuna commessa in questo mese. Aggiungine una qui sotto.</td></tr>`);
 
   const opts=(list,empty)=>`<option value="">${empty}</option>`+list.map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('');
 
   return appShell(`<h1>Consuntivo mensile</h1>
-    <p class="sub">Una riga per commessa, una colonna per giorno. Si compila con la tastiera — Tab per il giorno dopo — e si salva una volta sola.</p>
+    <p class="sub">Una riga per commessa — cliente, progetto e attività — e una colonna per giorno, fino a fine mese. Si compila con la tastiera, Tab per il giorno dopo, e si salva una volta sola.</p>
     ${monthSelector()}
     <div class="card grigliaCard" data-scope="${scope}">
       <div class="barra">
@@ -878,13 +891,15 @@ function griglia(){
       <div class="settimanaNav"><button type="button" onclick="gridWeekShift(-1)"${wi===0?' disabled':''} aria-label="Settimana precedente">‹</button><strong>${wi+1}ª settimana<span>${gridWeekLabel(weeks[wi])} ${esc(monthLabel(state.month).split(' ')[0].toLowerCase())}</span></strong><button type="button" onclick="gridWeekShift(1)"${wi>=weeks.length-1?' disabled':''} aria-label="Settimana successiva">›</button></div>
       <div class="scrollGriglia"><table class="griglia">
         <thead><tr><th class="riga">Commessa</th>${head}<th class="tot"><span class="totMese">Mese</span><span class="totTot">Tot</span></th></tr></thead>
-        <tbody>${body}${assRow}${plannedRow}</tbody>
+        <tbody>${body}${assRow}</tbody>
         <tfoot><tr><td class="riga">Totale giornata</td>${foot}<td class="tot">${gridNum(total+assTot)}</td></tr></tfoot>
       </table></div>
       <div class="nuovaRiga">
-        <select id="g-cliente" onchange="gridFillProjects()" aria-label="Cliente">${opts(activeClients(),'— cliente —')}</select>
-        <select id="g-progetto" aria-label="Progetto"><option value="">— prima scegli il cliente —</option></select>
-        <select id="g-attivita" aria-label="Attività">${opts(sortEntities('activities',data.activities.filter(a=>a.active)),'— attività —')}</select>
+        <select id="g-cliente" onchange="gridClienteCambiato()" aria-label="Cliente">${opts(activeClients(),'— cliente —')}</select>
+        <select id="g-commessa" onchange="gridCommessaCambiata()" aria-label="Commessa"><option value="">— prima scegli il cliente —</option></select>
+        <select id="g-progetto" onchange="gridProgettoCambiato()" aria-label="Progetto"><option value="">— prima scegli la commessa —</option></select>
+        <select id="g-wbs" aria-label="WBS"><option value="">— prima scegli il progetto —</option></select>
+        <select id="g-attivita" aria-label="Attività" hidden>${opts(sortEntities('activities',data.activities.filter(a=>a.active)),'— attività —')}</select>
         <button type="button" class="miniBtn" onclick="addGridRow()">+ Aggiungi riga</button>
       </div>
       <div class="calLegend" style="padding:10px 14px">
@@ -892,18 +907,27 @@ function griglia(){
         <span><i class="sw ferie"></i>Giorno off</span><span><i class="sw worked"></i>Oggi</span>
       </div>
     </div>
-    <div class="metricLine" style="margin-top:12px">${gridNum(total)} h consuntivate <span class="dot">·</span> ${fmtDays(total)} gg/u${assTot>0?` <span class="dot">·</span> <span class="tag ferieTag">Assenze ${gridNum(assTot)} h</span>`:''}${plannedTot>0?` <span class="dot">·</span> <span class="tag blue">Pianificato ${gridNum(plannedTot)} h</span>`:''}</div>`);
+    <div class="metricLine" style="margin-top:12px">${gridNum(total)} h consuntivate <span class="dot">·</span> ${fmtDays(total)} gg/u${assTot>0?` <span class="dot">·</span> <span class="tag ferieTag">Assenze ${gridNum(assTot)} h</span>`:''}</div>`);
 }
 function gridFillProjects(){const c=document.getElementById('g-cliente')?.value||'';const p=document.getElementById('g-progetto');if(p)p.innerHTML=`<option value="">— progetto —</option>`+sortEntities('projects',data.projects.filter(x=>x.active&&x.client_id===c)).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('')}
 function addGridRow(){
   const c=document.getElementById('g-cliente')?.value||'';
   const p=document.getElementById('g-progetto')?.value||'';
   const a=document.getElementById('g-attivita')?.value||'';
+  const w=document.getElementById('g-wbs')?.value||'';
   if(!c)return setMsg('Scegli almeno il cliente.',5000);
-  const k=[c,p,a].join('|');
+  // dove il cliente ha delle commesse, la WBS e' obbligatoria: e'
+  // quella che dice su cosa si sta lavorando
+  if(wbsReady()&&engagementsOf(c).length&&!w)
+    return setMsg('Scegli commessa, progetto e WBS.',5000);
+  const lin=w?wbsLineage(w):null;
+  const k=w?('w|'+w):[c,p,a].join('|');
   state.gridNew=state.gridNew||[];
-  if(gridRows().some(r=>r.k===k))return setMsg('Questa commessa è già nella griglia.',5000);
-  state.gridNew.push({k,client_id:c,project_id:p||null,activity_id:a||null});
+  if(gridRows().some(r=>r.k===k))return setMsg('Questa riga è già nella griglia.',5000);
+  state.gridNew.push({k,client_id:lin?lin.client_id:c,
+    project_id:(lin?lin.project.id:p)||null,
+    activity_id:(lin&&lin.wbs.activity_id?lin.wbs.activity_id:a)||null,
+    wbs_id:w||null});
   render();
 }
 function gridConfirmRed(dates){
@@ -911,9 +935,18 @@ function gridConfirmRed(dates){
   const lines=dates.sort().map(iso=>{const w=gridDayWhy({iso,holiday:holidayName(iso),we:isWeekendISO(iso),off:isFerie(iso)});return fmtDMY(iso)+(w?' — '+w:'')});
   return confirm('Stai registrando ore in giorni non lavorativi:\n\n'+lines.join('\n')+'\n\nVuoi procedere?');
 }
+// Unire più voci di uno stesso giorno in una sola fa perdere le
+// descrizioni e le note delle altre: si chiede prima.
+function gridConfirmMerge(merged){
+  if(!merged.length)return true;
+  const righe=merged.map(m=>fmtDMY(m.iso)+' — '+m.chi+' · '+m.n+' voci diventano 1');
+  const perse=merged.reduce((t,m)=>t+m.n-1,0);
+  return confirm('In questi giorni ci sono più voci per la stessa commessa. Salvando, il valore che hai scritto resta su una sola voce e le altre vengono eliminate:\n\n'
+    +righe.join('\n')+'\n\nSi perdono descrizioni e note di '+(perse===1?'1 voce':perse+' voci')+'.\n\nVuoi procedere?');
+}
 async function saveGrid(){
   const rows=new Map(gridRows().map(r=>[r.k,r]));
-  const toCreate=[],toUpdate=[],toDelete=[];
+  const toCreate=[],toUpdate=[],toDelete=[],merged=[];
   for(const el of document.querySelectorAll('.griglia input:not([disabled])')){
     const r=rows.get(el.dataset.row);if(!r)continue;
     const iso=el.dataset.day,before=Number(r.hours[iso]||0);
@@ -924,14 +957,28 @@ async function saveGrid(){
     const items=r.items[iso]||[];
     if(after===0)toDelete.push(...items.map(e=>e.id));
     else if(!items.length){const c=clientById(r.client_id);
-      toCreate.push({entry_date:iso,client_id:r.client_id,project_id:r.project_id||null,activity_id:r.activity_id||null,hours:after,daily_rate_snapshot:Number(c?.daily_rate||0),standard_hours_snapshot:Number(c?.standard_hours||8)});}
-    else toUpdate.push({id:items[0].id,iso,patch:{hours:after}});
+      toCreate.push({entry_date:iso,client_id:r.client_id,project_id:r.project_id||null,activity_id:r.activity_id||null,wbs_id:r.wbs_id||null,hours:after,daily_rate_snapshot:Number(c?.daily_rate||0),standard_hours_snapshot:Number(c?.standard_hours||8)});}
+    else{
+      // La casella è l'unica verità: la prima voce prende il valore
+      // scritto e le altre dello stesso giorno spariscono. Altrimenti
+      // la griglia direbbe una cosa e il database ne conterrebbe
+      // un'altra, con le voci in eccesso rimaste indietro.
+      // La griglia ragiona per WBS e ore, non per stato: quello che si
+      // scrive qui è un consuntivo, qualunque sia il giorno.
+      const patch={hours:after};
+      if(items[0].status==='planned')patch.status=null;
+      toUpdate.push({id:items[0].id,iso,patch});
+      if(items.length>1){
+        toDelete.push(...items.slice(1).map(e=>e.id));
+        merged.push({iso,n:items.length,chi:clientName(r.client_id)||'Senza cliente'});
+      }}
   }
   const n=toCreate.length+toUpdate.length+toDelete.length;
   if(!n){const pruned=(state.gridNew||[]).length;state.gridNew=[];return setMsg(pruned?'Non c\'era niente da salvare. Tolte '+(pruned===1?'la riga aggiunta e mai compilata.':pruned+' righe aggiunte e mai compilate.'):'Non c\'è niente da salvare.',4000)||render();}
   const red=[...new Set(toCreate.map(e=>e.entry_date).concat(toUpdate.map(u=>u.iso)))]
     .filter(iso=>holidayName(iso)||isFerie(iso)||isWeekendISO(iso));
   if(!gridConfirmRed(red))return;
+  if(!gridConfirmMerge(merged))return;
   state.busy=true;render();
   try{
     if(toDelete.length){const {error}=await sb.from('timesheet_entries').delete().in('id',toDelete);if(error)throw error;}
@@ -1196,10 +1243,10 @@ function appearance(){return appShell(`<div class="screenTitle">Aspetto / Tema</
 function exportTimesheetViewOptions(){const clients=activeClients();const selected=clients[0]?.id||'';return `<div class="field"><label>Mese</label><input name="month" type="month" value="${state.month}"></div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)"><option value="">Tutti i clienti</option>${clients.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Cliente/Progetto</label><select name="project_id"><option value="">Tutti i progetti</option>${projectOptions(selected)}</select></div><div class="field"><label>Includi importi</label><select name="include_amount"><option value="false">No, solo dettaglio operativo</option><option value="true">Sì, includi importi</option></select></div>`}
 function exportTimesheet(){return appShell(`<div class="screenTitle">Export Timesheet Excel</div><p class="sub">Scarica il dettaglio mensile da inviare al cliente.</p><form class="form" onsubmit="downloadTimesheetExcel(event)">${exportTimesheetViewOptions()}<div class="actions"><button class="primary">Scarica Excel</button><button type="button" class="secondary" onclick="go('settings')">Annulla</button></div></form>`)}
 
-function clients(){return appShell(`<h1>Clienti</h1><form class="form" onsubmit="addClient(event)"><div class="field"><label>Nome cliente</label><input name="name" required></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h">Tariffa giornaliera 8h</option><option value="monthly_flat">Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="0"></div><button class="primary">Aggiungi cliente</button></form>${sortControl('clients')}<div class="list">${sortEntities('clients',data.clients).map(c=>`<div class="row" onclick="editClient('${c.id}')"><div></div><div><div class="title">${esc(c.name)}</div><div class="desc">${c.compensation_type==='daily_rate_8h'?'Tariffa giornaliera 8h · '+fmtEUR(c.daily_rate||0):'Una tantum mensile'} · ${c.active?'Attivo':'Disattivo'}</div></div>${moveBtns('clients',c.id)}</div>`).join('')||emptyForm('Nessun cliente ancora inserito.')}</div>`)}
+function clients(){return appShell(`<h1>Clienti</h1><form class="form" onsubmit="addClient(event)"><div class="field"><label>Nome cliente</label><input name="name" required></div><div class="field"><label>Codice cliente</label><input name="code" maxlength="5" placeholder="Es. SO" oninput="this.value=normCode(this.value)"><div class="small">Da 2 a 5 lettere o cifre. Entra nel codice di ogni commessa: una volta usato non si cambia piu'.</div></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h">Tariffa giornaliera 8h</option><option value="monthly_flat">Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="0"></div><button class="primary">Aggiungi cliente</button></form>${sortControl('clients')}<div class="list">${sortEntities('clients',data.clients).map(c=>`<div class="row" onclick="editClient('${c.id}')"><div></div><div><div class="title">${esc(c.name)}</div><div class="desc">${c.compensation_type==='daily_rate_8h'?'Tariffa giornaliera 8h · '+fmtEUR(c.daily_rate||0):'Una tantum mensile'} · ${c.active?'Attivo':'Disattivo'}</div></div>${moveBtns('clients',c.id)}</div>`).join('')||emptyForm('Nessun cliente ancora inserito.')}</div>`)}
 function editClient(id){navigateTo('clientEdit',{edit:id})}
 function clientPolicyEditor(c){const pol=parsePolicy(c);const typeOf=id=>{const h=pol.find(r=>r.category_id===id);return h?h.type:'own'};const cats=data.expenseCategories.filter(x=>x.active);if(!cats.length)return '<p class="sub">Crea prima delle voci di spesa per definire la policy.</p>';return `<div class="card" style="margin-top:6px">${cats.map(cat=>`<div class="policyRow"><div><div class="title">${esc(cat.name)}</div></div><select name="policy_${cat.id}">${reimbTypeOptions(typeOf(cat.id))}</select></div>`).join('')}</div>`}
-function clientEdit(){const c=clientById(state.edit);if(!c)return clients();return appShell(`<h1>Modifica cliente</h1><form class="form" onsubmit="saveClient(event)"><div class="field"><label>Nome cliente</label><input name="name" value="${esc(c.name)}" required></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h" ${c.compensation_type==='daily_rate_8h'?'selected':''}>Tariffa giornaliera 8h</option><option value="monthly_flat" ${c.compensation_type==='monthly_flat'?'selected':''}>Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="${Number(c.daily_rate||0)}"></div><div class="field"><label>Ore standard giornata</label><input name="standard_hours" type="number" step="0.25" value="${Number(c.standard_hours||8)}"></div><div class="field"><label>Sede operativa (base trasferte)</label><input name="base_city" value="${esc(c.base_city||'')}" placeholder="Es. Milano"></div><div class="field"><label>Attivo</label><select name="active"><option value="true" ${c.active?'selected':''}>Sì</option><option value="false" ${!c.active?'selected':''}>No</option></select></div><h2>Policy rimborsi spese</h2><p class="sub">Per ogni voce di spesa scegli come viene gestita con questo cliente. L'app la proporrà in automatico quando inserisci una spesa.</p>${clientPolicyEditor(c)}<div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteClient('${c.id}')">Elimina cliente</button><button type="button" class="secondary" onclick="go('clients')">Annulla</button></div></form>`)}
+function clientEdit(){const c=clientById(state.edit);if(!c)return clients();return appShell(`<h1>Modifica cliente</h1><form class="form" onsubmit="saveClient(event)"><div class="field"><label>Nome cliente</label><input name="name" value="${esc(c.name)}" required></div><div class="field"><label>Codice cliente</label><input name="code" maxlength="5" value="${esc(c.code||'')}" oninput="this.value=normCode(this.value)"${engagementsOf(c.id).length?' readonly title="Ha gia\' delle commesse: il codice non si cambia"':''}><div class="small">${engagementsOf(c.id).length?'Bloccato: questo cliente ha gia\' delle commesse.':'Da 2 a 5 lettere o cifre.'}</div></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h" ${c.compensation_type==='daily_rate_8h'?'selected':''}>Tariffa giornaliera 8h</option><option value="monthly_flat" ${c.compensation_type==='monthly_flat'?'selected':''}>Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="${Number(c.daily_rate||0)}"></div><div class="field"><label>Ore standard giornata</label><input name="standard_hours" type="number" step="0.25" value="${Number(c.standard_hours||8)}"></div><div class="field"><label>Sede operativa (base trasferte)</label><input name="base_city" value="${esc(c.base_city||'')}" placeholder="Es. Milano"></div><div class="field"><label>Attivo</label><select name="active"><option value="true" ${c.active?'selected':''}>Sì</option><option value="false" ${!c.active?'selected':''}>No</option></select></div><h2>Policy rimborsi spese</h2><p class="sub">Per ogni voce di spesa scegli come viene gestita con questo cliente. L'app la proporrà in automatico quando inserisci una spesa.</p>${clientPolicyEditor(c)}<div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteClient('${c.id}')">Elimina cliente</button><button type="button" class="secondary" onclick="go('clients')">Annulla</button></div></form>`)}
 async function addClient(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const payload={name:norm(f.name),compensation_type:f.compensation_type,daily_rate:Number(f.daily_rate||0),standard_hours:8,active:true};const {error}=await insertResilient('clients',payload);if(error)return setMsg(error.message,7000);await reload();state.view='clients';render()}
 function collectPolicyFromForm(f){const pol=[];data.expenseCategories.forEach(cat=>{const v=f['policy_'+cat.id];if(v&&v!=='own')pol.push({category_id:cat.id,category:cat.name,type:v})});return pol}
 async function saveClient(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const policy=collectPolicyFromForm(f);const payload={name:norm(f.name),compensation_type:f.compensation_type,daily_rate:Number(f.daily_rate||0),standard_hours:Number(f.standard_hours||8),active:f.active==='true',base_city:norm(f.base_city)||null,expense_policy:policy};const {error}=await updateResilient('clients',payload,state.edit,['base_city','expense_policy']);if(error)return setMsg(error.message,7000);await reload();state.view='clients';state.edit=null;render()}
@@ -1246,9 +1293,871 @@ function downloadTimesheetExcel(ev){ev.preventDefault();const f=Object.fromEntri
 async function importCsv(ev){const file=ev.target.files?.[0];if(!file)return;const reader=new FileReader();reader.onload=async()=>{try{const text=reader.result.replace(/^\uFEFF/,'').trim();if(!text)return setMsg('CSV vuoto.');const lines=text.split(/\r?\n/).filter(Boolean);const sep=(lines[0].match(/;/g)||[]).length>=(lines[0].match(/,/g)||[]).length?';':',';const headers=parseCsvLine(lines.shift(),sep).map(canonHeader);const get=(row,names)=>{for(const n of names.map(canonHeader)){const i=headers.indexOf(n);if(i>=0)return row[i]||''}return''};let count=0,updated=0,skipped=0,createdClients=0,createdProjects=0,createdActivities=0;for(const line of lines){const row=parseCsvLine(line,sep);if(!row.some(x=>norm(x))){skipped++;continue}const cliente=norm(get(row,['cliente','client']));if(!cliente){skipped++;continue}const tipoRaw=get(row,['tipo','type']);const tipo=(tipoRaw||'Tariffa giornaliera 8h').toLowerCase();const isMonthly=tipo.includes('mens')||tipo.includes('monthly')||tipo.includes('una tantum');const ore=parseAmount(get(row,['ore','hours']));const amount=parseAmount(get(row,['importo','amount']));let rowRate=amount>0&&ore>0?amount/ore*8:0;const beforeC=data.clients.length;const client=await ensureClient(cliente,isMonthly?'monthly':'daily',rowRate);if(data.clients.length>beforeC)createdClients++;if(!client.daily_rate&&rowRate>0){await updateResilient('clients',{daily_rate:rowRate},client.id);client.daily_rate=rowRate}const progetto=norm(get(row,['cliente/progetto','progetto','cliente finale','project']));const beforeP=data.projects.length;const project=await ensureProject(client.id,progetto);if(data.projects.length>beforeP)createdProjects++;const att=norm(get(row,['attività','attivita','activity']));const beforeA=data.activities.length;const activity=await ensureActivity(att);if(data.activities.length>beforeA)createdActivities++;const descrizione=get(row,['descrizione','description']);const sede=norm(get(row,['sede','work_site','site']));const citta=norm(get(row,['luogo/città','luogo/citta','città','citta','luogo','work_city','city','location']));const luogo=[sede,citta].filter(Boolean).join(' - ');const note=get(row,['note','notes']);const idv=norm(get(row,['id','import_id','riga','key','chiave']));if(isMonthly){const mese=norm(get(row,['mese','month']))||toMonth(get(row,['data','date']))||state.month;const [year,month]=mese.split('-').map(Number);const payload={year,month,client_id:client.id,project_id:project?.id||null,description:descrizione||null,notes:note||null,amount};const key=idv?importKey(['mc',idv]):importKey(['mc',year,month,client.id,project?.id||'']);const {res,updated:u}=await upsertByKey('monthly_compensations',data.monthly,payload,key);if(res.error)throw res.error;if(u)updated++;else count++;}else{const date=toDate(get(row,['data','date']))||new Date().toISOString().slice(0,10);const rate=rowRate||Number(client.daily_rate||0);const payload={entry_date:date,client_id:client.id,project_id:project?.id||null,activity_id:activity?.id||null,work_location:luogo||null,work_site:sede||null,work_city:citta||null,description:descrizione||null,notes:note||null,hours:ore,daily_rate_snapshot:rate,standard_hours_snapshot:8};const key=idv?importKey(['ts',idv]):importKey(['ts',date,client.id,project?.id||'',activity?.id||'',descrizione,ore]);const {res,updated:u}=await upsertByKey('timesheet_entries',data.entries,payload,key);if(res.error)throw res.error;if(u)updated++;else count++;}}
 await fetchAll();state.view='timesheet';setMsg(`Import completato: ${count} inserite, ${updated} aggiornate. Clienti creati: ${createdClients}. Progetti: ${createdProjects}. Attività: ${createdActivities}. Scartate: ${skipped}.`,9000)}catch(e){console.error(e);setMsg('Errore import CSV: '+(e.message||e),9000)}};reader.readAsText(file,'windows-1252')}
 function exportData(){const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='totime-supabase-backup.json';a.click()}
-function render(){document.documentElement.setAttribute('data-view',state.view||'home');if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,newChoice,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,timesheet,griglia,pivot,summary,billing,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,incassi,balance,taxSettings,tasseFuture,fatturatoDetail,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
+/* ==================================================================
+   Commesse, progetti e WBS
+   Gerarchia: Cliente -> Commessa -> Progetto -> WBS -> registrazioni.
+   Regola di fondo: si registra e si controlla sulla WBS, ma si
+   fattura sempre a livello di commessa/progetto. La WBS non diventa
+   mai una riga di fattura.
+   Tutto qui dentro si spegne da solo se la migrazione non e' stata
+   applicata: wbsReady() e' falso e le voci non compaiono.
+   ================================================================== */
+const STATI={draft:'Bozza',active:'Attiva',suspended:'Sospesa',closed:'Chiusa',cancelled:'Annullata'};
+const TIPI_WBS={activity:'Attività',project_management:'Project management',analysis:'Analisi',
+  development:'Sviluppo / supporto',travel:'Trasferta',internal:'Attività interna',expense:'Spesa',other:'Altro'};
+const STATI_APERTI=['draft','active'];
+function normCode(v){return String(v||'').toUpperCase().replace(/[^A-Z0-9]/g,'')}
+function wbsReady(){return !state.missingTables||!state.missingTables.has('wbs_items')}
+function engagementById(id){return (data.engagements||[]).find(e=>e.id===id)}
+function engagementsOf(clientId){return (data.engagements||[]).filter(e=>e.client_id===clientId)}
+function projectsOfEngagement(engId){return (data.projects||[]).filter(p=>p.engagement_id===engId)}
+function wbsById(id){return (data.wbsItems||[]).find(w=>w.id===id)}
+function wbsOfProject(projId){return (data.wbsItems||[]).filter(w=>w.project_id===projId)
+  .sort((a,b)=>(a.sort_order-b.sort_order)||String(a.activity_code).localeCompare(String(b.activity_code),'it'))}
+function wbsAperte(projId){return wbsOfProject(projId).filter(w=>STATI_APERTI.includes(w.status))}
+function engagementLabel(e){return e?`${e.code} · ${e.name}`:''}
+function wbsLabel(w){return w?`${w.code} · ${w.name}`:''}
+function projectFullCode(p){return p&&p.code?p.code:(p?p.name:'')}
+// Quante registrazioni pendono da una WBS: serve prima di chiuderla
+function wbsUsage(id){
+  const t=(data.entries||[]).filter(e=>e.wbs_id===id).length;
+  const m=(data.manualEntries||[]).filter(e=>e.wbs_id===id).length;
+  const x=(data.travelExpenses||[]).filter(e=>e.wbs_id===id).length;
+  return {t,m,x,tot:t+m+x};
+}
+function statoTag(st){const cls=st==='active'?'green':st==='closed'||st==='cancelled'?'gray':'orange';
+  return `<span class="tag ${cls}">${STATI[st]||st}</span>`}
+
+/* ---------- Elenco commesse ---------- */
+function engagementFilters(){
+  const f=state.engFilter||{};
+  const anni=[...new Set((data.engagements||[]).map(e=>e.year))].sort((a,b)=>b-a);
+  return `<div class="miniActions" style="grid-template-columns:1fr 1fr">
+    <select class="miniBtn" onchange="setEngFilter('client_id',this.value)"><option value="">Tutti i clienti</option>
+      ${(data.clients||[]).map(c=>`<option value="${c.id}" ${f.client_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
+    <select class="miniBtn" onchange="setEngFilter('year',this.value)"><option value="">Tutti gli anni</option>
+      ${anni.map(y=>`<option value="${y}" ${String(f.year)===String(y)?'selected':''}>${y}</option>`).join('')}</select>
+    <select class="miniBtn" onchange="setEngFilter('status',this.value)"><option value="">Tutti gli stati</option>
+      ${Object.entries(STATI).map(([k,v])=>`<option value="${k}" ${f.status===k?'selected':''}>${v}</option>`).join('')}</select>
+    <input class="miniBtn" placeholder="Cerca codice o nome" value="${esc(f.q||'')}" oninput="setEngFilter('q',this.value)">
+  </div>`;
+}
+function setEngFilter(k,v){state.engFilter={...(state.engFilter||{}),[k]:v};render()}
+function engagementRows(){
+  const f=state.engFilter||{};
+  return (data.engagements||[]).filter(e=>
+    (!f.client_id||e.client_id===f.client_id)&&
+    (!f.year||String(e.year)===String(f.year))&&
+    (!f.status||e.status===f.status)&&
+    (!f.q||(`${e.code} ${e.name}`).toLowerCase().includes(String(f.q).toLowerCase()))
+  ).sort((a,b)=>String(b.code).localeCompare(String(a.code),'it'));
+}
+function engagements(){
+  if(!wbsReady())return migrazioneMancante('Commesse');
+  const rows=engagementRows();
+  return appShell(`<h1>Commesse</h1>
+    <p class="sub">Una commessa per incarico. Il codice si compone da solo: codice cliente, anno e progressivo.</p>
+    <button class="primary" onclick="go('engagementNew')">+ Nuova commessa</button>
+    ${engagementFilters()}
+    <div class="list">${rows.map(e=>{
+      const prj=projectsOfEngagement(e.id);
+      return `<div class="row" onclick="openEngagement('${e.id}')">
+        <div class="date">${e.year}</div>
+        <div><div class="title">${esc(e.code)} ${statoTag(e.status)}</div>
+          <div class="desc">${esc(clientName(e.client_id))} · ${esc(e.name)}</div>
+          <div class="desc">${prj.length===1?'1 progetto':prj.length+' progetti'}${e.engagement_letter?' · '+esc(e.engagement_letter):''}</div></div>
+        <div class="chev">›</div></div>`}).join('')||
+      '<div class="empty">Nessuna commessa.'+(( data.engagements||[]).length?' Nessuna corrisponde ai filtri.':'')+'</div>'}</div>`);
+}
+function migrazioneMancante(titolo){
+  return appShell(`<h1>${esc(titolo)}</h1>
+    <div class="card"><b>Migrazione non ancora applicata</b>
+    <div class="desc" style="margin-top:6px">Questa sezione richiede le tabelle di commesse e WBS.
+    Esegui nel SQL Editor di Supabase, in quest'ordine:</div>
+    <div class="copybox">migrations/2026-09-09_commesse-progetti-wbs.sql
+migrations/2026-09-09_backfill-a-codici-cliente.sql
+&nbsp;&nbsp;(rivedi i codici cliente proposti)
+migrations/2026-09-09_backfill-b-commesse-wbs.sql</div>
+    <div class="desc">Fino ad allora il resto dell'app funziona normalmente.</div></div>
+    <button type="button" class="secondary" onclick="go('settings')">Torna a Impostazioni</button>`);
+}
+
+/* ---------- Dettaglio commessa ---------- */
+function openEngagement(id){navigateTo('engagementDetail',{edit:id})}
+function engagementDetail(){
+  if(!wbsReady())return migrazioneMancante('Commessa');
+  const e=engagementById(state.edit);if(!e)return engagements();
+  const prj=projectsOfEngagement(e.id);
+  const refs=(data.engagementReferences||[]).filter(r=>r.engagement_id===e.id);
+  return appShell(`<h1>${esc(e.code)}</h1>
+    <p class="sub">${esc(clientName(e.client_id))} · ${esc(e.name)} ${statoTag(e.status)}</p>
+    <div class="card"><b>Dati della commessa</b>
+      <div class="list" style="box-shadow:none;margin:10px 0 0">
+        ${rigaDato('Cliente contrattuale',clientName(e.client_id))}
+        ${rigaDato('Anno / progressivo',e.year+' / '+String(e.seq).padStart(3,'0'))}
+        ${rigaDato("Lettera d'incarico",e.engagement_letter||'—')}
+        ${rigaDato('Riferimento in fattura',e.invoice_reference||'—')}
+        ${rigaDato('Ordine cliente (PO)',e.purchase_order||'—')}
+        ${rigaDato('Periodo',[e.start_date?dateIT(e.start_date):'',e.end_date?dateIT(e.end_date):''].filter(Boolean).join(' → ')||'—')}
+        ${e.budget_amount?rigaDato('Budget',fmtEUR(e.budget_amount)):''}
+      </div>
+      <button type="button" class="secondary" style="margin-top:12px" onclick="go('engagementEdit')">Modifica commessa</button>
+    </div>
+    <h2>Progetti</h2>
+    <p class="sub">Il progetto è il livello a cui si fattura. Le WBS stanno dentro il progetto.</p>
+    <div class="list">${prj.map(p=>{
+      const w=wbsOfProject(p.id);
+      return `<div class="row" onclick="openProjectWbs('${p.id}')">
+        <div></div>
+        <div><div class="title">${esc(p.code||p.name)} ${statoTag(p.status||'active')}</div>
+          <div class="desc">${esc(p.name)}${p.end_client_name?' · cliente finale '+esc(p.end_client_name):''}</div>
+          <div class="desc">${w.length===1?'1 WBS':w.length+' WBS'}</div></div>
+        <div class="chev">›</div></div>`}).join('')||'<div class="empty">Nessun progetto in questa commessa.</div>'}</div>
+    <button type="button" class="secondary" onclick="go('projectNew')">+ Nuovo progetto</button>
+    <h2>Riferimenti contrattuali</h2>
+    <p class="sub">Una proroga non cambia la commessa: aggiunge un riferimento. Lo storico resta.</p>
+    <div class="list">${refs.map(r=>`<div class="row"><div></div>
+      <div><div class="title">${esc(r.engagement_letter||r.purchase_order||'Riferimento')}</div>
+        <div class="desc">${[r.valid_from?dateIT(r.valid_from):'',r.valid_to?dateIT(r.valid_to):''].filter(Boolean).join(' → ')||'senza scadenza'}${r.invoice_reference?' · '+esc(r.invoice_reference):''}</div></div>
+      <div class="value">${STATI_RIF[r.status]||r.status}</div></div>`).join('')||'<div class="empty">Nessun riferimento storicizzato.</div>'}</div>
+    <details class="moreFields"><summary>+ Aggiungi riferimento</summary>
+      <form class="form" onsubmit="addEngagementRef(event)" style="margin-top:10px">
+        <div class="field"><label>Lettera d'incarico</label><input name="engagement_letter" placeholder="Es. LI_202601"></div>
+        <div class="field"><label>Ordine cliente (PO)</label><input name="purchase_order"></div>
+        <div class="field"><label>Riferimento da riportare in fattura</label><input name="invoice_reference" placeholder="Es. LI_202601_Nome_Cognome"></div>
+        <div class="field"><label>Valido dal</label><input name="valid_from" type="date"></div>
+        <div class="field"><label>Valido al</label><input name="valid_to" type="date"></div>
+        <button class="primary">Aggiungi riferimento</button></form></details>
+    <button type="button" class="secondary" onclick="go('engagements')">Torna alle commesse</button>`);
+}
+const STATI_RIF={active:'Attivo',expired:'Scaduto',superseded:'Sostituito',cancelled:'Annullato'};
+function rigaDato(etichetta,valore){return `<div class="row"><div></div><div><div class="title">${esc(etichetta)}</div></div><div class="value">${esc(String(valore))}</div></div>`}
+
+/* ---------- Creazione e modifica commessa ---------- */
+function engagementForm(e){
+  const nuovo=!e;
+  const clientiConCodice=(data.clients||[]).filter(c=>c.code);
+  const senzaCodice=(data.clients||[]).filter(c=>!c.code);
+  if(nuovo&&!clientiConCodice.length)return appShell(`<h1>Nuova commessa</h1>
+    <div class="card"><b>Serve prima un codice cliente</b>
+    <div class="desc" style="margin-top:6px">Il codice della commessa si compone dal codice del cliente.
+    Assegnane uno in Impostazioni → Clienti.</div></div>
+    <button type="button" class="secondary" onclick="go('clients')">Vai ai clienti</button>`);
+  const c0=e?e.client_id:(clientiConCodice[0]||{}).id;
+  return appShell(`<h1>${nuovo?'Nuova commessa':'Modifica '+esc(e.code)}</h1>
+    <p class="sub">Il codice si compone da solo. Lettera d'incarico e PO sono campi a parte: non entrano nel codice.</p>
+    <form class="form" onsubmit="${nuovo?'addEngagement':'saveEngagement'}(event)">
+      <div class="field"><label>Cliente contrattuale</label>
+        <select name="client_id" ${nuovo?'onchange="previewEngCode()"':'disabled'}>
+          ${clientiConCodice.map(c=>`<option value="${c.id}" ${c.id===c0?'selected':''}>${esc(c.code)} · ${esc(c.name)}</option>`).join('')}
+        </select>${senzaCodice.length?`<div class="small">${senzaCodice.length} client${senzaCodice.length===1?'e senza codice non è':'i senza codice non sono'} selezionabil${senzaCodice.length===1?'e':'i'}.</div>`:''}</div>
+      <div class="field"><label>Anno</label><input name="year" type="number" value="${e?e.year:new Date().getFullYear()}" ${nuovo?'onchange="previewEngCode()"':'disabled'}></div>
+      ${nuovo?`<div class="field"><label>Codice che verrà assegnato</label><div class="copybox" id="engCodePreview">—</div>
+        <div class="small">Il progressivo definitivo lo assegna il database al salvataggio.</div></div>`:
+        `<div class="field"><label>Codice</label><div class="copybox">${esc(e.code)}</div></div>`}
+      <div class="field"><label>Nome o descrizione</label><input name="name" value="${e?esc(e.name):''}" required></div>
+      <div class="field"><label>Lettera d'incarico</label><input name="engagement_letter" value="${e?esc(e.engagement_letter||''):''}" placeholder="Es. LI_202601"></div>
+      <div class="field"><label>Riferimento da riportare in fattura</label><input name="invoice_reference" value="${e?esc(e.invoice_reference||''):''}" placeholder="Es. LI_202601_Nome_Cognome"></div>
+      <div class="field"><label>Ordine cliente (PO)</label><input name="purchase_order" value="${e?esc(e.purchase_order||''):''}"></div>
+      <div class="field"><label>Data di inizio</label><input name="start_date" type="date" value="${e?esc(e.start_date||''):''}"></div>
+      <div class="field"><label>Data di fine prevista</label><input name="end_date" type="date" value="${e?esc(e.end_date||''):''}"></div>
+      <div class="field"><label>Budget (facoltativo)</label><input name="budget_amount" type="number" step="0.01" value="${e&&e.budget_amount!=null?e.budget_amount:''}"></div>
+      <div class="field"><label>Stato</label><select name="status">${Object.entries(STATI).map(([k,v])=>`<option value="${k}" ${(e?e.status:'active')===k?'selected':''}>${v}</option>`).join('')}</select></div>
+      <div class="field"><label>Note</label><textarea name="notes">${e?esc(e.notes||''):''}</textarea></div>
+      <div class="actions"><button class="primary">${nuovo?'Crea commessa':'Salva modifiche'}</button>
+        <button type="button" class="secondary" onclick="go('${nuovo?'engagements':'engagementDetail'}')">Annulla</button></div>
+    </form>`);
+}
+function engagementNew(){return wbsReady()?engagementForm(null):migrazioneMancante('Nuova commessa')}
+function engagementEdit(){const e=engagementById(state.edit);return e?engagementForm(e):engagements()}
+// Anteprima del codice mentre si compila: il valore vero lo assegna
+// comunque il database.
+function previewEngCode(){
+  const f=document.querySelector('form.form');if(!f)return;
+  const c=clientById(f.client_id.value);const y=f.year.value||new Date().getFullYear();
+  const usate=engagementsOf(f.client_id.value).filter(e=>String(e.year)===String(y)).length;
+  const box=document.getElementById('engCodePreview');
+  if(box)box.textContent=c&&c.code?`${c.code}-${y}-${String(usate+1).padStart(3,'0')}`:'—';
+}
+
+/* ---------- Progetto: dati e WBS ---------- */
+function openProjectWbs(id){navigateTo('projectWbs',{edit:id})}
+function projectWbs(){
+  if(!wbsReady())return migrazioneMancante("WBS");
+  const p=(data.projects||[]).find(x=>x.id===state.edit);if(!p)return engagements();
+  const e=engagementById(p.engagement_id);
+  const ws=wbsOfProject(p.id);
+  const oreDi=w=>(data.entries||[]).filter(x=>x.wbs_id===w.id).reduce((t,x)=>t+Number(x.hours||0),0);
+  return appShell(`<h1>${esc(p.code||p.name)}</h1>
+    <p class="sub">${e?esc(e.code)+" · ":""}${esc(p.name)}${p.end_client_name?" · cliente finale "+esc(p.end_client_name):""} ${statoTag(p.status||"active")}</p>
+    <div class="card"><b>Il progetto è il livello di fatturazione</b>
+      <div class="desc" style="margin-top:6px">Le ore si registrano sulle WBS qui sotto, ma in fattura confluiscono
+      in una riga sola intestata a questo progetto.</div>
+      <div class="list" style="box-shadow:none;margin:10px 0 0">
+        ${rigaDato("Unità di fatturazione",p.billing_unit==="hour"?"Ore":"Giornate")}
+        ${rigaDato("Descrizione riga fattura",p.invoice_line_description||"— (si usa il nome del progetto)")}
+      </div>
+      <button type="button" class="secondary" style="margin-top:12px" onclick="go('projectEdit')">Modifica progetto</button>
+    </div>
+    <h2>WBS del progetto</h2>
+    <p class="sub">Codici a decine: 10, 20, 30… così puoi inserire una 15 in mezzo senza rinumerare niente.</p>
+    <div class="list">${ws.map(w=>{
+      const ore=oreDi(w);const u=wbsUsage(w.id);
+      return `<div class="row" onclick="editWbs('${w.id}')">
+        <div class="date">${esc(w.activity_code)}</div>
+        <div><div class="title">${esc(w.name)} ${statoTag(w.status)}${w.billable?"":' <span class="tag gray">non fatturabile</span>'}</div>
+          <div class="desc">${esc(w.code)} · ${TIPI_WBS[w.kind]||w.kind}</div>
+          <div class="desc">${fmtNum(ore,1)} h consuntivate${w.budget_hours?" su "+fmtNum(w.budget_hours,1)+" h di budget":""}${u.tot?" · "+u.tot+" registrazion"+(u.tot===1?"e":"i"):""}</div></div>
+        <div class="chev">›</div></div>`}).join("")||'<div class="empty">Nessuna WBS. Aggiungine una qui sotto.</div>'}</div>
+    <details class="moreFields" ${ws.length?"":"open"}><summary>+ Nuova WBS</summary>
+      <form class="form" onsubmit="addWbs(event)" style="margin-top:10px">
+        <div class="field"><label>Codice attività</label>
+          <input name="activity_code" maxlength="6" value="${String((ws.length+1)*10)}" oninput="this.value=normCode(this.value);previewWbsCode()">
+          <div class="small">Anteprima: <span id="wbsCodePreview">${esc(p.code||"")}-${(ws.length+1)*10}</span></div></div>
+        <div class="field"><label>Descrizione</label><input name="name" required placeholder="Es. Project Management"></div>
+        <div class="field"><label>Tipologia</label><select name="kind">${Object.entries(TIPI_WBS).map(([k,v])=>`<option value="${k}">${v}</option>`).join("")}</select></div>
+        <div class="field"><label>Fatturabile</label><select name="billable"><option value="1">Sì, le ore vanno in fattura</option><option value="0">No, attività non fatturabile</option></select></div>
+        <div class="field"><label>Budget ore (facoltativo)</label><input name="budget_hours" type="number" step="0.5"></div>
+        <button class="primary">Aggiungi WBS</button></form></details>
+    <button type="button" class="secondary" onclick="openEngagement('${p.engagement_id||""}')">Torna alla commessa</button>`);
+}
+function previewWbsCode(){
+  const f=document.querySelector("form.form");const p=(data.projects||[]).find(x=>x.id===state.edit);
+  const box=document.getElementById("wbsCodePreview");
+  if(f&&p&&box)box.textContent=(p.code||"")+"-"+normCode(f.activity_code.value);
+}
+function editWbs(id){navigateTo("wbsEdit",{edit:id,parent:state.edit})}
+function wbsEdit(){
+  const w=wbsById(state.edit);if(!w)return engagements();
+  const u=wbsUsage(w.id);const bloccato=u.tot>0;
+  return appShell(`<h1>${esc(w.code)}</h1>
+    <p class="sub">${esc(w.name)} ${statoTag(w.status)}</p>
+    <form class="form" onsubmit="saveWbs(event)">
+      <div class="field"><label>Codice attività</label>
+        <input name="activity_code" value="${esc(w.activity_code)}" ${bloccato?"readonly":'oninput="this.value=normCode(this.value)"'}>
+        <div class="small">${bloccato?"Bloccato: ci sono "+u.tot+" registrazion"+(u.tot===1?"e":"i")+" su questa WBS. La descrizione si può comunque cambiare.":"Ancora modificabile: nessuna registrazione la usa."}</div></div>
+      <div class="field"><label>Descrizione</label><input name="name" value="${esc(w.name)}" required></div>
+      <div class="field"><label>Tipologia</label><select name="kind">${Object.entries(TIPI_WBS).map(([k,v])=>`<option value="${k}" ${w.kind===k?"selected":""}>${v}</option>`).join("")}</select></div>
+      <div class="field"><label>Fatturabile</label><select name="billable"><option value="1" ${w.billable?"selected":""}>Sì, le ore vanno in fattura</option><option value="0" ${w.billable?"":"selected"}>No, attività non fatturabile</option></select></div>
+      <div class="field"><label>Budget ore</label><input name="budget_hours" type="number" step="0.5" value="${w.budget_hours!=null?w.budget_hours:""}"></div>
+      <div class="field"><label>Ordinamento</label><input name="sort_order" type="number" value="${w.sort_order||0}"></div>
+      <div class="field"><label>Stato</label><select name="status">${Object.entries(STATI).map(([k,v])=>`<option value="${k}" ${w.status===k?"selected":""}>${v}</option>`).join("")}</select>
+        <div class="small">Una WBS chiusa non accetta nuove registrazioni, ma resta nello storico e nei report.</div></div>
+      <div class="field"><label>Note</label><textarea name="notes">${esc(w.notes||"")}</textarea></div>
+      ${bloccato?wbsSpostaOptions(w):""}
+      <div class="actions"><button class="primary">Salva modifiche</button>
+        ${bloccato?"":`<button type="button" class="secondary danger" onclick="deleteWbs('${w.id}')">Elimina</button>`}
+        <button type="button" class="secondary" onclick="openProjectWbs('${w.project_id}')">Annulla</button></div>
+    </form>`);
+}
+
+/* ---------- Azioni ---------- */
+async function addEngagement(ev){
+  ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));
+  const payload={client_id:f.client_id,year:Number(f.year)||new Date().getFullYear(),name:norm(f.name),
+    engagement_letter:norm(f.engagement_letter)||null,invoice_reference:norm(f.invoice_reference)||null,
+    purchase_order:norm(f.purchase_order)||null,start_date:f.start_date||null,end_date:f.end_date||null,
+    budget_amount:f.budget_amount?Number(f.budget_amount):null,status:f.status||"active",notes:norm(f.notes)||null};
+  const {error}=await insertResilient("engagements",payload);
+  if(error)return setMsg(messaggioCommessa(error),8000);
+  await reload();state.view="engagements";render();
+  setMsg("Commessa creata.",3500);
+}
+async function saveEngagement(ev){
+  ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));
+  const payload={name:norm(f.name),engagement_letter:norm(f.engagement_letter)||null,
+    invoice_reference:norm(f.invoice_reference)||null,purchase_order:norm(f.purchase_order)||null,
+    start_date:f.start_date||null,end_date:f.end_date||null,
+    budget_amount:f.budget_amount?Number(f.budget_amount):null,status:f.status,notes:norm(f.notes)||null};
+  const r=await updateResilient("engagements",payload,state.edit);
+  if(r.error)return setMsg(messaggioCommessa(r.error),8000);
+  await reload();state.view="engagementDetail";render();
+}
+async function addEngagementRef(ev){
+  ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));
+  if(!norm(f.engagement_letter)&&!norm(f.purchase_order))return setMsg("Serve almeno una lettera d'incarico o un PO.",5000);
+  const {error}=await insertResilient("engagement_references",{engagement_id:state.edit,
+    engagement_letter:norm(f.engagement_letter)||null,purchase_order:norm(f.purchase_order)||null,
+    invoice_reference:norm(f.invoice_reference)||null,valid_from:f.valid_from||null,valid_to:f.valid_to||null,
+    reference_type:norm(f.purchase_order)&&!norm(f.engagement_letter)?"purchase_order":"engagement_letter"});
+  if(error)return setMsg(error.message,7000);
+  await reload();render();setMsg("Riferimento aggiunto. Lo storico precedente resta.",4000);
+}
+async function addWbs(ev){
+  ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));
+  const {error}=await insertResilient("wbs_items",{project_id:state.edit,activity_code:normCode(f.activity_code),
+    name:norm(f.name),kind:f.kind||"activity",billable:f.billable==="1",
+    budget_hours:f.budget_hours?Number(f.budget_hours):null,sort_order:Number(normCode(f.activity_code))||0});
+  if(error)return setMsg(messaggioWbs(error),8000);
+  await reload();render();setMsg("WBS aggiunta.",3000);
+}
+async function saveWbs(ev){
+  ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));
+  const w=wbsById(state.edit);if(!w)return;
+  const payload={name:norm(f.name),kind:f.kind,billable:f.billable==="1",
+    budget_hours:f.budget_hours?Number(f.budget_hours):null,sort_order:Number(f.sort_order)||0,
+    status:f.status,notes:norm(f.notes)||null};
+  if(!wbsUsage(w.id).tot)payload.activity_code=normCode(f.activity_code);
+  const r=await updateResilient("wbs_items",payload,w.id);
+  if(r.error)return setMsg(messaggioWbs(r.error),8000);
+  await reload();navigateTo("projectWbs",{edit:w.project_id});
+}
+async function deleteWbs(id){
+  const w=wbsById(id);if(!w)return;
+  if(wbsUsage(id).tot)return setMsg("Questa WBS ha delle registrazioni: si può chiudere, non eliminare.",6000);
+  if(!confirm("Eliminare la WBS "+w.code+"? Non è mai stata usata, quindi non si perde nulla."))return;
+  const {error}=await sb.from("wbs_items").delete().eq("id",id);
+  if(error)return setMsg(error.message,7000);
+  await reload();navigateTo("projectWbs",{edit:w.project_id});
+}
+// Messaggi comprensibili al posto degli errori del database
+function messaggioCommessa(e){
+  const m=String(e&&e.message||e);
+  if(/non ha un codice/.test(m))return "Il cliente non ha un codice: assegnalo prima, in Impostazioni → Clienti.";
+  if(/duplicate key|unique/i.test(m))return "Esiste già una commessa con questo codice.";
+  return m;
+}
+function messaggioWbs(e){
+  const m=String(e&&e.message||e);
+  if(/gia. usato/i.test(m))return "Questa WBS è già usata in consuntivi o spese: il codice non si può più cambiare. La descrizione sì.";
+  if(/duplicate key|unique/i.test(m))return "Esiste già una WBS con questo codice in questo progetto.";
+  if(/non e. attiva/i.test(m))return "La WBS non è attiva: non accetta nuove registrazioni.";
+  if(/non ha un codice completo/.test(m))return "Il progetto non è collegato a una commessa: collegalo prima.";
+  return m;
+}
+
+/* ---------- Nuovo progetto dentro una commessa ---------- */
+function projectNew(){
+  if(!wbsReady())return migrazioneMancante("Nuovo progetto");
+  const e=engagementById(state.edit);if(!e)return engagements();
+  const usati=projectsOfEngagement(e.id).map(p=>p.short_code).filter(Boolean);
+  return appShell(`<h1>Nuovo progetto</h1>
+    <p class="sub">Dentro la commessa ${esc(e.code)}. Il progetto è il livello a cui si fattura.</p>
+    <form class="form" onsubmit="addProjectInEngagement(event)">
+      <div class="field"><label>Codice breve</label>
+        <input name="short_code" maxlength="6" required placeholder="Es. EQU" oninput="this.value=normCode(this.value);previewPrjCode()">
+        <div class="small">Anteprima: <span id="prjCodePreview">${esc(e.code)}-…</span>${usati.length?" · già usati: "+usati.map(esc).join(", "):""}</div></div>
+      <div class="field"><label>Nome del progetto</label><input name="name" required placeholder="Es. EQUANS"></div>
+      <div class="field"><label>Cliente finale</label><input name="end_client_name" placeholder="Se diverso dal cliente contrattuale"></div>
+      <div class="field"><label>Unità di fatturazione</label><select name="billing_unit"><option value="day">Giornate</option><option value="hour">Ore</option></select></div>
+      <div class="field"><label>Descrizione predefinita della riga di fattura</label><input name="invoice_line_description" placeholder="Se vuoto si usa il nome del progetto"></div>
+      <div class="field"><label>Data di inizio</label><input name="start_date" type="date"></div>
+      <div class="field"><label>Data di fine</label><input name="end_date" type="date"></div>
+      <div class="actions"><button class="primary">Crea progetto</button>
+        <button type="button" class="secondary" onclick="openEngagement('${e.id}')">Annulla</button></div>
+    </form>`);
+}
+function previewPrjCode(){
+  const f=document.querySelector("form.form");const e=engagementById(state.edit);
+  const box=document.getElementById("prjCodePreview");
+  if(f&&e&&box)box.textContent=e.code+"-"+(normCode(f.short_code.value)||"…");
+}
+async function addProjectInEngagement(ev){
+  ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));
+  const e=engagementById(state.edit);if(!e)return;
+  const {error}=await insertResilient("projects",{client_id:e.client_id,engagement_id:e.id,
+    short_code:normCode(f.short_code),name:norm(f.name),end_client_name:norm(f.end_client_name)||null,
+    billing_unit:f.billing_unit||"day",invoice_line_description:norm(f.invoice_line_description)||null,
+    start_date:f.start_date||null,end_date:f.end_date||null,status:"active",active:true});
+  if(error)return setMsg(/duplicate key|unique/i.test(String(error.message))?
+    "Esiste già un progetto con questo codice in questa commessa.":error.message,8000);
+  await reload();render();setMsg("Progetto creato.",3000);
+}
+
+/* ---------- Selezione gerarchica Cliente > Commessa > Progetto > WBS ----------
+   Compare solo dove la gerarchia esiste davvero. Se un cliente non ha
+   ancora commesse, il modulo resta quello di prima: cosi' chi non ha
+   ancora migrato tutto continua a lavorare. */
+function hierAvailable(clientId){
+  return wbsReady() && engagementsOf(clientId).some(e=>projectsOfEngagement(e.id).some(p=>wbsAperte(p.id).length));
+}
+function engagementOptions(clientId,selected=''){
+  const list=engagementsOf(clientId).filter(e=>STATI_APERTI.includes(e.status)||e.id===selected);
+  return `<option value="">— commessa —</option>`+list.map(e=>
+    `<option value="${e.id}" ${e.id===selected?'selected':''}>${esc(e.code)} · ${esc(e.name)}</option>`).join('');
+}
+function projectOptionsOfEngagement(engId,selected=''){
+  const list=projectsOfEngagement(engId).filter(p=>!p.status||STATI_APERTI.includes(p.status)||p.id===selected);
+  return `<option value="">— progetto —</option>`+list.map(p=>
+    `<option value="${p.id}" ${p.id===selected?'selected':''}>${esc(p.code||p.name)} · ${esc(p.name)}</option>`).join('');
+}
+function wbsOptions(projId,selected=''){
+  const list=wbsOfProject(projId).filter(w=>STATI_APERTI.includes(w.status)||w.id===selected);
+  return `<option value="">— WBS —</option>`+list.map(w=>
+    `<option value="${w.id}" ${w.id===selected?'selected':''}>${esc(w.activity_code)} · ${esc(w.name)}${w.billable?'':' (non fatturabile)'}</option>`).join('');
+}
+// Da una WBS si risale a tutto il resto: non si duplica niente a mano
+function wbsLineage(wbsId){
+  const w=wbsById(wbsId);if(!w)return null;
+  const p=(data.projects||[]).find(x=>x.id===w.project_id);if(!p)return null;
+  const e=engagementById(p.engagement_id);
+  return {wbs:w,project:p,engagement:e,client_id:p.client_id};
+}
+// I tre menu a tendina della gerarchia, per i moduli di consuntivo
+function hierFields(clientId,wbsId){
+  const lin=wbsId?wbsLineage(wbsId):null;
+  const engSel=lin&&lin.engagement?lin.engagement.id:'';
+  const prjSel=lin?lin.project.id:'';
+  return `<div class="field"><label>Commessa</label>
+      <select name="engagement_id" onchange="hierChanged(this.form,'engagement')">${engagementOptions(clientId,engSel)}</select></div>
+    <div class="field"><label>Progetto</label>
+      <select name="hier_project_id" onchange="hierChanged(this.form,'project')">${engSel?projectOptionsOfEngagement(engSel,prjSel):'<option value="">— prima scegli la commessa —</option>'}</select></div>
+    <div class="field"><label>WBS / attività</label>
+      <select name="wbs_id" onchange="hierChanged(this.form,'wbs')">${prjSel?wbsOptions(prjSel,wbsId||''):'<option value="">— prima scegli il progetto —</option>'}</select>
+      <div class="small" id="wbsHint">${lin?esc(lin.wbs.code)+(lin.wbs.billable?'':' · non fatturabile'):'Le ore si registrano sulla WBS. In fattura confluiscono nel progetto.'}</div></div>`;
+}
+function hierChanged(form,livello){
+  if(!form)return;
+  if(livello==='client'||livello==='engagement'){
+    const eng=form.engagement_id?form.engagement_id.value:'';
+    if(form.hier_project_id)form.hier_project_id.innerHTML=eng?projectOptionsOfEngagement(eng,''):'<option value="">— prima scegli la commessa —</option>';
+    if(form.wbs_id)form.wbs_id.innerHTML='<option value="">— prima scegli il progetto —</option>';
+  }
+  if(livello==='project'){
+    const prj=form.hier_project_id?form.hier_project_id.value:'';
+    if(form.wbs_id)form.wbs_id.innerHTML=prj?wbsOptions(prj,''):'<option value="">— prima scegli il progetto —</option>';
+  }
+  const hint=document.getElementById('wbsHint');
+  if(hint){
+    const w=form.wbs_id&&form.wbs_id.value?wbsById(form.wbs_id.value):null;
+    hint.textContent=w?(w.code+(w.billable?'':' · non fatturabile')):
+      'Le ore si registrano sulla WBS. In fattura confluiscono nel progetto.';
+  }
+  // il progetto "vecchio" resta allineato, cosi' il resto dell'app
+  // continua a leggere quello che ha sempre letto
+  if(form.project_id&&form.hier_project_id&&form.hier_project_id.value)
+    form.project_id.value=form.hier_project_id.value;
+}
+// Quando si sceglie il cliente, si rifanno commessa/progetto/WBS
+function refreshHierForForm(form){
+  if(!form||!form.engagement_id)return;
+  form.engagement_id.innerHTML=engagementOptions(form.client_id.value,'');
+  hierChanged(form,'engagement');
+}
+
+/* ---------- La griglia ragiona per WBS quando c'e' ----------
+   La riga mostra la commessa, non solo cliente e progetto: era
+   l'informazione che mancava per capire su cosa si sta lavorando. */
+function gridRigaEtichetta(r){
+  const w=r.wbs_id?wbsById(r.wbs_id):null;
+  if(w){
+    const lin=wbsLineage(w.id);
+    const commessa=lin&&lin.engagement?lin.engagement.code:'';
+    return `<div class="n">${esc(w.name)}</div>
+      <div class="d">${commessa?esc(commessa)+' · ':''}${esc(lin?lin.project.name:'')}</div>
+      <div class="d wbsCode">${esc(w.code)}${w.billable?'':' · non fatturabile'}</div>`;
+  }
+  return `<div class="n">${esc(clientName(r.client_id)||'Senza cliente')}</div>
+    <div class="d">${esc(projectName(r.project_id)||'Senza progetto')} · ${esc(activityName(r.activity_id)||'Senza attività')}</div>`;
+}
+/* La cascata sotto la griglia */
+function gridClienteCambiato(){
+  const c=document.getElementById('g-cliente').value;
+  const com=document.getElementById('g-commessa');
+  if(wbsReady()&&engagementsOf(c).length){
+    com.hidden=false;
+    com.innerHTML=engagementOptions(c,'');
+  }else{
+    // niente commesse per questo cliente: si torna al percorso di prima
+    com.hidden=true;
+    document.getElementById('g-attivita').hidden=false;
+    document.getElementById('g-wbs').hidden=true;
+    gridFillProjects();return;
+  }
+  document.getElementById('g-attivita').hidden=true;
+  document.getElementById('g-wbs').hidden=false;
+  gridCommessaCambiata();
+}
+function gridCommessaCambiata(){
+  const e=document.getElementById('g-commessa').value;
+  document.getElementById('g-progetto').innerHTML=
+    e?projectOptionsOfEngagement(e,''):'<option value="">— prima scegli la commessa —</option>';
+  gridProgettoCambiato();
+}
+function gridProgettoCambiato(){
+  const p=document.getElementById('g-progetto').value;
+  const w=document.getElementById('g-wbs');
+  if(w)w.innerHTML=p?wbsOptions(p,''):'<option value="">— prima scegli il progetto —</option>';
+}
+
+/* ---------- Spostare le registrazioni da una WBS a un'altra ----------
+   Serve a riorganizzare: le WBS create dalla migrazione portano i nomi
+   delle vecchie attivita', e chi usa l'app vuole le proprie. Si crea
+   la WBS giusta in anagrafica, ci si spostano sopra le registrazioni,
+   e la vecchia si chiude. */
+function wbsSpostaOptions(w){
+  const altre=wbsOfProject(w.project_id).filter(x=>x.id!==w.id&&STATI_APERTI.includes(x.status));
+  if(!altre.length)return '';
+  return `<div class="field"><label>Sposta le registrazioni su un'altra WBS</label>
+    <select id="wbsTarget">${altre.map(x=>`<option value="${x.id}">${esc(x.activity_code)} · ${esc(x.name)}</option>`).join('')}</select>
+    <div class="small">Le ${wbsUsage(w.id).tot} registrazioni passano alla WBS scelta. Importi e date non cambiano.</div>
+    <button type="button" class="secondary" style="margin-top:8px" onclick="spostaWbs('${w.id}')">Sposta e basta</button></div>`;
+}
+async function spostaWbs(daId){
+  const da=wbsById(daId);const aId=document.getElementById('wbsTarget')?.value;
+  const a=wbsById(aId);if(!da||!a)return;
+  const u=wbsUsage(daId);
+  if(!u.tot)return setMsg('Non ci sono registrazioni da spostare.',4000);
+  if(!confirm(`Spostare ${u.tot} registrazion${u.tot===1?'e':'i'} da ${da.code} a ${a.code}?\n\nImporti, date e note non cambiano: cambia solo la WBS.`))return;
+  state.busy=true;render();
+  try{
+    for(const [tabella,chiave] of [['timesheet_entries','entries'],['manual_entries','manualEntries'],['travel_expenses','travelExpenses']]){
+      const ids=(data[chiave]||[]).filter(e=>e.wbs_id===daId).map(e=>e.id);
+      if(!ids.length)continue;
+      const {error}=await sb.from(tabella).update({wbs_id:aId}).in('id',ids);
+      if(error)throw error;
+    }
+  }catch(e){state.busy=false;return setMsg(messaggioWbs(e),8000)||render();}
+  state.busy=false;
+  await reload();
+  navigateTo('projectWbs',{edit:da.project_id});
+  setMsg(`${u.tot} registrazion${u.tot===1?'e spostata':'i spostate'} su ${a.code}. Ora ${da.code} è vuota e si può chiudere o eliminare.`,6000);
+}
+
+/* ==================================================================
+   Fatturazione per commessa
+   Si registra sulla WBS, si fattura sul PROGETTO. Le WBS servono a
+   sapere cosa e' stato fatto e a controllarlo; in fattura confluiscono
+   in una riga sola per progetto.
+   Questo flusso si aggiunge a quello esistente, non lo sostituisce.
+   ================================================================== */
+
+// Quanto di una registrazione risulta gia' fatturato
+function oreGiaFatturate(entryId){
+  return (data.invoiceAllocations||[])
+    .filter(a=>a.source_table==='timesheet_entries'&&a.source_id===entryId)
+    .reduce((t,a)=>t+Number(a.quantity||0),0);
+}
+// Il prospetto analitico per WBS di un progetto in un periodo.
+// E' il documento di controllo: dice da dove viene ogni ora.
+function prospettoProgetto(projectId,dal,al){
+  const wbs=wbsOfProject(projectId);
+  const righe=wbs.map(w=>{
+    const voci=(data.entries||[]).filter(e=>e.wbs_id===w.id
+      && String(e.entry_date||'')>=dal && String(e.entry_date||'')<=al);
+    const consuntivate=voci.reduce((t,e)=>t+Number(e.hours||0),0);
+    const fatturate=voci.reduce((t,e)=>t+oreGiaFatturate(e.id),0);
+    const daFatturare=w.billable?Math.max(0,consuntivate-fatturate):0;
+    return {wbs:w,voci,consuntivate,fatturate,daFatturare,
+      fatturabili:w.billable?consuntivate:0,
+      escluse:w.billable?0:consuntivate};
+  }).filter(r=>r.consuntivate>0);
+  const tot=righe.reduce((a,r)=>({
+    consuntivate:a.consuntivate+r.consuntivate,
+    fatturabili:a.fatturabili+r.fatturabili,
+    fatturate:a.fatturate+r.fatturate,
+    daFatturare:a.daFatturare+r.daFatturare,
+    escluse:a.escluse+r.escluse
+  }),{consuntivate:0,fatturabili:0,fatturate:0,daFatturare:0,escluse:0});
+  return {righe,tot};
+}
+// L'importo si calcola sulla tariffa del CLIENTE, come e' sempre stato.
+// La tariffa di progetto resta documentale e non entra nei conti.
+function importoDaOre(clientId,ore){
+  const c=clientById(clientId)||{};
+  const std=Number(c.standard_hours||8)||8;
+  return Number(c.daily_rate||0)/std*Number(ore||0);
+}
+function unitaProgetto(p){return (p&&p.billing_unit==='hour')?'ore':'giornate'}
+function quantitaInUnita(p,ore,clientId){
+  if(p&&p.billing_unit==='hour')return Number(ore||0);
+  const c=clientById(clientId)||{};
+  return Number(ore||0)/(Number(c.standard_hours||8)||8);
+}
+
+function fattCommessaState(){
+  const s=state.fatt||{};
+  return {client_id:s.client_id||'',engagement_id:s.engagement_id||'',
+    dal:s.dal||primoDelMese(),al:s.al||ultimoDelMese(),
+    progetti:s.progetti||null};
+}
+function primoDelMese(){return state.month+'-01'}
+function ultimoDelMese(){const [y,m]=state.month.split('-').map(Number);
+  return `${state.month}-${String(new Date(y,m,0).getDate()).padStart(2,'0')}`}
+function setFatt(k,v){state.fatt={...(state.fatt||{}),[k]:v};
+  if(k==='client_id')state.fatt.engagement_id='';
+  if(k==='client_id'||k==='engagement_id')state.fatt.progetti=null;
+  render()}
+function toggleProgettoFatt(id){
+  const s=fattCommessaState();
+  const cur=s.progetti===null?progettiFatturabili().map(p=>p.id):s.progetti.slice();
+  const i=cur.indexOf(id);
+  if(i>=0)cur.splice(i,1);else cur.push(id);
+  state.fatt={...(state.fatt||{}),progetti:cur};render();
+}
+function progettiFatturabili(){
+  const s=fattCommessaState();
+  if(!s.engagement_id)return [];
+  return projectsOfEngagement(s.engagement_id);
+}
+
+function fatturazioneCommessa(){
+  if(!wbsReady())return migrazioneMancante('Fatturazione per commessa');
+  const s=fattCommessaState();
+  const clienti=(data.clients||[]).filter(c=>engagementsOf(c.id).length);
+  if(!clienti.length)return appShell(`<h1>Fatturazione per commessa</h1>
+    <div class="card"><b>Nessuna commessa</b><div class="desc" style="margin-top:6px">
+    Crea prima una commessa in Impostazioni → Commesse.</div></div>
+    <button type="button" class="secondary" onclick="go('engagements')">Vai alle commesse</button>`);
+  const cid=s.client_id||clienti[0].id;
+  const comm=engagementsOf(cid);
+  const eid=s.engagement_id||(comm[0]||{}).id||'';
+  const prj=eid?projectsOfEngagement(eid):[];
+  const scelti=s.progetti===null?prj.map(p=>p.id):s.progetti;
+  const e=engagementById(eid);
+
+  const blocchi=prj.filter(p=>scelti.includes(p.id)).map(p=>{
+    const pr=prospettoProgetto(p.id,s.dal,s.al);
+    if(!pr.righe.length)return `<div class="card"><b>${esc(p.code||p.name)}</b>
+      <div class="desc" style="margin-top:6px">Nessun consuntivo nel periodo.</div></div>`;
+    const q=quantitaInUnita(p,pr.tot.daFatturare,cid);
+    const imp=importoDaOre(cid,pr.tot.daFatturare);
+    return `<div class="card"><b>${esc(p.code||p.name)} · ${esc(p.name)}</b>
+      <div class="desc" style="margin-top:2px">${esc(p.end_client_name||'')}${p.end_client_name?' · ':''}il dettaglio per WBS resta qui, in fattura va una riga sola</div>
+      <div class="scrollGriglia" style="margin-top:12px"><table class="griglia prospetto">
+        <thead><tr><th class="riga">WBS</th><th>Consuntivato</th><th>Fatturabile</th><th>Già fatturato</th><th>Da fatturare</th></tr></thead>
+        <tbody>${pr.righe.map(r=>`<tr>
+          <td class="riga"><div class="n">${esc(r.wbs.activity_code)} · ${esc(r.wbs.name)}</div>
+            <div class="d">${esc(r.wbs.code)}${r.wbs.billable?'':' · non fatturabile'}</div></td>
+          <td class="num">${fmtNum(r.consuntivate,1)} h</td>
+          <td class="num">${r.wbs.billable?fmtNum(r.fatturabili,1)+' h':'—'}</td>
+          <td class="num">${r.fatturate>0?fmtNum(r.fatturate,1)+' h':'—'}</td>
+          <td class="num${r.daFatturare>0?' spicca':''}">${r.daFatturare>0?fmtNum(r.daFatturare,1)+' h':'—'}</td></tr>`).join('')}
+        </tbody>
+        <tfoot><tr><td class="riga">Totale progetto</td>
+          <td class="num">${fmtNum(pr.tot.consuntivate,1)} h</td>
+          <td class="num">${fmtNum(pr.tot.fatturabili,1)} h</td>
+          <td class="num">${fmtNum(pr.tot.fatturate,1)} h</td>
+          <td class="num spicca">${fmtNum(pr.tot.daFatturare,1)} h</td></tr></tfoot>
+      </table></div>
+      ${pr.tot.escluse>0?`<div class="metricLine" style="margin-top:10px"><span class="tag gray">Escluse</span> ${fmtNum(pr.tot.escluse,1)} h su WBS non fatturabili</div>`:''}
+      <div class="metricLine" style="margin-top:10px">
+        <b>Andrà in fattura:</b> ${fmtNum(q,2)} ${unitaProgetto(p)} <span class="dot">·</span> <b>${fmtEUR(imp)}</b></div>
+      ${pr.tot.daFatturare>0?`<button type="button" class="primary" style="margin-top:12px" onclick="generaRigaFattura('${p.id}')">Genera la riga di fattura per questo progetto</button>`:
+        '<div class="desc" style="margin-top:10px">Niente da fatturare in questo periodo.</div>'}
+    </div>`;
+  }).join('');
+
+  return appShell(`<h1>Fatturazione per commessa</h1>
+    <p class="sub">Si registra sulla WBS, si fattura sul progetto. Il dettaglio per WBS è il prospetto di controllo, non finisce in fattura.</p>
+    <div class="card"><b>Cosa fatturare</b>
+      <div class="field" style="margin-top:12px"><label>Cliente contrattuale</label>
+        <select onchange="setFatt('client_id',this.value)">${clienti.map(c=>`<option value="${c.id}" ${c.id===cid?'selected':''}>${esc(c.code||'')} · ${esc(c.name)}</option>`).join('')}</select></div>
+      <div class="field"><label>Commessa</label>
+        <select onchange="setFatt('engagement_id',this.value)">${comm.map(x=>`<option value="${x.id}" ${x.id===eid?'selected':''}>${esc(x.code)} · ${esc(x.name)}</option>`).join('')}</select></div>
+      <div class="field"><label>Dal</label><input type="date" value="${esc(s.dal)}" onchange="setFatt('dal',this.value)"></div>
+      <div class="field"><label>Al</label><input type="date" value="${esc(s.al)}" onchange="setFatt('al',this.value)"></div>
+      ${prj.length>1?`<div class="field"><label>Progetti da includere</label>
+        <div class="miniActions">${prj.map(p=>`<button type="button" class="miniBtn ${scelti.includes(p.id)?'active':''}" onclick="toggleProgettoFatt('${p.id}')">${scelti.includes(p.id)?'☑':'☐'} ${esc(p.code||p.name)}</button>`).join('')}</div></div>`:''}
+      ${e&&(e.invoice_reference||e.engagement_letter)?`<div class="metricLine" style="margin-top:10px">
+        <span class="tag blue">Riferimento in fattura</span> ${esc(e.invoice_reference||e.engagement_letter)}</div>`:''}
+    </div>
+    ${blocchi||'<div class="empty">Scegli almeno un progetto.</div>'}
+    <button type="button" class="secondary" onclick="go('billing')">Vai alla fatturazione mensile di sempre</button>`);
+}
+
+/* Genera UNA riga di fattura per il progetto, e la collega alle
+   registrazioni che la compongono. E' l'allocazione che impedisce di
+   fatturare due volte la stessa ora, non un contrassegno sulla WBS. */
+async function generaRigaFattura(projectId){
+  const s=fattCommessaState();
+  const p=(data.projects||[]).find(x=>x.id===projectId);if(!p)return;
+  const e=engagementById(p.engagement_id);
+  const cid=s.client_id||(e?e.client_id:null);
+  const c=clientById(cid)||{};
+  const pr=prospettoProgetto(projectId,s.dal,s.al);
+  if(pr.tot.daFatturare<=0)return setMsg('Non c\'è niente da fatturare in questo periodo.',5000);
+
+  const q=quantitaInUnita(p,pr.tot.daFatturare,cid);
+  const imp=importoDaOre(cid,pr.tot.daFatturare);
+  const dettaglio=pr.righe.filter(r=>r.daFatturare>0)
+    .map(r=>`${r.wbs.activity_code} ${r.wbs.name}: ${fmtNum(r.daFatturare,1)} h`).join('\n');
+  if(!confirm(`Generare la riga di fattura per ${p.code||p.name}?\n\n`
+    +`${fmtNum(q,2)} ${unitaProgetto(p)} · ${fmtEUR(imp)}\n\n`
+    +`Composta da:\n${dettaglio}\n\n`
+    +`Le registrazioni verranno segnate come fatturate e non potranno essere fatturate di nuovo.`))return;
+
+  state.busy=true;render();
+  try{
+    // Una testata per cliente e mese, come fa gia' il resto dell'app
+    const [anno,mese]=s.al.split('-').map(Number);
+    let hdr=(data.billingHeaders||[]).find(h=>h.client_id===cid&&Number(h.year)===anno&&Number(h.month)===mese);
+    if(!hdr){
+      const r=await insertResilient('billing_headers',{client_id:cid,year:anno,month:mese,status:'draft'});
+      if(r.error)throw r.error;
+      await reload();
+      hdr=(data.billingHeaders||[]).find(h=>h.client_id===cid&&Number(h.year)===anno&&Number(h.month)===mese);
+    }
+    // La riga punta al progetto, mai alla WBS. Gli snapshot congelano
+    // il valore: cambiare poi tariffa o riferimenti non la tocca.
+    const riga={billing_header_id:hdr?hdr.id:null,client_id:cid,engagement_id:e?e.id:null,project_id:p.id,
+      line_type:'daily_rate_8h',
+      description:p.invoice_line_description||`${p.name}${p.end_client_name?' — '+p.end_client_name:''}`,
+      period_from:s.dal,period_to:s.al,
+      quantity:Number(q.toFixed(2)),unit:p.billing_unit==='hour'?'hour':'day',
+      unit_rate:Number(c.daily_rate||0),currency:p.currency||'EUR',amount:Number(imp.toFixed(2)),
+      snapshot_client_name:c.name||null,snapshot_client_code:c.code||null,
+      snapshot_engagement_code:e?e.code:null,snapshot_project_code:p.code||null,
+      snapshot_project_name:p.name||null,snapshot_end_client:p.end_client_name||null,
+      snapshot_engagement_letter:e?e.engagement_letter:null,
+      snapshot_purchase_order:e?e.purchase_order:null,
+      snapshot_invoice_reference:e?e.invoice_reference:null};
+    const ins=await insertResilient('billing_lines',riga);
+    if(ins.error)throw ins.error;
+    await reload();
+    const linea=(data.billingLines||[]).slice().sort((a,b)=>
+      String(b.created_at||'').localeCompare(String(a.created_at||'')))[0];
+    if(!linea)throw new Error('Riga di fattura non trovata dopo il salvataggio');
+
+    // Le allocazioni: da quali registrazioni arriva la quantita'
+    const alloc=[];
+    for(const r of pr.righe){
+      if(r.daFatturare<=0)continue;
+      for(const v of r.voci){
+        const resto=Number(v.hours||0)-oreGiaFatturate(v.id);
+        if(resto<=0.0001)continue;
+        alloc.push({billing_line_id:linea.id,source_table:'timesheet_entries',source_id:v.id,
+          wbs_id:r.wbs.id,quantity:Number(resto.toFixed(2)),
+          amount:Number(importoDaOre(cid,resto).toFixed(2))});
+      }
+    }
+    if(alloc.length){
+      const a=await insertManyResilient('invoice_line_allocations',alloc);
+      if(a.error)throw a.error;
+    }
+  }catch(err){state.busy=false;return setMsg(messaggioFattura(err),9000)||render();}
+  state.busy=false;
+  await reload();render();
+  setMsg(`Riga di fattura creata per ${p.code||p.name}. Le ore che la compongono non sono più fatturabili.`,6000);
+}
+function messaggioFattura(e){
+  const m=String(e&&e.message||e);
+  if(/gia. fatturata|fatturare due volte/i.test(m))
+    return 'Alcune di queste ore risultano già fatturate: ricarica la pagina e rifai il prospetto.';
+  if(/does not exist|could not find the table/i.test(m))
+    return 'Manca la migrazione delle commesse: esegui prima gli script in migrations/.';
+  return m;
+}
+
+/* ==================================================================
+   Report
+   Due livelli distinti, come devono restare: quello analitico ragiona
+   per WBS, quello economico aggrega per cliente, commessa e progetto.
+   La WBS non e' una dimensione del documento fiscale.
+   ================================================================== */
+function repState(){const r=state.rep||{};return {dal:r.dal||(currentYear()+'-01-01'),al:r.al||(currentYear()+'-12-31'),client_id:r.client_id||''}}
+function setRep(k,v){state.rep={...(state.rep||{}),[k]:v};render()}
+function repFiltri(){
+  const r=repState();
+  return `<div class="card"><b>Periodo</b>
+    <div class="field" style="margin-top:12px"><label>Dal</label><input type="date" value="${esc(r.dal)}" onchange="setRep('dal',this.value)"></div>
+    <div class="field"><label>Al</label><input type="date" value="${esc(r.al)}" onchange="setRep('al',this.value)"></div>
+    <div class="field"><label>Cliente</label><select onchange="setRep('client_id',this.value)">
+      <option value="">Tutti i clienti</option>
+      ${(data.clients||[]).map(c=>`<option value="${c.id}" ${r.client_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}
+    </select></div></div>`;
+}
+// Le righe analitiche: una per WBS, con budget e scostamento
+function repRigheWbs(){
+  const r=repState();
+  return (data.wbsItems||[]).map(w=>{
+    const lin=wbsLineage(w.id);if(!lin)return null;
+    if(r.client_id&&lin.client_id!==r.client_id)return null;
+    const voci=(data.entries||[]).filter(e=>e.wbs_id===w.id
+      && String(e.entry_date||'')>=r.dal && String(e.entry_date||'')<=r.al);
+    const ore=voci.reduce((t,e)=>t+Number(e.hours||0),0);
+    const fatturate=voci.reduce((t,e)=>t+oreGiaFatturate(e.id),0);
+    if(!ore&&!w.budget_hours)return null;
+    const budget=Number(w.budget_hours||0);
+    return {w,lin,ore,fatturate,budget,
+      scostamento:budget?ore-budget:null,
+      fatturabili:w.billable?ore:0};
+  }).filter(Boolean).sort((a,b)=>String(a.w.code).localeCompare(String(b.w.code),'it'));
+}
+function reportWbs(){
+  if(!wbsReady())return migrazioneMancante('Report analitico WBS');
+  const righe=repRigheWbs();
+  const tot=righe.reduce((a,x)=>({ore:a.ore+x.ore,fatturabili:a.fatturabili+x.fatturabili,
+    fatturate:a.fatturate+x.fatturate,budget:a.budget+x.budget}),{ore:0,fatturabili:0,fatturate:0,budget:0});
+  return appShell(`<h1>Report analitico WBS</h1>
+    <p class="sub">Dove è finito il tempo, WBS per WBS. È il livello di controllo, non quello di fatturazione.</p>
+    ${repFiltri()}
+    <div class="card"><b>Totale periodo</b>
+      <div class="kpiGrid three" style="margin-top:14px">
+        <div><span>Consuntivato</span><strong>${fmtNum(tot.ore,1)} h</strong><small>${fmtNum(tot.ore/8,2)} gg/u</small></div>
+        <div><span>Fatturabile</span><strong>${fmtNum(tot.fatturabili,1)} h</strong><small>${tot.ore>tot.fatturabili?fmtNum(tot.ore-tot.fatturabili,1)+' h non fatturabili':'tutto fatturabile'}</small></div>
+        <div><span>Già fatturato</span><strong>${fmtNum(tot.fatturate,1)} h</strong><small>${fmtNum(Math.max(0,tot.fatturabili-tot.fatturate),1)} h da fatturare</small></div>
+      </div></div>
+    <div class="scrollGriglia"><table class="griglia prospetto">
+      <thead><tr><th class="riga">WBS</th><th>Consuntivato</th><th>Fatturabile</th><th>Fatturato</th><th>Budget</th><th>Scostamento</th></tr></thead>
+      <tbody>${righe.map(x=>`<tr>
+        <td class="riga"><div class="n">${esc(x.w.name)} ${statoTag(x.w.status)}</div>
+          <div class="d">${esc(x.lin.engagement?x.lin.engagement.code:'')} · ${esc(x.lin.project.name)}</div>
+          <div class="d wbsCode">${esc(x.w.code)}${x.w.billable?'':' · non fatturabile'}</div></td>
+        <td class="num">${fmtNum(x.ore,1)} h</td>
+        <td class="num">${x.w.billable?fmtNum(x.fatturabili,1)+' h':'—'}</td>
+        <td class="num">${x.fatturate>0?fmtNum(x.fatturate,1)+' h':'—'}</td>
+        <td class="num">${x.budget?fmtNum(x.budget,1)+' h':'—'}</td>
+        <td class="num${x.scostamento>0?' spicca':''}">${x.scostamento===null?'—':(x.scostamento>0?'+':'')+fmtNum(x.scostamento,1)+' h'}</td></tr>`).join('')
+        ||`<tr><td class="riga vuota" colspan="6">Nessun consuntivo nel periodo.</td></tr>`}</tbody>
+    </table></div>`);
+}
+// Il report economico: aggregato per cliente, commessa, progetto.
+// Nessuna WBS: non e' una dimensione del documento fiscale.
+function reportEconomico(){
+  if(!wbsReady())return migrazioneMancante('Report economico');
+  const r=repState();
+  const blocchi=(data.engagements||[]).filter(e=>!r.client_id||e.client_id===r.client_id)
+    .map(e=>{
+      const prj=projectsOfEngagement(e.id).map(p=>{
+        const pr=prospettoProgetto(p.id,r.dal,r.al);
+        const val=importoDaOre(e.client_id,pr.tot.fatturate);
+        const res=importoDaOre(e.client_id,pr.tot.daFatturare);
+        const spese=(data.travelExpenses||[]).filter(x=>x.project_id===p.id
+          && String(x.expense_date||'')>=r.dal && String(x.expense_date||'')<=r.al)
+          .reduce((t,x)=>t+Number(x.amount||0),0);
+        return {p,pr,val,res,spese};
+      }).filter(x=>x.pr.tot.consuntivate>0||x.spese>0);
+      if(!prj.length)return '';
+      const t=prj.reduce((a,x)=>({val:a.val+x.val,res:a.res+x.res,spese:a.spese+x.spese,
+        cons:a.cons+x.pr.tot.consuntivate,daF:a.daF+x.pr.tot.daFatturare}),{val:0,res:0,spese:0,cons:0,daF:0});
+      return `<div class="card"><b>${esc(e.code)} · ${esc(e.name)}</b>
+        <div class="desc" style="margin-top:2px">${esc(clientName(e.client_id))}${e.invoice_reference?' · '+esc(e.invoice_reference):''}</div>
+        <div class="scrollGriglia" style="margin-top:12px"><table class="griglia prospetto">
+          <thead><tr><th class="riga">Progetto</th><th>Consuntivato</th><th>Da fatturare</th><th>Fatturato</th><th>Residuo</th><th>Spese</th></tr></thead>
+          <tbody>${prj.map(x=>`<tr>
+            <td class="riga"><div class="n">${esc(x.p.name)}</div><div class="d wbsCode">${esc(x.p.code||'')}</div></td>
+            <td class="num">${fmtNum(x.pr.tot.consuntivate,1)} h</td>
+            <td class="num">${fmtNum(x.pr.tot.daFatturare,1)} h</td>
+            <td class="num">${fmtEUR(x.val)}</td>
+            <td class="num${x.res>0?' spicca':''}">${fmtEUR(x.res)}</td>
+            <td class="num">${x.spese?fmtEUR(x.spese):'—'}</td></tr>`).join('')}</tbody>
+          <tfoot><tr><td class="riga">Totale commessa</td>
+            <td class="num">${fmtNum(t.cons,1)} h</td><td class="num">${fmtNum(t.daF,1)} h</td>
+            <td class="num">${fmtEUR(t.val)}</td><td class="num spicca">${fmtEUR(t.res)}</td>
+            <td class="num">${t.spese?fmtEUR(t.spese):'—'}</td></tr></tfoot>
+        </table></div>
+        ${e.budget_amount?`<div class="metricLine" style="margin-top:10px"><span class="tag blue">Budget</span> ${fmtEUR(e.budget_amount)} <span class="dot">·</span> impegnato ${fmtEUR(t.val+t.res)}</div>`:''}
+      </div>`;
+    }).join('');
+  return appShell(`<h1>Report economico</h1>
+    <p class="sub">Aggregato per cliente, commessa e progetto: è il livello a cui si fattura. Il dettaglio per WBS sta nel report analitico.</p>
+    ${repFiltri()}
+    ${blocchi||'<div class="empty">Nessuna commessa con movimenti nel periodo.</div>'}`);
+}
+
+function render(){document.documentElement.setAttribute('data-view',state.view||'home');if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,newChoice,reportWbs,reportEconomico,fatturazioneCommessa,engagements,engagementNew,engagementEdit,engagementDetail,projectNew,projectWbs,wbsEdit,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,timesheet,griglia,pivot,summary,billing,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,incassi,balance,taxSettings,tasseFuture,fatturatoDetail,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
 
 Object.assign(window,{
+  setRep,
+  generaRigaFattura,
+  setFatt,toggleProgettoFatt,prospettoProgetto,
+  spostaWbs,
+  gridClienteCambiato,gridCommessaCambiata,gridProgettoCambiato,
+  hierChanged,refreshHierForForm,wbsLineage,hierAvailable,
+  normCode,wbsReady,engagementsOf,openEngagement,openProjectWbs,editWbs,setEngFilter,
+  previewEngCode,previewPrjCode,previewWbsCode,addEngagement,saveEngagement,addEngagementRef,
+  addProjectInEngagement,addWbs,saveWbs,deleteWbs,
   setGridScope,
   gridWeekShift,
   openGriglia,

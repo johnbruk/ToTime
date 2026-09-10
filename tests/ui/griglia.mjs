@@ -26,8 +26,11 @@ const cols=await pg.evaluate(()=>document.querySelectorAll('table.griglia thead 
 ok(cols===33,'31 giorni + commessa + totale = 33 colonne',String(cols));
 const rows=await pg.evaluate(()=>[...document.querySelectorAll('table.griglia tbody tr')].map(r=>r.querySelector('.riga .n')?.textContent.trim()));
 console.log('  righe:',JSON.stringify(rows));
-ok(rows.length===4,'due commesse + riga Assenze + riga Pianificato',String(rows.length));
-ok(rows.includes('Pianificato'),'il pianificato è una riga a parte, non mescolato');
+// Il pianificato non è più una riga a sé: sta nella commessa a cui
+// appartiene, come una casella qualunque.
+ok(rows.length===4,'tre commesse (compresa quella solo pianificata) + riga Assenze',String(rows.length));
+ok(!rows.includes('Pianificato'),'niente riga «Pianificato» separata',JSON.stringify(rows));
+ok(rows.filter(r=>r==='Equans').length===2,'il pianificato di Equans sta in una riga Equans',JSON.stringify(rows));
 
 console.log('\n=== B. Totali ===');
 const tot=await pg.evaluate(()=>({
@@ -36,9 +39,10 @@ const tot=await pg.evaluate(()=>({
   g14:[...document.querySelectorAll('tfoot td')].map(t=>t.textContent.trim())[14]
 }));
 console.log('  '+JSON.stringify(tot));
-ok(tot.righe[0]==='24','Equans/Beta: 8+8+4+4 = 24 h',tot.righe[0]);
-ok(tot.righe[1]==='6','Zeta: 6 h',tot.righe[1]);
-ok(tot.generale==='46','totale di piede 46 h: 30 lavorate + 16 di assenze; il pianificato resta fuori',tot.generale);
+ok(tot.righe.includes('24'),'Equans/Beta: 8+8+4+4 = 24 h',JSON.stringify(tot.righe));
+ok(tot.righe.includes('4'),'Equans/Alfa: le 4 h pianificate, nella loro commessa',JSON.stringify(tot.righe));
+ok(tot.righe.includes('6'),'Zeta: 6 h',JSON.stringify(tot.righe));
+ok(tot.generale==='50','totale di piede 50 h: 30 lavorate + 16 di assenze + 4 pianificate',tot.generale);
 
 console.log('\n=== C. Colori dei giorni ===');
 const cls=await pg.evaluate(()=>{
@@ -48,14 +52,36 @@ const cls=await pg.evaluate(()=>{
 });
 console.log('  '+JSON.stringify(cls));
 ok(/we/.test(cls.g4)&&/we/.test(cls.g5),'sabato e domenica marcati weekend');
-ok(/bloccata/.test(cls.g14),'la cella con due voci è bloccata');
+const multi=await pg.evaluate(()=>{const td=document.querySelector('td.gg.multi');
+  const i=td&&td.querySelector('input');
+  return td?{cls:td.className,giorno:i&&i.dataset.day,riga:i&&i.dataset.row,titolo:td.title,
+    input:!!i,valore:i&&i.value}:null});
+ok(multi&&/multi/.test(multi.cls),'la cella con due voci è segnalata',multi?multi.giorno:'non trovata');
 
-console.log('\n=== D. La cella con più voci non si può sovrascrivere ===');
-const locked=await pg.evaluate(()=>{const td=document.querySelector('td.gg.bloccata');return {input:!!td.querySelector('input'),btn:!!td.querySelector('.gCell'),txt:td.textContent.trim()}});
-ok(!locked.input&&locked.btn,'niente input: solo un collegamento al giorno',JSON.stringify(locked));
-await pg.evaluate(()=>document.querySelector('td.gg.bloccata .gCell').click());await pg.waitForTimeout(400);
-ok(/14\/07\/2026/.test(await pg.evaluate(()=>document.querySelector('h1')?.textContent||'')),'porta al dettaglio del giorno',await pg.evaluate(()=>document.querySelector('h1')?.textContent));
-await pg.evaluate(()=>window.go('griglia'));await pg.waitForTimeout(400);
+console.log('\n=== D. Ogni cella è modificabile, e il salvataggio allinea il database ===');
+ok(multi&&multi.input,'anche la cella con più voci è un campo scrivibile',JSON.stringify(multi));
+ok(multi&&/voci in questo giorno/.test(multi.titolo||''),'e avvisa che salvando diventeranno una voce sola',multi&&multi.titolo);
+ok(multi&&multi.valore==='8','mostra la somma delle voci del giorno',multi&&multi.valore);
+// nessuna cella deve restare di sola lettura
+const soleLettura=await pg.evaluate(()=>[...document.querySelectorAll('table.griglia tbody td.gg')]
+  .filter(td=>!td.querySelector('input')&&!td.closest('.assRiga')).length);
+ok(soleLettura===0,'nessuna casella di commessa è di sola lettura',soleLettura+' bloccate');
+
+// Il caso che contava: scrivere su una cella con più voci non deve
+// lasciare record doppi nel database.
+const giornoMulti=multi.giorno;
+const primaN=await pg.evaluate(d=>window.__stores.timesheet_entries.filter(e=>e.entry_date===d).length,giornoMulti);
+await pg.evaluate(d=>{const el=document.querySelector(`td.gg.multi input[data-day="${d}"]`);
+  el.value='5';el.dispatchEvent(new Event('input',{bubbles:true}))},giornoMulti);
+await pg.evaluate(()=>window.saveGrid());await pg.waitForTimeout(1000);
+const dopo=await pg.evaluate(d=>{const v=window.__stores.timesheet_entries.filter(e=>e.entry_date===d);
+  return {n:v.length,ore:v.reduce((t,e)=>t+Number(e.hours||0),0)}},giornoMulti);
+ok(primaN===2&&dopo.n===1,'le due voci del giorno diventano una sola',primaN+' → '+dopo.n+' voci');
+ok(dopo.ore===5,'e il database porta il valore scritto nella griglia',dopo.ore+' h');
+// nella riga giusta: più commesse hanno una casella per lo stesso giorno
+const inGriglia=await pg.evaluate(([d,k])=>
+  document.querySelector(`input[data-day="${d}"][data-row="${CSS.escape(k)}"]`)?.value,[giornoMulti,multi.riga]);
+ok(inGriglia==='5','la griglia mostra lo stesso valore del database',inGriglia+' h');
 
 console.log('\n=== E. Salvataggio: crea, modifica, cancella ===');
 const before=await pg.evaluate(()=>window.__stores.timesheet_entries.length);
@@ -175,8 +201,12 @@ ok(await pgw.evaluate(()=>getComputedStyle(document.querySelector('.settimanaNav
 ok(await pgw.evaluate(()=>{const t=[...document.querySelectorAll('.tot')][0];return /Mese/.test(t.textContent)}),'la colonna dei totali dice "Mese", perché conta più della settimana mostrata');
 const alt=await pgw.evaluate(()=>[...document.querySelectorAll('.grigliaCard .barra button')].map(b=>Math.round(b.getBoundingClientRect().height)));
 ok(new Set(alt).size===1&&alt[0]>=44,'i due pulsanti hanno la stessa altezza',JSON.stringify(alt));
-const selH=await pgw.evaluate(()=>[...document.querySelectorAll('.nuovaRiga select,.nuovaRiga button')].map(e=>Math.round(e.getBoundingClientRect().width)));
-ok(new Set(selH).size===1,'i selettori sono incolonnati e larghi uguale',JSON.stringify(selH));
+// solo le tendine visibili: una nascosta ha larghezza zero e non
+// dice niente sull'allineamento
+const selH=await pgw.evaluate(()=>[...document.querySelectorAll('.nuovaRiga select,.nuovaRiga button')]
+  .filter(e=>!e.hidden&&e.getBoundingClientRect().width>0)
+  .map(e=>Math.round(e.getBoundingClientRect().width)));
+ok(new Set(selH).size===1,'i selettori visibili sono incolonnati e larghi uguale',JSON.stringify(selH));
 
 await pgw.evaluate(()=>window.gridWeekShift(1));await pgw.waitForTimeout(400);
 const v2=await vis();

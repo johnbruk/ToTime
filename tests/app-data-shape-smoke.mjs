@@ -8,7 +8,11 @@ import {
 } from '../src/appDataShape.js';
 
 const empty = createEmptyAppData();
-assert.equal(APP_DATA_KEYS.length, 14);
+// Non un numero a mano, che invecchia a ogni tabella aggiunta: si
+// verifica che le chiavi siano uniche e che ci siano quelle attese.
+assert.equal(new Set(APP_DATA_KEYS).size, APP_DATA_KEYS.length, 'nessuna chiave ripetuta');
+['clients','projects','activities','entries','engagements','wbsItems','billingLines','invoiceAllocations']
+  .forEach(k => assert.ok(APP_DATA_KEYS.includes(k), `manca la chiave ${k}`));
 assert.equal(appDataHasExpectedShape(empty), true);
 assert.deepEqual(empty.clients, []);
 assert.deepEqual(empty.taxPayments, []);

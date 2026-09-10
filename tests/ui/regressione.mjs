@@ -94,10 +94,14 @@ ok(campi.data&&campi.cliente&&campi.ore,'il modulo del consuntivo giornaliero ha
 // Ferragosto e guardDay() chiede giustamente conferma, che qui
 // accettiamo comunque per non dipendere dal calendario.
 pg.on('dialog',d=>d.accept());
+// Deve essere un giorno feriale GIÀ TRASCORSO del mese in corso: una
+// voce datata domani l'app la conta — giustamente — come pianificata,
+// non come consuntivata, e le ore del mese non si muoverebbero.
 const oggi=await pg.evaluate(()=>{const d=new Date();
-  for(let g=10;g<=20;g++){const x=new Date(d.getFullYear(),d.getMonth(),g);
-    if(x.getDay()>=1&&x.getDay()<=5)return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(g).padStart(2,'0')}`}
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-10`});
+  for(let g=d.getDate();g>=1;g--){const x=new Date(d.getFullYear(),d.getMonth(),g);
+    if(x.getDay()>=1&&x.getDay()<=5)
+      return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(g).padStart(2,'0')}`}
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`});
 await pg.fill('[name="entry_date"]',oggi);
 await pg.fill('[name="hours"]','8');
 await pg.evaluate(()=>document.querySelector('form.form').requestSubmit());
@@ -107,7 +111,8 @@ ok(dopoArch===primaArch+1,'il consuntivo viene davvero salvato',primaArch+' → 
 const dopoRighe=await oreDi();
 ok(dopoRighe===primaRighe+1,'e compare una riga in più nel timesheet del mese',primaRighe+' → '+dopoRighe);
 const dopoTot=num(await leggi('home','.cardLink .kpiGrid strong'));
-ok(dopoTot>primaTot,'le ore del mese sono aumentate',primaTot+' → '+dopoTot);
+ok(dopoTot>primaTot,'le ore consuntivate del mese sono aumentate (giorno passato, non pianificato)',
+  primaTot+' → '+dopoTot+' h il '+oggi);
 // modifica
 await pg.evaluate(()=>window.go('timesheet'));await pg.waitForTimeout(300);
 const apribile=await pg.evaluate(()=>{
