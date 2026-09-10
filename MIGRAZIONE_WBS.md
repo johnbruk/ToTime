@@ -90,6 +90,55 @@ Confronta le due fotografie:
 - la sezione B deve essere passata da `n/d` a dei numeri;
 - la sezione C dice quanto resta da sistemare a mano.
 
+## Passo 6 — il completamento
+
+```
+migrations/2026-09-10_completamento.sql
+```
+
+Un solo script che chiude quello che resta. Ogni passo controlla prima
+se serve, quindi si può rilanciare quante volte si vuole e non c'è da
+ricordarsi cosa era già stato eseguito. Fa tre cose:
+
+1. **le policy segnalate dal Performance Advisor** — `auth.uid()`
+   valutato una volta per query invece che una volta per riga, sulle
+   sei tabelle nuove;
+2. **la bonifica delle spese** — per ogni progetto che ha spese ancora
+   scollegate crea una WBS `90 · Trasferte e spese`, non fatturabile, e
+   ci aggancia le spese. Nessun altro campo delle spese viene toccato;
+3. **l'obbligo della WBS** sulle nuove registrazioni.
+
+Sull'obbligo vale la pena spendere due righe, perché la scelta ovvia
+sarebbe stata quella sbagliata. Un `not null` sulla colonna `wbs_id`
+avrebbe reso impossibile registrare per un cliente che non ha ancora
+commesse: il giorno che ne aggiungi uno nuovo, l'app avrebbe smesso di
+funzionare finché non gli avessi aperto una commessa. La regola giusta
+è più precisa, ed è quella implementata: **se il cliente ha delle
+commesse la WBS è obbligatoria; se non ne ha, si registra come si è
+sempre fatto.** Le spese restano fuori dall'obbligo, perché lì la WBS
+serve all'analisi e una spesa può nascere prima di sapere su che
+attività vada imputata.
+
+Alla fine lo script stampa quattro righe di esito:
+
+| controllo | atteso |
+| --- | --- |
+| policy che rivalutano `auth.uid()` per riga | `0` |
+| spese ancora senza WBS | `0`, se tutte hanno un progetto |
+| consuntivi ancora senza WBS | quelli senza progetto restano da sistemare a mano |
+| obbligo WBS attivo | `2` |
+
+Restano due cose fuori da questo script:
+
+- `2026-09-10_advisor-fix-3-rls-tabelle-storiche.sql` — la stessa
+  correzione di policy sulle 14 tabelle preesistenti. È **facoltativa**:
+  tocca tabelle che oggi funzionano, e il guadagno è di prestazioni,
+  non di sicurezza. Da lanciare quando hai tempo di ricontrollare l'app
+  dopo.
+- **Leaked password protection**, da attivare a mano in Supabase:
+  *Authentication → Providers → Email*. È l'unica segnalazione degli
+  advisor che non si chiude da SQL.
+
 ## Se qualcosa va storto
 
 ```
@@ -114,12 +163,22 @@ Provato su PostgreSQL 16 in locale, ricostruendo lo schema di TOTIME:
 - ciclo completo migrazione → backfill → rollback → backfill, con i
   dati originali verificati identici a ogni giro tramite impronte del
   contenuto, non solo conteggi;
-- 34 controlli sul modello, compreso l'isolamento fra due utenti;
+- 39 controlli sul modello, compreso l'isolamento fra due utenti e i
+  cinque sull'obbligo della WBS, che provano tanto il divieto quanto
+  l'eccezione;
 - venti creazioni di commessa in parallelo: venti codici distinti,
-  nessun buco e nessun duplicato.
+  nessun buco e nessun duplicato;
+- `completamento.sql` rilanciato su un database dove il trigger di
+  coerenza delle spese era stato tolto: arriva in fondo lo stesso.
+
+Lato applicazione, 259 controlli di interfaccia su Chromium: griglia,
+grafico, assenze, funzionamento offline, regressione, WBS e
+fatturazione per commessa.
 
 **Non provato**, perché non ho accesso al progetto Supabase:
 
-- gli advisor `database` e `security` di Supabase;
 - il comportamento sui dati veri;
 - i tempi di esecuzione sul volume reale.
+
+Gli advisor `database` e `security` li hai lanciati tu: le correzioni
+di questo pacchetto nascono da quei risultati, non da una mia ipotesi.

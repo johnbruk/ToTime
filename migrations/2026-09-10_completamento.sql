@@ -56,11 +56,22 @@ begin
   end loop;
 end $$;
 
-alter table public.travel_expenses disable trigger travel_expenses_wbs_trg;
-update public.travel_expenses x set wbs_id = w.id
-from public.wbs_items w
-where x.wbs_id is null and w.project_id = x.project_id and w.kind = 'travel';
-alter table public.travel_expenses enable trigger travel_expenses_wbs_trg;
+-- Il collegamento va fatto con il controllo di coerenza disattivato:
+-- il trigger rifiuta gli aggiornamenti massivi anche quando la WBS e'
+-- quella giusta. Se il trigger non c'e' (migrazione principale non
+-- ancora lanciata) il blocco si limita a saltare la disattivazione,
+-- invece di interrompere tutto lo script.
+do $$
+declare v_trg boolean := exists(
+  select 1 from pg_trigger t join pg_class c on c.oid = t.tgrelid
+  where c.relname = 'travel_expenses' and t.tgname = 'travel_expenses_wbs_trg');
+begin
+  if v_trg then alter table public.travel_expenses disable trigger travel_expenses_wbs_trg; end if;
+  update public.travel_expenses x set wbs_id = w.id
+  from public.wbs_items w
+  where x.wbs_id is null and w.project_id = x.project_id and w.kind = 'travel';
+  if v_trg then alter table public.travel_expenses enable trigger travel_expenses_wbs_trg; end if;
+end $$;
 
 -- ------------------------------------------------------------
 -- 3. La WBS diventa obbligatoria — ma non con un NOT NULL.
