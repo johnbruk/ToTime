@@ -21,9 +21,9 @@ do $$
 declare u1 uuid := '11111111-1111-1111-1111-111111111111'; c uuid; e uuid; p uuid; w uuid;
 begin
   insert into public.clients(user_id,name,code) values (u1,'Solution','SO') returning id into c;
-  insert into public.engagements(user_id,client_id,year,name) values (u1,c,2026,'Incarico') returning id into e;
-  insert into public.projects(user_id,client_id,engagement_id,short_code,name) values (u1,c,e,'EQU','EQUANS') returning id into p;
-  insert into public.wbs_items(user_id,project_id,activity_code,name) values (u1,p,'10','PM') returning id into w;
+  insert into public.projects(user_id,client_id,short_code,name) values (u1,c,'EQU','EQUANS') returning id into p;
+  insert into public.engagements(user_id,client_id,project_id,year,name) values (u1,c,p,2026,'Incarico') returning id into e;
+  insert into public.wbs_items(user_id,engagement_id,activity_code,name) values (u1,e,'10','PM') returning id into w;
   raise notice '  (utente 1 ha creato cliente, commessa, progetto e WBS)';
 end $$;
 
