@@ -43,8 +43,9 @@ console.log('\n=== A. Dal modulo nuovo si prosegue al giorno dopo ===');
 await pg.evaluate(()=>window.go('dailyForm'));await pg.waitForTimeout(450);
 ok(await pg.$('button:has-text("Salva e vai al giorno dopo")')!==null,'il pulsante c\'è');
 await pg.evaluate(d=>{const f=document.querySelector('#app form.form');f.entry_date.value=d;},g(2));
-await pg.selectOption('[name="hier_project_id"]','p1');await pg.waitForTimeout(250);
-await pg.selectOption('[name="engagement_id"]','e1');await pg.waitForTimeout(250);
+// scelto il progetto, la commessa si sceglie da se': e' l'unica, e il
+// suo menu non e' nemmeno visibile
+await pg.selectOption('[name="hier_project_id"]','p1');await pg.waitForTimeout(300);
 await pg.evaluate(()=>{const f=document.querySelector('#app form.form');f.hours.value='6';f.work_city.value='Milano'});
 const prima=await conta();
 await pg.evaluate(()=>[...document.querySelectorAll('#app button')].find(x=>/Salva e vai al giorno dopo/.test(x.textContent)).click());
@@ -70,8 +71,9 @@ ok(voci.filter(d=>[g(2),g(3),g(4)].includes(d)).length===3,'e i tre giorni sono 
 console.log('\n=== C. Se il giorno accanto e\' gia\' consuntivato, lo si apre ===');
 await pg.evaluate(()=>window.go('dailyForm'));await pg.waitForTimeout(450);
 await pg.evaluate(d=>{document.querySelector('#app form.form').entry_date.value=d},g(8));
-await pg.selectOption('[name="hier_project_id"]','p1');await pg.waitForTimeout(250);
-await pg.selectOption('[name="engagement_id"]','e1');await pg.waitForTimeout(250);
+// scelto il progetto, la commessa si sceglie da se': e' l'unica, e il
+// suo menu non e' nemmeno visibile
+await pg.selectOption('[name="hier_project_id"]','p1');await pg.waitForTimeout(300);
 const prima2=await conta();
 await pg.evaluate(()=>[...document.querySelectorAll('#app button')].find(x=>/Salva e vai al giorno dopo/.test(x.textContent)).click());
 await pg.waitForTimeout(900);

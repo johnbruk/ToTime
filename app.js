@@ -1843,7 +1843,7 @@ function clientDetail(){
           <div class="desc">${esc(p.name)}${p.end_client_name?' · cliente finale '+esc(p.end_client_name):''}</div>
           <div class="desc">${eng.length===1?'1 commessa':eng.length+' commesse'} · ${att===1?'1 attività':att+' attività'}</div></div>
         <div class="chev">›</div></div>`}).join('')||'<div class="empty">Nessun progetto. Creane uno: è il passo prima della commessa.</div>'}</div>
-    ${c.code?`<button type="button" class="primary cta" onclick="nuovoProgettoDi('${c.id}')">+ Nuovo progetto / cliente finale</button>`:''}
+    <button type="button" class="primary cta" onclick="${c.code?`nuovoProgettoDi('${c.id}')`:`editClient('${c.id}')`}">+ Nuovo progetto / cliente finale</button>
     <div class="actions" style="margin-top:18px">
       <button type="button" class="secondary" onclick="editClient('${c.id}')">Modifica dati del cliente</button>
       <button type="button" class="secondary" onclick="go('clients')">Torna ai clienti</button></div>`);
@@ -1933,51 +1933,63 @@ function wbsLineage(wbsId){
   return {wbs:w,project:p,engagement:e,client_id:p.client_id};
 }
 // I tre menu a tendina della gerarchia, per i moduli di consuntivo
+// Un livello con una sola scelta non e' una scelta: si sceglie da se'
+// e non compare. Per chi ha un cliente, un progetto e una commessa il
+// modulo torna a essere quello di sempre — cliente e ore — e la
+// gerarchia resta sotto, senza chiedere niente.
+function soloUno(lista){return lista.length===1?lista[0].id:''}
+function apertiPrj(clientId){return projectsOfClient(clientId).filter(p=>!p.status||STATI_APERTI.includes(p.status))}
+function apertiEng(projId){return engagementsOfProject(projId).filter(e=>STATI_APERTI.includes(e.status))}
 function hierFields(clientId,wbsId){
   const lin=wbsId?wbsLineage(wbsId):null;
-  const prjSel=lin?lin.project.id:'';
-  const engSel=lin&&lin.engagement?lin.engagement.id:'';
-  return `<div class="field"><label>Progetto / cliente finale</label>
+  const prjList=apertiPrj(clientId);
+  const prjSel=lin?lin.project.id:soloUno(prjList);
+  const engList=prjSel?apertiEng(prjSel):[];
+  const engSel=lin&&lin.engagement?lin.engagement.id:soloUno(engList);
+  const wList=engSel?wbsAperte(engSel):[];
+  const wSel=wbsId||soloUno(wList);
+  return `<div class="field" id="prjField" ${prjList.length<2?'hidden':''}><label>Progetto / cliente finale</label>
       <select name="hier_project_id" onchange="hierChanged(this.form,'project')">${projectOptionsOfClient(clientId,prjSel)}</select></div>
-    <div class="field"><label>Commessa</label>
+    <div class="field" id="engField" ${engList.length<2?'hidden':''}><label>Commessa</label>
       <select name="engagement_id" onchange="hierChanged(this.form,'engagement')">${prjSel?engagementOptionsOfProject(prjSel,engSel):'<option value="">— prima scegli il progetto —</option>'}</select></div>
-    <div class="field" id="wbsField" ${engSel&&!wbsDaScegliere(engSel)?'hidden':''}><label>Attività</label>
-      <select name="wbs_id" onchange="hierChanged(this.form,'wbs')">${engSel?wbsOptions(engSel,wbsId||''):'<option value="">— prima scegli la commessa —</option>'}</select></div>
-    <div class="small" id="wbsHint">${lin?esc(lin.wbs.code)+(lin.wbs.billable?'':' · non fatturabile'):'Le ore si registrano sulla commessa. In fattura confluiscono nel progetto.'}</div>`;
+    <div class="field" id="wbsField" ${wList.length<2?'hidden':''}><label>Attività</label>
+      <select name="wbs_id" onchange="hierChanged(this.form,'wbs')">${engSel?wbsOptions(engSel,wSel):'<option value="">— prima scegli la commessa —</option>'}</select></div>
+    <div class="small" id="wbsHint">${wSel&&wbsById(wSel)?esc(wbsById(wSel).code)+(wbsById(wSel).billable?'':' · non fatturabile'):'Le ore si registrano sulla commessa. In fattura confluiscono nel progetto.'}</div>`;
 }
 function hierChanged(form,livello){
   if(!form)return;
+  const mostra=(id,cond)=>{const el=document.getElementById(id);if(el)el.hidden=!cond};
   if(livello==='client'){
     const cli=form.client_id?form.client_id.value:'';
-    if(form.hier_project_id)form.hier_project_id.innerHTML=projectOptionsOfClient(cli,'');
-    if(form.engagement_id)form.engagement_id.innerHTML='<option value="">— prima scegli il progetto —</option>';
-    if(form.wbs_id)form.wbs_id.innerHTML='<option value="">— prima scegli la commessa —</option>';
+    const prj=apertiPrj(cli);
+    if(form.hier_project_id){form.hier_project_id.innerHTML=projectOptionsOfClient(cli,'');
+      if(prj.length===1)form.hier_project_id.value=prj[0].id;}
+    mostra('prjField',prj.length>1);
+    livello='project';
   }
   if(livello==='project'){
-    const prj=form.hier_project_id?form.hier_project_id.value:'';
-    if(form.engagement_id)form.engagement_id.innerHTML=prj?engagementOptionsOfProject(prj,''):'<option value="">— prima scegli il progetto —</option>';
-    if(form.wbs_id)form.wbs_id.innerHTML='<option value="">— prima scegli la commessa —</option>';
+    const prjId=form.hier_project_id?form.hier_project_id.value:'';
+    const eng=prjId?apertiEng(prjId):[];
+    if(form.engagement_id){form.engagement_id.innerHTML=prjId?engagementOptionsOfProject(prjId,''):'<option value="">— prima scegli il progetto —</option>';
+      if(eng.length===1)form.engagement_id.value=eng[0].id;}
+    mostra('engField',eng.length>1);
+    livello='engagement';
   }
   if(livello==='engagement'){
-    const eng=form.engagement_id?form.engagement_id.value:'';
-    if(form.wbs_id)form.wbs_id.innerHTML=eng?wbsOptions(eng,''):'<option value="">— prima scegli la commessa —</option>';
-    // una commessa con una voce sola non si chiede: la si sceglie da se'
-    const sola=eng?wbsUnica(eng):null;
-    if(sola&&form.wbs_id)form.wbs_id.value=sola.id;
-    const campo=document.getElementById('wbsField');
-    if(campo)campo.hidden=!!sola||!eng;
+    const engId=form.engagement_id?form.engagement_id.value:'';
+    const w=engId?wbsAperte(engId):[];
+    if(form.wbs_id){form.wbs_id.innerHTML=engId?wbsOptions(engId,''):'<option value="">— prima scegli la commessa —</option>';
+      if(w.length===1)form.wbs_id.value=w[0].id;}
+    mostra('wbsField',w.length>1);
   }
   const hint=document.getElementById('wbsHint');
   if(hint){
     const w=form.wbs_id&&form.wbs_id.value?wbsById(form.wbs_id.value):null;
     hint.textContent=w?(w.code+(w.billable?'':' · non fatturabile')):
-      'Le ore si registrano sulla WBS. In fattura confluiscono nel progetto.';
+      'Le ore si registrano sulla commessa. In fattura confluiscono nel progetto.';
   }
-  // il progetto "vecchio" resta allineato, cosi' il resto dell'app
-  // continua a leggere quello che ha sempre letto
-  if(form.project_id&&form.hier_project_id&&form.hier_project_id.value)
-    form.project_id.value=form.hier_project_id.value;
 }
+
 // Quando si sceglie il cliente, si rifanno commessa/progetto/WBS
 function refreshHierForForm(form){
   if(!form||!form.hier_project_id)return;
