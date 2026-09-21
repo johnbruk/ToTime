@@ -247,6 +247,9 @@ table.griglia thead .riga{background:var(--surface2);z-index:3;white-space:norma
 /* i codici sono parole lunghe senza spazi: se non le si lascia
    spezzare allargano la colonna e la griglia smette di starci */
 table.griglia .riga .d,table.griglia .riga .wbsCode{overflow-wrap:anywhere}
+/* l'attivita' e' cio' che distingue una riga dall'altra quando
+   cliente e progetto si ripetono: non deve sparire fra le note */
+table.griglia .riga .attivita{color:var(--soft);font-weight:600}
 table.griglia .riga .n{font-weight:750;font-size:14px;letter-spacing:-.1px}
 table.griglia .riga .d{color:var(--muted);font-size:12px;margin-top:2px}
 table.griglia .riga.vuota{color:var(--muted);font-weight:400;text-align:center;padding:24px;min-width:0}

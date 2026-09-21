@@ -1913,9 +1913,9 @@ function refreshHierForForm(form){
 /* ---------- La griglia ragiona per WBS quando c'e' ----------
    La riga mostra la commessa, non solo cliente e progetto: era
    l'informazione che mancava per capire su cosa si sta lavorando. */
-// Quello che si legge per primo sono i nomi — cliente, progetto,
-// attivita' — non i codici. Il codice resta, in fondo e in sordina:
-// serve quando si fattura, non quando si consuntiva.
+// Si legge dall'alto nell'ordine della gerarchia: prima il cliente,
+// poi il progetto, poi l'attivita' svolta. Il codice resta in fondo e
+// in sordina: serve quando si fattura, non quando si consuntiva.
 function gridRigaEtichetta(r){
   const w=r.wbs_id?wbsById(r.wbs_id):null;
   if(w){
@@ -1923,8 +1923,8 @@ function gridRigaEtichetta(r){
     const cliente=lin?clientName(lin.client_id):'';
     const progetto=lin?lin.project.name:'';
     const commessa=lin&&lin.engagement?lin.engagement.name:'';
-    return `<div class="n">${esc(w.name)}</div>
-      <div class="d">${[cliente,progetto].filter(Boolean).map(esc).join(' › ')}</div>
+    return `<div class="n">${[cliente,progetto].filter(Boolean).map(esc).join(' › ')||esc(w.name)}</div>
+      <div class="d attivita">${esc(w.name)}</div>
       <div class="d wbsCode">${commessa?esc(commessa)+' · ':''}${esc(w.code)}${w.billable?'':' · non fatturabile'}</div>`;
   }
   return `<div class="n">${esc(clientName(r.client_id)||'Senza cliente')}</div>

@@ -130,11 +130,11 @@ console.log('\n=== F. Nella griglia si leggono i nomi, non i codici ===');
 await pg.evaluate(()=>window.go('griglia'));await pg.waitForTimeout(700);
 const riga=await pg.evaluate(()=>{const t=document.querySelector('table.griglia tbody td.riga');
   return t?{n:t.querySelector('.n')?.textContent.trim()||'',
-            d:t.querySelector('.d')?.textContent.trim()||'',
+            d:t.querySelector('.attivita')?.textContent.trim()||'',
             cod:t.querySelector('.wbsCode')?.textContent.trim()||''}:null;});
-ok(riga&&riga.n&&!/^[A-Z]{2,5}-/.test(riga.n),'in cima alla riga c\'è il nome dell\'attività, non un codice',
+ok(riga&&/›/.test(riga.n),'in cima ci sono cliente e progetto, nell\'ordine della gerarchia',
   riga?riga.n:'nessuna riga');
-ok(riga&&/›/.test(riga.d),'sotto ci sono cliente e progetto',riga?riga.d:'');
+ok(riga&&riga.d&&!/^[A-Z]{2,5}-/.test(riga.d),'sotto l\'attività svolta, per nome e non per codice',riga?riga.d:'');
 ok(riga&&/-\d{4}-\d{3}-/.test(riga.cod),'e il codice resta, ma in fondo e in sordina',riga?riga.cod:'');
 
 ok(errs.length===0,'nessun errore JS in tutta la discesa',errs.slice(0,2).join(' | ')||'nessuno');
