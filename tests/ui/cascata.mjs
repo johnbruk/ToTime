@@ -12,7 +12,9 @@ const EXTRA=`
                {id:'e2',user_id:'u1',client_id:'c1',project_id:'p1',code:'SO-EQU-2027-001',year:2027,seq:1,name:'Contratto 2027',status:'active'}],
   engagement_references:[],
   wbs_items:[
-    {id:'w10',user_id:'u1',engagement_id:'e1',activity_code:'10',code:'SO-EQU-2026-001-10',name:'Project Management',kind:'project_management',billable:true,status:'active',sort_order:10}],
+    {id:'w10',user_id:'u1',engagement_id:'e1',activity_code:'10',code:'SO-EQU-2026-001-10',name:'Project Management',kind:'project_management',billable:true,status:'active',sort_order:10},
+    {id:'w21',user_id:'u1',engagement_id:'e2',activity_code:'10',code:'SO-EQU-2027-001-10',name:'Incident',kind:'activity',billable:true,status:'active',sort_order:10},
+    {id:'w22',user_id:'u1',engagement_id:'e2',activity_code:'20',code:'SO-EQU-2027-001-20',name:'Progetti',kind:'activity',billable:true,status:'active',sort_order:20}],
   billing_lines:[],invoice_line_allocations:[],`;
 const srv=http.createServer((q,s)=>{let p=decodeURIComponent(q.url.split('?')[0]);if(p==='/')p='/index.html';
   fs.readFile(path.join(ROOT,p),(e,b)=>{if(e){s.writeHead(404);s.end('x');return;}
@@ -65,7 +67,8 @@ ok(await vista()==='engagementDetail','dalla commessa si apre la sua scheda',awa
 t=await testo();
 ok(/Attività/.test(t),'la scheda commessa elenca le sue attività');
 ok(/Project Management/.test(t)&&/SO-EQU-2026-001-10/.test(t),'con descrizione e codice completo');
-ok(/\+ Nuova attività/i.test(t),'e da qui si aggiunge un\'attività');
+ok(/Dividi in più attività/i.test(t),'e spezzarla in più voci resta possibile, ma è facoltativo');
+ok(/Su cosa si registra/.test(t),'una commessa con una voce sola non si presenta come un elenco da gestire');
 
 console.log('\n=== B. Le attività restano un elenco unico, slegato dalla commessa ===');
 await pg.evaluate(()=>{const d=document.querySelector('#app details.moreFields');if(d)d.open=true});
@@ -134,8 +137,25 @@ const riga=await pg.evaluate(()=>{const t=document.querySelector('table.griglia 
             cod:t.querySelector('.wbsCode')?.textContent.trim()||''}:null;});
 ok(riga&&/›/.test(riga.n),'in cima ci sono cliente e progetto, nell\'ordine della gerarchia',
   riga?riga.n:'nessuna riga');
-ok(riga&&riga.d&&!/^[A-Z]{2,5}-/.test(riga.d),'sotto l\'attività svolta, per nome e non per codice',riga?riga.d:'');
+ok(riga&&!riga.d,'dove la voce è una sola non se ne parla: sarebbe rumore uguale per tutte le righe',
+  riga?(riga.d||'(assente, giusto)'):'');
 ok(riga&&/-\d{4}-\d{3}-/.test(riga.cod),'e il codice resta, ma in fondo e in sordina',riga?riga.cod:'');
+
+console.log('\n=== G. La voce si chiede solo dove ce n\'e\' piu\' d\'una ===');
+await pg.evaluate(()=>window.go('dailyForm'));await pg.waitForTimeout(400);
+const scegli=async(nome,val)=>{await pg.selectOption(`[name="${nome}"]`,val);await pg.waitForTimeout(250)};
+await scegli('hier_project_id','p1');
+await scegli('engagement_id','e1');          // commessa con UNA voce
+let vis=await pg.evaluate(()=>{const f=document.getElementById('wbsField');
+  return {nascosto:f?f.hidden:null,valore:document.querySelector('[name="wbs_id"]')?.value||''}});
+ok(vis.nascosto===true,'con una voce sola il menu Attività non compare',JSON.stringify(vis));
+ok(vis.valore==='w10','e la voce è già scelta, senza chiedere niente',vis.valore||'vuoto');
+
+await scegli('engagement_id','e2');          // commessa con DUE voci
+vis=await pg.evaluate(()=>{const f=document.getElementById('wbsField');
+  return {nascosto:f?f.hidden:null,opzioni:[...document.querySelectorAll('[name="wbs_id"] option')].map(o=>o.value).filter(Boolean)}});
+ok(vis.nascosto===false,'con due voci il menu torna',JSON.stringify(vis));
+ok(vis.opzioni.length===2,'e le elenca entrambe',vis.opzioni.join(' '));
 
 ok(errs.length===0,'nessun errore JS in tutta la discesa',errs.slice(0,2).join(' | ')||'nessuno');
 await pg.close();

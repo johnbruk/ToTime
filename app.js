@@ -919,7 +919,7 @@ function addGridRow(){
   // dove il cliente ha delle commesse, la WBS e' obbligatoria: e'
   // quella che dice su cosa si sta lavorando
   if(wbsReady()&&engagementsOf(c).length&&!w)
-    return setMsg('Scegli commessa, progetto e WBS.',5000);
+    return setMsg('Scegli progetto e commessa.',5000);
   const lin=w?wbsLineage(w):null;
   const k=w?('w|'+w):[c,p,a].join('|');
   state.gridNew=state.gridNew||[];
@@ -1394,6 +1394,12 @@ function versoNuovo(){
 }
 function engagementById(id){return (data.engagements||[]).find(e=>e.id===id)}
 function engagementsOf(clientId){return (data.engagements||[]).filter(e=>e.client_id===clientId)}
+// Una commessa nasce con una WBS sola, che l'app crea da se'. Chi
+// vuole spezzare il lavoro in piu' voci puo' farlo, ma non e' il
+// percorso normale: dove la WBS e' una sola l'app non la nomina
+// nemmeno, e si registra su cliente, progetto e commessa.
+function wbsUnica(engId){const l=wbsOfEngagement(engId);return l.length===1?l[0]:null}
+function wbsDaScegliere(engId){return wbsOfEngagement(engId).length>1}
 // Il verso: Cliente > Progetto (cliente finale) > Commessa > Attivita'.
 // Il progetto e' l'entita' che dura, e sotto ci si appendono le
 // commesse man mano: contratto 2026, contratto 2027, ordini distinti.
@@ -1506,9 +1512,10 @@ function engagementDetail(){
       </div>
       <button type="button" class="secondary" style="margin-top:12px" onclick="navigateTo('engagementEdit',{edit:'${e.id}'})">Modifica commessa</button>
     </div>
-    <h2>Attività</h2>
-    <p class="sub">Le ore si registrano sull'attività. In fattura confluiscono tutte in una riga sola di progetto.
-    Codici a decine — 10, 20, 30… — così puoi inserire una 15 in mezzo senza rinumerare niente.</p>
+    <h2>${ws.length>1?'Attività':'Su cosa si registra'}</h2>
+    <p class="sub">${ws.length>1
+      ? `Le ore si registrano sull'attività. In fattura confluiscono tutte in una riga sola di progetto. Codici a decine — 10, 20, 30… — così puoi inserire una 15 in mezzo senza rinumerare niente.`
+      : `Questa commessa ha una voce sola: registri qui sopra senza dover scegliere niente. Se un giorno ti serve separare il lavoro — per esempio incident e progetti — puoi aggiungere altre voci qui sotto.`}</p>
     <div class="list">${ws.map(w=>{
       const ore=oreDi(w);const u=wbsUsage(w.id);
       return `<div class="row" onclick="editWbs('${w.id}')">
@@ -1517,7 +1524,7 @@ function engagementDetail(){
           <div class="desc">${esc(w.code)} · ${TIPI_WBS[w.kind]||w.kind}</div>
           <div class="desc">${fmtNum(ore,1)} h consuntivate${w.budget_hours?' su '+fmtNum(w.budget_hours,1)+' h di budget':''}${u.tot?' · '+u.tot+' registrazion'+(u.tot===1?'e':'i'):''}</div></div>
         <div class="chev">›</div></div>`}).join('')||'<div class="empty">Nessuna attività. Aggiungine una qui sotto.</div>'}</div>
-    <details class="moreFields" ${ws.length?'':'open'}><summary>+ Nuova attività</summary>
+    <details class="moreFields" ${ws.length?'':'open'}><summary>${ws.length?'Dividi in più attività (facoltativo)':'+ Aggiungi la voce su cui registrare'}</summary>
       <form class="form" onsubmit="addWbs(event)" style="margin-top:10px">
         <div class="field"><label>Codice attività</label>
           <input name="activity_code" maxlength="6" value="${String((ws.length+1)*10)}" oninput="this.value=normCode(this.value);previewWbsCode()">
@@ -1679,8 +1686,19 @@ async function addEngagement(ev){
     budget_amount:f.budget_amount?Number(f.budget_amount):null,status:f.status||"active",notes:norm(f.notes)||null};
   const {error}=await insertResilient("engagements",payload);
   if(error)return setMsg(messaggioCommessa(error),8000);
-  await reload();navigateTo("projectDetail",{edit:f.project_id});
-  setMsg("Commessa creata. Ora aggiungici le attività.",4000);
+  await reload();
+  // La commessa nasce gia' con la sua WBS: e' quella su cui si
+  // registra. Spezzarla in piu' voci resta possibile, ma nessuno deve
+  // essere costretto a farlo per poter consuntivare.
+  const nuova=(data.engagements||[]).find(x=>x.project_id===f.project_id
+    && String(x.year)===String(payload.year) && !wbsOfEngagement(x.id).length);
+  if(nuova){
+    await insertResilient("wbs_items",{engagement_id:nuova.id,activity_code:"10",
+      name:prj?prj.name:norm(f.name),kind:"activity",billable:true,status:"active",sort_order:10});
+    await reload();
+  }
+  navigateTo("projectDetail",{edit:f.project_id});
+  setMsg("Commessa creata: puoi già registrarci sopra.",4000);
 }
 async function saveEngagement(ev){
   ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));
@@ -1871,9 +1889,9 @@ function hierFields(clientId,wbsId){
       <select name="hier_project_id" onchange="hierChanged(this.form,'project')">${projectOptionsOfClient(clientId,prjSel)}</select></div>
     <div class="field"><label>Commessa</label>
       <select name="engagement_id" onchange="hierChanged(this.form,'engagement')">${prjSel?engagementOptionsOfProject(prjSel,engSel):'<option value="">— prima scegli il progetto —</option>'}</select></div>
-    <div class="field"><label>Attività</label>
-      <select name="wbs_id" onchange="hierChanged(this.form,'wbs')">${engSel?wbsOptions(engSel,wbsId||''):'<option value="">— prima scegli la commessa —</option>'}</select>
-      <div class="small" id="wbsHint">${lin?esc(lin.wbs.code)+(lin.wbs.billable?'':' · non fatturabile'):'Le ore si registrano sulla WBS. In fattura confluiscono nel progetto.'}</div></div>`;
+    <div class="field" id="wbsField" ${engSel&&!wbsDaScegliere(engSel)?'hidden':''}><label>Attività</label>
+      <select name="wbs_id" onchange="hierChanged(this.form,'wbs')">${engSel?wbsOptions(engSel,wbsId||''):'<option value="">— prima scegli la commessa —</option>'}</select></div>
+    <div class="small" id="wbsHint">${lin?esc(lin.wbs.code)+(lin.wbs.billable?'':' · non fatturabile'):'Le ore si registrano sulla commessa. In fattura confluiscono nel progetto.'}</div>`;
 }
 function hierChanged(form,livello){
   if(!form)return;
@@ -1891,6 +1909,11 @@ function hierChanged(form,livello){
   if(livello==='engagement'){
     const eng=form.engagement_id?form.engagement_id.value:'';
     if(form.wbs_id)form.wbs_id.innerHTML=eng?wbsOptions(eng,''):'<option value="">— prima scegli la commessa —</option>';
+    // una commessa con una voce sola non si chiede: la si sceglie da se'
+    const sola=eng?wbsUnica(eng):null;
+    if(sola&&form.wbs_id)form.wbs_id.value=sola.id;
+    const campo=document.getElementById('wbsField');
+    if(campo)campo.hidden=!!sola||!eng;
   }
   const hint=document.getElementById('wbsHint');
   if(hint){
@@ -1922,10 +1945,12 @@ function gridRigaEtichetta(r){
     const lin=wbsLineage(w.id);
     const cliente=lin?clientName(lin.client_id):'';
     const progetto=lin?lin.project.name:'';
-    const commessa=lin&&lin.engagement?lin.engagement.name:'';
+    // l'attivita' si nomina solo dove ce n'e' piu' d'una: dove la WBS
+    // e' unica sarebbe una riga di rumore uguale per tutti
+    const piuAttivita=lin&&lin.engagement?wbsDaScegliere(lin.engagement.id):false;
     return `<div class="n">${[cliente,progetto].filter(Boolean).map(esc).join(' › ')||esc(w.name)}</div>
-      <div class="d attivita">${esc(w.name)}</div>
-      <div class="d wbsCode">${commessa?esc(commessa)+' · ':''}${esc(w.code)}${w.billable?'':' · non fatturabile'}</div>`;
+      ${piuAttivita?`<div class="d attivita">${esc(w.name)}</div>`:''}
+      <div class="d wbsCode">${esc(w.code)}${w.billable?'':' · non fatturabile'}</div>`;
   }
   return `<div class="n">${esc(clientName(r.client_id)||'Senza cliente')}</div>
     <div class="d">${esc(projectName(r.project_id)||'Senza progetto')} · ${esc(activityName(r.activity_id)||'Senza attività')}</div>`;
@@ -1958,7 +1983,13 @@ function gridProgettoCambiato(){
 function gridCommessaCambiata(){
   const e=document.getElementById('g-commessa').value;
   const w=document.getElementById('g-wbs');
-  if(w)w.innerHTML=e?wbsOptions(e,''):'<option value="">— prima scegli la commessa —</option>';
+  if(!w)return;
+  w.innerHTML=e?wbsOptions(e,''):'<option value="">— prima scegli la commessa —</option>';
+  // dove la commessa ha una voce sola non la si sceglie: il menu
+  // sparisce e la riga si aggiunge con cliente, progetto e commessa
+  const sola=e?wbsUnica(e):null;
+  if(sola)w.value=sola.id;
+  w.hidden=!!sola;
 }
 
 /* ---------- Spostare le registrazioni da una WBS a un'altra ----------
