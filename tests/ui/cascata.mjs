@@ -85,9 +85,12 @@ ok(/Attività/.test(await testo())&&await vista()==='activities',
 console.log('\n=== C. Non esiste piu\' la scorciatoia che salta la commessa ===');
 await pg.evaluate(()=>window.go('projects'));await pg.waitForTimeout(300);
 const formProgetti=await pg.evaluate(()=>document.querySelectorAll('#app form.form').length);
-ok(formProgetti===0,'l\'elenco progetti non ha piu\' un modulo per crearne uno',formProgetti+' moduli');
+ok(formProgetti===0,'l\'elenco progetti non ha piu\' un modulo che salta la commessa',formProgetti+' moduli');
 t=await testo();
-ok(/dal cliente/i.test(t),'e spiega che si passa dal cliente');
+ok(/sotto il suo cliente/i.test(t),'e spiega che il progetto nasce sotto il cliente');
+// ma non deve essere un vicolo cieco: chi arriva qui per creare un
+// progetto deve trovare come, non solo l'elenco di quelli che ci sono
+ok(/\+ Nuovo progetto/i.test(t),'e da qui ci si arriva comunque a crearne uno');
 await pg.evaluate(()=>document.querySelector('#app .list .row').click());await pg.waitForTimeout(350);
 ok(await vista()==='projectDetail','da li\' si entra comunque nella scheda del progetto',await vista());
 
@@ -140,6 +143,41 @@ ok(riga&&/›/.test(riga.n),'in cima ci sono cliente e progetto, nell\'ordine de
 ok(riga&&!riga.d,'dove la voce è una sola non se ne parla: sarebbe rumore uguale per tutte le righe',
   riga?(riga.d||'(assente, giusto)'):'');
 ok(riga&&/-\d{4}-\d{3}-/.test(riga.cod),'e il codice resta, ma in fondo e in sordina',riga?riga.cod:'');
+
+console.log('\n=== H. Creare davvero un progetto e una commessa ===');
+// navigateTo non portava `parent`: projectNew cercava il cliente li'
+// dentro, non lo trovava e ricadeva sull'elenco senza dire niente.
+// Il pulsante c'era, il modulo no.
+await pg.evaluate(()=>window.go('clients'));await pg.waitForTimeout(300);
+await pg.evaluate(()=>document.querySelector('#app .list .row').click());await pg.waitForTimeout(350);
+await pg.evaluate(()=>{const x=[...document.querySelectorAll('#app button')].find(y=>/Nuovo progetto/.test(y.textContent));if(x)x.click()});
+await pg.waitForTimeout(400);
+ok(await vista()==='projectNew','dal cliente si arriva al modulo del progetto nuovo',await vista());
+let campiNP=await pg.evaluate(()=>[...document.querySelectorAll('#app form.form [name]')].map(e=>e.name));
+ok(campiNP.includes('short_code')&&campiNP.includes('name'),'e il modulo c\'è davvero',campiNP.join(', ')||'NESSUN MODULO');
+const prjPrima=await pg.evaluate(()=>window.__stores.projects.length);
+await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
+  f.short_code.value='ACM';f.name.value='ACME';f.end_client_name.value='ACME Italia';f.requestSubmit()});
+await pg.waitForTimeout(900);
+ok(await pg.evaluate(()=>window.__stores.projects.length)===prjPrima+1,'il progetto viene creato',
+  (await pg.evaluate(()=>window.__stores.projects.length))+' progetti');
+ok(await vista()==='engagementNew','e si finisce dritti nel modulo della commessa, che è il passo dopo',await vista());
+const campiNC=await pg.evaluate(()=>[...document.querySelectorAll('#app form.form [name]')].map(e=>e.name));
+ok(campiNC.includes('project_id')&&campiNC.includes('year'),'con il modulo della commessa compilabile',campiNC.join(', ')||'NESSUN MODULO');
+const scelto=await pg.evaluate(()=>{const s=document.querySelector('[name="project_id"]');
+  return s?s.options[s.selectedIndex]?.textContent.trim():''});
+ok(/ACME/.test(scelto),'e il progetto appena creato già selezionato',scelto||'nessuno');
+
+// e la commessa si crea anche dal progetto
+await pg.evaluate(()=>window.go('projects'));await pg.waitForTimeout(300);
+await pg.evaluate(()=>[...document.querySelectorAll('#app .list .row')].find(r=>/EQUANS/.test(r.textContent)).click());
+await pg.waitForTimeout(350);
+await pg.evaluate(()=>{const x=[...document.querySelectorAll('#app button')].find(y=>/Nuova commessa/.test(y.textContent));if(x)x.click()});
+await pg.waitForTimeout(400);
+ok(await vista()==='engagementNew','dal progetto si arriva al modulo della commessa nuova',await vista());
+const sceltoE=await pg.evaluate(()=>{const s=document.querySelector('[name="project_id"]');
+  return s?s.options[s.selectedIndex]?.textContent.trim():''});
+ok(/EQUANS/.test(sceltoE),'col progetto di partenza già selezionato',sceltoE||'nessuno');
 
 console.log('\n=== G. La voce si chiede solo dove ce n\'e\' piu\' d\'una ===');
 await pg.evaluate(()=>window.go('dailyForm'));await pg.waitForTimeout(400);

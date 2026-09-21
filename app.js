@@ -84,10 +84,13 @@ function amountLine(label,amount){return `${esc(label)} <span class="dot">·</sp
 function dateIT(v){if(!v)return'';const s=String(v);return `${s.slice(8,10)}/${s.slice(5,7)}`}
 function viewLabel(v){return ({home:'Dashboard',timesheet:'Timesheet',summary:'Riepiloghi',billing:'Fatturazione',incassi:'Incassi',billingDetail:'Dettaglio fattura',tax:'Profilo fiscale',taxPayments:'Pagamenti fiscali',taxPaymentEdit:'Pagamento fiscale',annualMonths:'Consuntivato annuale',annualInvoices:'Elenco fatture',settings:'Configurazione',clients:'Clienti',clientEdit:'Cliente',projects:'Progetti',projectEdit:'Progetto',activities:'Attività',activityEdit:'Attività',expenseCategories:'Voci spesa',expenseCategoryEdit:'Voce spesa',invoiceTemplates:'Template fattura',invoiceTemplateEdit:'Template fattura',appearance:'Aspetto',exportTimesheet:'Export timesheet',newChoice:'Nuovo consuntivo',dailyForm:'Consuntivo giornaliero',dailyEdit:'Consuntivo giornaliero',monthlyForm:'Compenso mensile',monthlyEdit:'Compenso mensile',manualForm:'Consuntivo manuale',manualEdit:'Consuntivo manuale',expenseForm:'Spesa trasferta',expenseEdit:'Spesa trasferta'})[v]||'schermata precedente'}
 function guardUnsavedChanges(){if(!state.dirty)return true;const leave=confirm('Hai modifiche non salvate. Vuoi uscire da questa schermata e perdere i dati inseriti?');if(leave){state.dirty=false;return true}return false}
-function pushHistory(){const last=state.history[state.history.length-1];const cur={view:state.view,edit:state.edit,editType:state.editType};if(!last||last.view!==cur.view||last.edit!==cur.edit||last.editType!==cur.editType)state.history.push(cur);if(state.history.length>30)state.history.shift()}
-function navigateTo(v,{edit=null,editType=null,track=true,resetEdit=true,prefill=null}={}){if(!guardUnsavedChanges())return;if(track&&state.view!==v)pushHistory();state.view=v;state.edit=resetEdit?edit:state.edit;state.editType=resetEdit?editType:state.editType;state.prefill=prefill;state.menuOpen=false;clearSel();render()}
+function pushHistory(){const last=state.history[state.history.length-1];const cur={view:state.view,edit:state.edit,editType:state.editType,parent:state.parent};if(!last||last.view!==cur.view||last.edit!==cur.edit||last.editType!==cur.editType)state.history.push(cur);if(state.history.length>30)state.history.shift()}
+// `parent` e' il livello sopra: il cliente di un progetto nuovo, il
+// progetto di una commessa nuova. Senza di lui quelle due maschere non
+// sanno sotto cosa stanno creando e ricadono sull'elenco, in silenzio.
+function navigateTo(v,{edit=null,editType=null,track=true,resetEdit=true,prefill=null,parent=null}={}){if(!guardUnsavedChanges())return;if(track&&state.view!==v)pushHistory();state.view=v;state.edit=resetEdit?edit:state.edit;state.editType=resetEdit?editType:state.editType;state.prefill=prefill;state.parent=parent;state.menuOpen=false;clearSel();render()}
 function go(v){navigateTo(v)}
-function back(){if(!guardUnsavedChanges())return;const prev=state.history.pop()||{view:'home',edit:null,editType:null};state.view=prev.view||'home';state.edit=prev.edit||null;state.editType=prev.editType||null;state.menuOpen=false;render()}
+function back(){if(!guardUnsavedChanges())return;const prev=state.history.pop()||{view:'home',edit:null,editType:null};state.view=prev.view||'home';state.edit=prev.edit||null;state.editType=prev.editType||null;state.parent=prev.parent||null;state.menuOpen=false;render()}
 function toggleMainMenu(){if(!guardUnsavedChanges())return;state.menuOpen=!state.menuOpen;render()}
 const MENU=[
   {v:'home',ic:'⌂',l:'Dashboard'},
@@ -1298,8 +1301,8 @@ function projects(){
   const tutti=(data.projects||[]).slice()
     .sort((a,b)=>String(a.code||a.name).localeCompare(String(b.code||b.name),'it'));
   return appShell(`<h1>Progetti / Clienti finali</h1>
-    <p class="sub">Tutti i progetti, per ritrovarli. Per crearne uno si passa dal cliente:
-    il codice del progetto viene dal suo, e il passo subito dopo è aprirgli la commessa.</p>
+    <p class="sub">Tutti i progetti, per ritrovarli. Un progetto nuovo nasce sotto il suo cliente —
+    il codice viene da lì — e il passo subito dopo è aprirgli la commessa.</p>
     <div class="list">${tutti.map(p=>{
       const eng=engagementsOfProject(p.id);
       return `<div class="row" onclick="openProject('${p.id}')">
@@ -1307,8 +1310,17 @@ function projects(){
         <div><div class="title">${esc(p.code||p.name)} ${statoTag(p.status||'active')}</div>
           <div class="desc">${esc(clientName(p.client_id))} › ${esc(p.name)}</div>
           <div class="desc">${eng.length===1?'1 commessa':eng.length+' commesse'}</div></div>
-        <div class="chev">›</div></div>`}).join('')||emptyForm('Nessun progetto. Aprine uno dal cliente.')}</div>
-    <button type="button" class="secondary" onclick="go('clients')">Vai ai clienti</button>`);
+        <div class="chev">›</div></div>`}).join('')||emptyForm('Nessun progetto ancora. Creane uno qui sotto.')}</div>
+    <button type="button" class="primary cta" onclick="nuovoProgettoScegliCliente()">+ Nuovo progetto / cliente finale</button>`);
+}
+// Il progetto si crea sotto un cliente, perche' il suo codice viene da
+// li'. Se il cliente e' uno solo non c'e' niente da chiedere: questa
+// pagina era un vicolo cieco, elencava e basta.
+function nuovoProgettoScegliCliente(){
+  const cl=(data.clients||[]).filter(c=>c.active!==false);
+  if(cl.length===1)return nuovoProgettoDi(cl[0].id);
+  go('clients');
+  setMsg('Scegli il cliente: il progetto nasce dalla sua scheda, perché il codice viene dal suo.',6000);
 }
 function projectsLegacy(){return appShell(`<h1>Progetti / Clienti finali</h1><form class="form" onsubmit="addProject(event)"><div class="field"><label>Cliente collegato</label><select name="client_id">${data.clients.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Nome progetto / cliente finale</label><input name="name" required></div><button class="primary">Aggiungi progetto</button></form>${sortControl('projects')}<div class="list">${sortEntities('projects',data.projects).map(p=>`<div class="row" onclick="editProject('${p.id}')"><div></div><div><div class="title">${esc(clientName(p.client_id))}</div><div class="desc">${esc(p.name)} · ${p.active?'Attivo':'Disattivo'}</div></div>${moveBtns('projects',p.id)}</div>`).join('')||emptyForm('Nessun progetto.')}</div>`)}
 function editProject(id){navigateTo('projectEdit',{edit:id})}
@@ -1596,8 +1608,12 @@ function rigaDato(etichetta,valore){return `<div class="row"><div></div><div><di
 function nuovaCommessaDi(projectId){navigateTo('engagementNew',{parent:projectId})}
 function engagementForm(e){
   const nuovo=!e;
-  const conCodice=(data.projects||[]).filter(p=>p.code);
-  const senzaCodice=(data.projects||[]).filter(p=>!p.code);
+  // Il progetto da cui si e' arrivati va sempre incluso, anche se il
+  // codice non risulta ancora: se sparisse dall'elenco il modulo ne
+  // sceglierebbe un altro da se', e la commessa finirebbe sotto il
+  // progetto sbagliato senza che nessuno se ne accorga.
+  const conCodice=(data.projects||[]).filter(p=>p.code||p.id===state.parent);
+  const senzaCodice=(data.projects||[]).filter(p=>!p.code&&p.id!==state.parent);
   if(nuovo&&!conCodice.length)return appShell(`<h1>Nuova commessa</h1>
     <div class="card"><b>Serve prima un progetto con codice</b>
     <div class="desc" style="margin-top:6px">Il codice della commessa si compone da quello del progetto,
@@ -2411,7 +2427,7 @@ Object.assign(window,{
   gridClienteCambiato,gridCommessaCambiata,gridProgettoCambiato,
   hierChanged,refreshHierForForm,wbsLineage,hierAvailable,
   normCode,wbsReady,engagementsOf,openEngagement,openProjectWbs,editWbs,setEngFilter,
-  openClient,openProject,nuovoProgettoDi,nuovaCommessaDi,
+  openClient,openProject,nuovoProgettoDi,nuovaCommessaDi,nuovoProgettoScegliCliente,
   previewEngCode,previewPrjCode,previewWbsCode,addEngagement,saveEngagement,addEngagementRef,
   addProjectOfClient,saveProjectFull,addWbs,saveWbs,deleteWbs,
   salvaEVai,
