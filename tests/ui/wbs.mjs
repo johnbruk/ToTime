@@ -41,15 +41,21 @@ const campi=await pg.evaluate(()=>[...document.querySelectorAll('#app form.form 
 ok(campi.includes('engagement_id')&&campi.includes('wbs_id'),'il modulo mostra commessa e WBS',campi.join(', '));
 ok(!campi.includes('activity_id'),'e non chiede piu\' l\'attivita\' sciolta');
 const opts=async n=>pg.evaluate(x=>[...document.querySelectorAll(`[name="${x}"] option`)].map(o=>o.value).filter(Boolean),n);
-// la cascata parte dal progetto: e' il progetto a reggere le commesse
-ok((await opts('hier_project_id')).includes('p1'),'il progetto e\' selezionabile subito');
-ok((await opts('engagement_id')).length===0,'la commessa resta vuota finche\' non si sceglie il progetto');
-await pg.selectOption('[name="hier_project_id"]','p1');await pg.waitForTimeout(200);
-ok((await opts('engagement_id')).includes('e1'),'scelto il progetto, compaiono le sue commesse');
-ok((await opts('wbs_id')).length===0,'l\'attivita\' resta vuota finche\' non si sceglie la commessa');
-await pg.selectOption('[name="engagement_id"]','e1');await pg.waitForTimeout(200);
+// Un livello con una scelta sola si sceglie da se' e non compare: qui
+// c'e' un progetto solo e una commessa sola, quindi il modulo non deve
+// chiedere niente oltre al cliente.
+const visibile=async id=>pg.evaluate(x=>{const e=document.getElementById(x);return e?!e.hidden:null},id);
+const valore=async n=>pg.evaluate(x=>document.querySelector(`[name="${x}"]`)?.value||'',n);
+// questo cliente ha DUE progetti, quindi la scelta va chiesta
+ok((await opts('hier_project_id')).includes('p1'),'il progetto e\' fra le scelte possibili');
+ok(await visibile('prjField')===true,'e viene chiesto, perche\' i progetti sono due');
+await pg.selectOption('[name="hier_project_id"]','p1');await pg.waitForTimeout(250);
+// ma sotto quel progetto la commessa e' una sola: non si chiede
+ok(await visibile('engField')===false,'la commessa invece non viene chiesta: ce n\'e\' una sola');
+ok(await valore('engagement_id')==='e1','ed e\' gia\' scelta',await valore('engagement_id'));
 const wbs=await opts('wbs_id');
-ok(wbs.includes('w10')&&wbs.includes('w20'),'scelta la commessa, compaiono le sue attivita\'',wbs.join(' '));
+ok(wbs.includes('w10')&&wbs.includes('w20'),'le attivita\' della commessa ci sono tutte',wbs.join(' '));
+ok(await visibile('wbsField')===true,'e questa volta la scelta si chiede, perche\' sono due');
 ok(!wbs.includes('w90'),'l\'attivita\' chiusa non e\' selezionabile per nuove registrazioni');
 await pg.selectOption('[name="wbs_id"]','w10');await pg.waitForTimeout(200);
 ok(/SO-EQU-2026-001-10/.test(await pg.evaluate(()=>document.getElementById('wbsHint')?.textContent||'')),'sotto la WBS si legge il codice completo');
@@ -62,10 +68,9 @@ ok(await pg.evaluate(()=>window.__stores.timesheet_entries.length)===prima,'senz
 ok(/WBS/i.test(await pg.evaluate(()=>document.querySelector('.toast')?.textContent||'')),'e lo dice');
 
 console.log('\n=== C. Salvando, la voce porta la WBS ===');
-// dopo il messaggio d'errore il modulo si ricostruisce: la cascata
-// va rifatta, altrimenti si assegnerebbe una WBS a un menu vuoto
-await pg.selectOption('[name="hier_project_id"]','p1');await pg.waitForTimeout(200);
-await pg.selectOption('[name="engagement_id"]','e1');await pg.waitForTimeout(200);
+// dopo il messaggio d'errore il modulo si ricostruisce: il progetto
+// va riscelto (sono due), e da li' in giu' si sistema da solo
+await pg.selectOption('[name="hier_project_id"]','p1');await pg.waitForTimeout(300);
 await pg.selectOption('[name="wbs_id"]','w10');await pg.waitForTimeout(200);
 await pg.evaluate(()=>{const f=document.querySelector('form.form');f.hours.value='6';f.requestSubmit()});
 await pg.waitForTimeout(700);
