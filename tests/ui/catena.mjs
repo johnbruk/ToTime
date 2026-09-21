@@ -30,9 +30,40 @@ const V=()=>pg.evaluate(()=>document.documentElement.getAttribute('data-view'));
 const store=n=>pg.evaluate(x=>window.__stores[x],n);
 const premi=re=>pg.evaluate(r=>{const x=[...document.querySelectorAll('#app button')].find(y=>new RegExp(r).test(y.textContent));if(x){x.click();return true}return false},re);
 
-console.log('\n--- 1. dal cliente, che non ha ancora niente sotto ---');
+console.log('\n--- 0. il codice cliente si scrive davvero ---');
+// Era il bug alla radice: il campo c'era nel modulo e il salvataggio
+// non lo scriveva. Senza codice cliente non si crea nessun progetto,
+// perche' il codice del progetto deriva da quello.
 await pg.evaluate(()=>window.go('clients'));await pg.waitForTimeout(350);
-await pg.evaluate(()=>document.querySelector('#app .list .row').click());await pg.waitForTimeout(400);
+await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
+  f.name.value='Cliente di prova';f.code.value='prv';f.requestSubmit()});
+await pg.waitForTimeout(900);
+const cl=await store('clients');
+const nuovo=cl.find(c=>c.name==='Cliente di prova');
+ok(!!nuovo,'il cliente viene creato',cl.length+' clienti');
+ok(nuovo&&nuovo.code==='PRV','E IL CODICE VIENE SCRITTO, normalizzato in maiuscolo',
+  nuovo?('code='+(nuovo.code===null?'NULLO':nuovo.code)):'—');
+
+// e si deve poter correggere finche' non ci sono progetti sotto
+await pg.evaluate(()=>window.go('clients'));await pg.waitForTimeout(350);
+await pg.evaluate(n=>{const r=[...document.querySelectorAll('#app .list .row')].find(x=>new RegExp(n).test(x.textContent));if(r)r.click()},'Cliente di prova');
+await pg.waitForTimeout(400);
+await premi('Modifica dati del cliente');await pg.waitForTimeout(400);
+const campoCod=await pg.evaluate(()=>{const e=document.querySelector('#app form.form [name="code"]');
+  return e?{presente:true,bloccato:e.readOnly,valore:e.value}:{presente:false}});
+ok(campoCod.presente&&!campoCod.bloccato,'il codice e\' modificabile finche\' non ci sono progetti',JSON.stringify(campoCod));
+await pg.evaluate(()=>{const f=document.querySelector('#app form.form');f.code.value='PR2';f.requestSubmit()});
+await pg.waitForTimeout(900);
+const cl2=await store('clients');
+ok((cl2.find(c=>c.name==='Cliente di prova')||{}).code==='PR2','e la correzione viene salvata',
+  (cl2.find(c=>c.name==='Cliente di prova')||{}).code||'—');
+
+console.log('\n--- 1. dal cliente, che non ha ancora niente sotto ---');
+// va aperto SOLUTION, non la prima riga: la sezione 0 ha aggiunto un
+// cliente di prova e l'ordine dell'elenco non e' piu' quello di prima
+await pg.evaluate(()=>window.go('clients'));await pg.waitForTimeout(350);
+await pg.evaluate(()=>[...document.querySelectorAll('#app .list .row')]
+  .find(r=>/Solution/.test(r.textContent)).click());await pg.waitForTimeout(400);
 ok(await V()==='clientDetail','si apre la scheda del cliente',await V());
 ok(await premi('Nuovo progetto'),'il pulsante per creare il progetto c\'è e risponde');
 await pg.waitForTimeout(450);
@@ -63,13 +94,16 @@ ok(wbs[0]&&wbs[0].engagement_id===eng[0].id,'agganciata alla commessa giusta');
 
 console.log('\n--- 4. il progetto si vede sotto il cliente ---');
 await pg.evaluate(()=>window.go('clients'));await pg.waitForTimeout(350);
-await pg.evaluate(()=>document.querySelector('#app .list .row').click());await pg.waitForTimeout(450);
+await pg.evaluate(()=>[...document.querySelectorAll('#app .list .row')]
+  .find(r=>/Solution/.test(r.textContent)).click());await pg.waitForTimeout(450);
 const righe=await pg.evaluate(()=>[...document.querySelectorAll('#app .list .row')].map(r=>r.textContent.replace(/\s+/g,' ').trim()));
 ok(righe.some(r=>/Equans/.test(r)),'compare nella scheda del cliente',righe.join(' | ')||'nessuna riga');
 ok(righe.some(r=>/1 commessa/.test(r)),'con la sua commessa contata',righe.find(r=>/Equans/.test(r))||'');
 
 console.log('\n--- 5. ci si registra sopra un consuntivo ---');
 await pg.evaluate(()=>window.go('dailyForm'));await pg.waitForTimeout(500);
+// il modulo si apre sul primo cliente dell'elenco: qui serve Solution
+await pg.selectOption('#app form.form [name="client_id"]','c1');await pg.waitForTimeout(400);
 const vis=await pg.evaluate(()=>{const o={};for(const id of ['prjField','engField','wbsField']){const e=document.getElementById(id);o[id]=e?(e.hidden?'nascosto':'visibile'):'assente'}return o});
 ok(vis.prjField==='nascosto'&&vis.engField==='nascosto'&&vis.wbsField==='nascosto',
   'il modulo non chiede niente: ce n\'è uno solo di ogni livello',JSON.stringify(vis));
