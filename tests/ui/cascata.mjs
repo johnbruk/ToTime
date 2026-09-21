@@ -19,6 +19,7 @@ const srv=http.createServer((q,s)=>{let p=decodeURIComponent(q.url.split('?')[0]
     if(p.endsWith('mock.html')){let h=b.toString();
       h=h.replace("  clients,projects,activities,expense_categories,user_profiles:profiles", EXTRA+"\n  clients,projects,activities,expense_categories,user_profiles:profiles");
       h=h.replace("{id:'c1',name:'Equans',daily_rate:480","{id:'c1',name:'Equans',code:'SO',daily_rate:480");
+      h=h.replace(/timesheet_entries:\[[\s\S]*?\n  \],/, "timesheet_entries:[{id:'v1',entry_date:'"+new Date().toISOString().slice(0,8)+"02',client_id:'c1',project_id:'p1',wbs_id:'w10',hours:8,daily_rate_snapshot:480,standard_hours_snapshot:8}],");
       h=h.replace("{id:'p1',client_id:'c1',name:'Beta',active:true}","{id:'p1',client_id:'c1',short_code:'EQU',code:'SO-EQU',name:'EQUANS',status:'active',active:true}");
       b=Buffer.from(h);}
     s.writeHead(200,{'content-type':MIME[path.extname(p)]||'text/plain'});s.end(b);});});
@@ -93,6 +94,48 @@ t=await testo();
 ok(/Cliente › Progetto \/ cliente finale › Commessa › Attività/.test(t),
   'le Impostazioni dichiarano la cascata, invece di elencare anagrafiche parallele');
 ok(/Commesse/.test(t),'e le commesse compaiono fra le anagrafiche');
+
+console.log('\n=== E. Modificare quello che si e\' creato ===');
+// go() azzera state.edit: le viste che ne hanno bisogno vanno
+// raggiunte con navigateTo, altrimenti ricadono sull'elenco e il
+// modulo non compare. Era il caso di "Modifica progetto".
+await pg.evaluate(()=>window.go('projects'));await pg.waitForTimeout(300);
+await pg.evaluate(()=>[...document.querySelectorAll('#app .list .row')].find(r=>/EQUANS/.test(r.textContent)).click());
+await pg.waitForTimeout(350);
+await pg.evaluate(()=>{const x=[...document.querySelectorAll('#app button')].find(y=>/Modifica progetto/.test(y.textContent));if(x)x.click()});
+await pg.waitForTimeout(400);
+ok(await vista()==='projectEdit','da «Modifica progetto» si arriva al modulo',await vista());
+const campiPrj=await pg.evaluate(()=>[...document.querySelectorAll('#app form.form [name]')].map(e=>e.name));
+ok(campiPrj.length>0,'e il modulo c\'è davvero',campiPrj.join(', ')||'NESSUN MODULO');
+ok(campiPrj.includes('short_code')&&campiPrj.includes('billing_unit')&&campiPrj.includes('end_client_name'),
+  'con i campi del progetto, non solo nome e cliente',campiPrj.join(', '));
+
+// il collegamento all'anagrafica attivita' si poteva scegliere solo
+// alla creazione: dopo non si cambiava piu'
+// va aperta la commessa del 2026: e' quella che ha le attivita'
+await pg.evaluate(()=>window.go('engagements'));await pg.waitForTimeout(300);
+await pg.evaluate(()=>[...document.querySelectorAll('#app .list .row')]
+  .find(r=>/SO-EQU-2026-001/.test(r.textContent)).click());await pg.waitForTimeout(350);
+const rigaAtt=await pg.evaluate(()=>{
+  const r=[...document.querySelectorAll('#app .list .row')].find(x=>/Project Management/.test(x.textContent));
+  if(r){r.click();return true}return false;});
+ok(rigaAtt,'l\'attività è nell\'elenco della commessa');
+await pg.waitForTimeout(400);
+ok(await vista()==='wbsEdit','l\'attività della commessa si apre in modifica',await vista());
+const campiW=await pg.evaluate(()=>[...document.querySelectorAll('#app form.form [name]')].map(e=>e.name));
+ok(campiW.includes('activity_id'),'e il collegamento all\'anagrafica si può cambiare, non solo impostare',
+  campiW.join(', '));
+
+console.log('\n=== F. Nella griglia si leggono i nomi, non i codici ===');
+await pg.evaluate(()=>window.go('griglia'));await pg.waitForTimeout(700);
+const riga=await pg.evaluate(()=>{const t=document.querySelector('table.griglia tbody td.riga');
+  return t?{n:t.querySelector('.n')?.textContent.trim()||'',
+            d:t.querySelector('.d')?.textContent.trim()||'',
+            cod:t.querySelector('.wbsCode')?.textContent.trim()||''}:null;});
+ok(riga&&riga.n&&!/^[A-Z]{2,5}-/.test(riga.n),'in cima alla riga c\'è il nome dell\'attività, non un codice',
+  riga?riga.n:'nessuna riga');
+ok(riga&&/›/.test(riga.d),'sotto ci sono cliente e progetto',riga?riga.d:'');
+ok(riga&&/-\d{4}-\d{3}-/.test(riga.cod),'e il codice resta, ma in fondo e in sordina',riga?riga.cod:'');
 
 ok(errs.length===0,'nessun errore JS in tutta la discesa',errs.slice(0,2).join(' | ')||'nessuno');
 await pg.close();
