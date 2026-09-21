@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TOTIME · aggiornamento</title>
+<style>
+  :root{color-scheme:light}
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+       background:#F6F7F8;color:#151A1F;
+       font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:24px}
+  .box{max-width:460px;width:100%;background:#fff;border:1px solid rgba(21,26,31,.09);
+       padding:28px 24px;box-shadow:0 10px 24px rgba(21,26,31,.06)}
+  h1{font-size:20px;margin:0 0 10px;letter-spacing:-.2px}
+  p{font-size:15px;line-height:1.5;color:#40454B;margin:0 0 14px}
+  #stato{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;
+         background:rgba(124,137,166,.08);border:1px dashed rgba(124,137,166,.34);
+         padding:12px;white-space:pre-line;color:#40454B}
+  a.btn{display:block;text-align:center;margin-top:16px;padding:14px;
+        background:linear-gradient(135deg,#94A2BE,#62708F);color:#fff;
+        text-decoration:none;font-weight:600}
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>Aggiornamento di TOTIME</h1>
+  <p>Questa pagina butta via la copia vecchia dell'app rimasta nel browser.
+     Serve una volta sola: dopo, gli aggiornamenti arrivano da soli.</p>
+  <div id="stato">avvio…</div>
+  <a class="btn" href="./index.html" id="vai">Apri TOTIME</a>
+</div>
+<script>
+// Questa pagina non e' nella cache del vecchio service worker, quindi
+// viene presa dalla rete anche quando tutto il resto e' congelato: e'
+// l'unico appiglio per uscire da una cache che si rifiuta di scadere.
+const stato=document.getElementById('stato');
+const righe=[];
+const dì=t=>{righe.push(t);stato.textContent=righe.join('\n')};
+(async()=>{
+  try{
+    if('serviceWorker' in navigator){
+      const regs=await navigator.serviceWorker.getRegistrations();
+      dì(regs.length?('service worker trovati: '+regs.length):'nessun service worker registrato');
+      for(const r of regs){await r.unregister();}
+      if(regs.length)dì('service worker rimossi');
+    }else dì('questo browser non usa service worker');
+    if(window.caches){
+      const nomi=await caches.keys();
+      dì(nomi.length?('cache trovate: '+nomi.join(', ')):'nessuna cache');
+      await Promise.all(nomi.map(n=>caches.delete(n)));
+      if(nomi.length)dì('cache svuotate');
+    }
+    dì('');dì('Fatto. Apri TOTIME qui sotto.');
+    setTimeout(()=>{location.replace('./index.html?fresh='+Date.now())},2500);
+  }catch(e){
+    dì('');dì('Qualcosa non è riuscito: '+e.message);
+    dì('Apri comunque TOTIME qui sotto, poi ricarica con Ctrl+Shift+R.');
+  }
+})();
+</script>
+</body>
+</html>
