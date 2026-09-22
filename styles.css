@@ -101,7 +101,7 @@ button,input,select,textarea{font-family:var(--font-body)} button{cursor:pointer
 .refHead span{font-weight:750;font-size:14px;color:var(--soft)}
 
 /* Calendario ferie/festivi */
-.calGrid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.calGrid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
 .calGrid.head{margin-bottom:6px;gap:4px}
 .calHead{text-align:center;font-size:11.5px;font-weight:750;color:var(--muted);padding:2px 0}
 .calCell{position:relative;min-height:52px;border:1px solid var(--line);background:var(--surface2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;transition:background .12s ease}
@@ -592,4 +592,23 @@ table.griglia.prospetto td.riga{padding:10px;text-align:left}
    un iPhone emulato e va in rosso se uno riscende sotto i 16. */
 @media (pointer: coarse){
   input,select,textarea{font-size:16px!important}
+}
+
+/* Il calendario che sfondava a destra.
+   Le sette colonne erano repeat(7,1fr), e 1fr vale minmax(auto,1fr):
+   non scende sotto la larghezza minima del contenuto. Il nome della
+   festività, che è nowrap, faceva da cuneo — a dicembre le colonne
+   uscivano 140px, 72, 17, 17, 42, 87, 17 e domenica finiva fuori dallo
+   schermo. minmax(0,1fr) toglie quel minimo: sette colonne uguali,
+   qualunque cosa ci sia dentro. Vale anche per la riga dei nomi dei
+   giorni, che per lo stesso motivo non era allineata alle celle.
+
+   Restava il nome dentro la casella: in 40px diventa «S…», che non
+   informa e sembra un guasto. Sotto i 700px non lo scriviamo — la
+   casella resta colorata, la legenda dice cosa vuol dire il colore, e
+   la riga «Festività del mese» qui sotto le nomina tutte col giorno.
+   Sopra i 700px la casella è larga ~90px e il nome ci sta.
+   Presidiato da tests/ui/calendario.mjs. */
+@media (max-width:699px){
+  .calCell .calFest{display:none}
 }
