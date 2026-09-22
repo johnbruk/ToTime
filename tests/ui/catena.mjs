@@ -79,13 +79,10 @@ ok(prj[0]&&prj[0].client_id==='c1','ED È LEGATO AL CLIENTE',prj[0]?('client_id=
 ok(prj[0]&&prj[0].short_code==='EQU'&&prj[0].name==='Equans','col codice e il nome dati',
   prj[0]?(prj[0].short_code+' / '+prj[0].name):'—');
 
-console.log('\n--- 3. si crea la commessa ---');
-ok(await V()==='engagementNew','ci porta dritti alla commessa',await V());
-await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
-  f.name.value='Contratto 2026';f.requestSubmit()});
-await pg.waitForTimeout(1200);
+console.log('\n--- 3. la commessa nasce da sola, senza un secondo modulo ---');
+ok(await V()==='clientDetail','si torna alla scheda del cliente, non a un altro modulo',await V());
 const eng=await store('engagements');
-ok(eng.length===1,'la commessa è stata scritta',eng.length+' commesse');
+ok(eng.length===1,'la commessa è stata creata senza chiedere niente',eng.length+' commesse');
 ok(eng[0]&&eng[0].project_id===prj[0].id,'ED È LEGATA AL PROGETTO',eng[0]?('project_id='+(eng[0].project_id===prj[0].id?'giusto':eng[0].project_id)):'—');
 ok(eng[0]&&eng[0].client_id==='c1','e porta anche il cliente',eng[0]?eng[0].client_id:'—');
 const wbs=await store('wbs_items');
