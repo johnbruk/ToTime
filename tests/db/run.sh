@@ -35,7 +35,8 @@ run_db () {                      # $1 = nome db, $2... = file .sql
                2026-09-10_advisor-fix-2-rls-performance.sql \
                2026-09-10_advisor-fix-3-rls-tabelle-storiche.sql \
                2026-09-10_completamento.sql \
-               2026-09-10_inversione-progetto-commessa.sql; do
+               2026-09-10_inversione-progetto-commessa.sql \
+               2026-09-22_user-id-di-default.sql; do
     psql -h "$RUN" -p "$PORT" -U postgres -d "$db" -q -v ON_ERROR_STOP=1 -f "$ROOT/migrations/$extra" >/dev/null 2>&1
   done
   for f in "$@"; do
@@ -73,6 +74,7 @@ run_db totime_test "$HERE/wbs-model.sql"
 run_db totime_rls  "$HERE/wbs-rls.sql"
 run_db totime_obbl "$HERE/wbs-obbligo.sql"
 run_db totime_stor "$HERE/rls-storiche.sql"
+run_db totime_prop "$HERE/proprietario.sql"
 run_db_vecchio totime_inv "$HERE/inversione.sql"
 
 echo ""
