@@ -1893,19 +1893,21 @@ function projectNew(){
     <button type="button" class="secondary" onclick="editClient('${c.id}')">Assegna il codice</button>`);
   const usati=projectsOfClient(c.id).map(p=>p.short_code).filter(Boolean);
   return appShell(`<h1>Nuovo progetto / cliente finale</h1>
-    <p class="sub">Sotto ${esc(c.code)} · ${esc(c.name)}. È il livello a cui si fattura, e sotto ci andranno
-    le commesse: un contratto nuovo, un ordine aggiuntivo, l'anno dopo.</p>
+    <p class="sub">Per chi lavori, sotto ${esc(c.code)} · ${esc(c.name)}. Due campi e basta:
+    la commessa e la voce su cui registrare le apre l'app da sé.</p>
     <form class="form" onsubmit="addProjectOfClient(event)">
+      <div class="field"><label>Nome</label><input name="name" required placeholder="Es. EQUANS" autofocus></div>
       <div class="field"><label>Codice breve</label>
         <input name="short_code" maxlength="6" required placeholder="Es. EQU" oninput="this.value=normCode(this.value);previewPrjCode()">
         <div class="small">Anteprima: <span id="prjCodePreview">${esc(c.code)}-…</span>${usati.length?" · già usati: "+usati.map(esc).join(", "):""}</div></div>
-      <div class="field"><label>Nome del progetto</label><input name="name" required placeholder="Es. EQUANS"></div>
-      <div class="field"><label>Cliente finale</label><input name="end_client_name" placeholder="Se diverso dal cliente che paga"></div>
-      <div class="field"><label>Unità di fatturazione</label><select name="billing_unit"><option value="day">Giornate</option><option value="hour">Ore</option></select></div>
-      <div class="field"><label>Descrizione predefinita della riga di fattura</label><input name="invoice_line_description" placeholder="Se vuoto si usa il nome del progetto"></div>
-      <div class="field"><label>Data di inizio</label><input name="start_date" type="date"></div>
-      <div class="field"><label>Data di fine</label><input name="end_date" type="date"></div>
-      <div class="actions"><button class="primary">Crea progetto</button>
+      <details class="moreFields"><summary>Altri dettagli (fatturazione, date)</summary>
+        <div class="field"><label>Cliente finale</label><input name="end_client_name" placeholder="Solo se in fattura va un nome diverso"></div>
+        <div class="field"><label>Unità di fatturazione</label><select name="billing_unit"><option value="day">Giornate</option><option value="hour">Ore</option></select></div>
+        <div class="field"><label>Descrizione predefinita della riga di fattura</label><input name="invoice_line_description" placeholder="Se vuoto si usa il nome del progetto"></div>
+        <div class="field"><label>Data di inizio</label><input name="start_date" type="date"></div>
+        <div class="field"><label>Data di fine</label><input name="end_date" type="date"></div>
+      </details>
+      <div class="actions"><button class="primary" data-busy="Creazione…">Crea progetto</button>
         <button type="button" class="secondary" onclick="openClient('${c.id}')">Annulla</button></div>
     </form>`);
 }
@@ -1914,21 +1916,43 @@ function previewPrjCode(){
   const box=document.getElementById("prjCodePreview");
   if(f&&c&&box)box.textContent=(c.code||"")+"-"+(normCode(f.short_code.value)||"…");
 }
+// Creare un progetto e' UN gesto solo. La commessa e la voce su cui
+// registrare nascono da sole: servono al database e alla fatturazione,
+// non a chi sta aprendo un cliente nuovo. Chi ha bisogno di una
+// seconda commessa la aggiunge dalla scheda del progetto.
 async function addProjectOfClient(ev){
   ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));
   const c=clientById(state.parent||state.edit);if(!c)return;
-  const {data:ins,error}=await insertResilient("projects",{client_id:c.id,
-    short_code:normCode(f.short_code),name:norm(f.name),end_client_name:norm(f.end_client_name)||null,
+  const nome=norm(f.name);
+  const codice=normCode(f.short_code);
+  const {error}=await insertResilient("projects",{client_id:c.id,
+    short_code:codice,name:nome,end_client_name:norm(f.end_client_name)||null,
     billing_unit:f.billing_unit||"day",invoice_line_description:norm(f.invoice_line_description)||null,
     start_date:f.start_date||null,end_date:f.end_date||null,status:"active",active:true});
   if(error)return setMsg(/duplicate key|unique/i.test(String(error.message))?
     "Questo cliente ha già un progetto con questo codice breve.":error.message,8000);
   await reload();
-  // il passo successivo e' la commessa: ce lo si porta dentro da soli
-  const nuovo=(data.projects||[]).find(p=>p.client_id===c.id&&p.short_code===normCode(f.short_code));
-  if(nuovo)navigateTo("engagementNew",{parent:nuovo.id});
-  else render();
-  setMsg("Progetto creato. Ora aprigli la commessa.",4000);
+  const prj=(data.projects||[]).find(p=>p.client_id===c.id&&p.short_code===codice);
+  if(!prj){render();return setMsg("Progetto creato.",3000)}
+
+  // la commessa: l'anno in corso, con un nome che si puo' cambiare dopo
+  const anno=new Date().getFullYear();
+  const e1=await insertResilient("engagements",{project_id:prj.id,client_id:c.id,
+    year:anno,name:nome+" "+anno,status:"active"});
+  if(e1.error){
+    navigateTo("projectDetail",{edit:prj.id});
+    return setMsg("Progetto creato, ma la commessa no: "+messaggioCommessa(e1.error)+
+      " Puoi aprirla da qui.",9000);
+  }
+  await reload();
+  const eng=engagementsOfProject(prj.id)[0];
+  if(eng&&!wbsOfEngagement(eng.id).length){
+    await insertResilient("wbs_items",{engagement_id:eng.id,activity_code:"10",
+      name:nome,kind:"activity",billable:true,status:"active",sort_order:10});
+    await reload();
+  }
+  navigateTo("clientDetail",{edit:c.id});
+  setMsg("Progetto "+nome+" creato: puoi già registrarci le ore sopra.",5000);
 }
 
 /* ---------- Selezione gerarchica Cliente > Commessa > Progetto > WBS ----------

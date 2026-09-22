@@ -161,12 +161,14 @@ await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
 await pg.waitForTimeout(900);
 ok(await pg.evaluate(()=>window.__stores.projects.length)===prjPrima+1,'il progetto viene creato',
   (await pg.evaluate(()=>window.__stores.projects.length))+' progetti');
-ok(await vista()==='engagementNew','e si finisce dritti nel modulo della commessa, che è il passo dopo',await vista());
-const campiNC=await pg.evaluate(()=>[...document.querySelectorAll('#app form.form [name]')].map(e=>e.name));
-ok(campiNC.includes('project_id')&&campiNC.includes('year'),'con il modulo della commessa compilabile',campiNC.join(', ')||'NESSUN MODULO');
-const scelto=await pg.evaluate(()=>{const s=document.querySelector('[name="project_id"]');
-  return s?s.options[s.selectedIndex]?.textContent.trim():''});
-ok(/ACME/.test(scelto),'e il progetto appena creato già selezionato',scelto||'nessuno');
+// creare un progetto e' un gesto solo: commessa e voce nascono da se',
+// e si torna dove si era, non in un secondo modulo
+ok(await vista()==='clientDetail','si torna alla scheda del cliente, non a un altro modulo',await vista());
+const conta=await pg.evaluate(()=>({eng:window.__stores.engagements.length,wbs:window.__stores.wbs_items.length}));
+ok(conta.eng===3,'la commessa del progetto nuovo e\' nata da se\'',JSON.stringify(conta));
+const rigaACME=await pg.evaluate(()=>{const r=[...document.querySelectorAll('#app .list .row')].find(x=>/ACME/.test(x.textContent));
+  return r?r.textContent.replace(/\s+/g,' ').trim():''});
+ok(/1 commessa/.test(rigaACME),'e il progetto compare gia\' con la sua commessa',rigaACME||'riga non trovata');
 
 // e la commessa si crea anche dal progetto
 await pg.evaluate(()=>window.go('projects'));await pg.waitForTimeout(300);
