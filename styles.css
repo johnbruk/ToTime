@@ -570,3 +570,26 @@ table.griglia.prospetto td.num{text-align:right;padding:10px;font-variant-numeri
 table.griglia.prospetto td.num.spicca{font-weight:var(--w-bold);color:var(--text)}
 table.griglia.prospetto tfoot td{font-weight:var(--w-bold);background:var(--surface2)}
 table.griglia.prospetto td.riga{padding:10px;text-align:left}
+
+/* Lo zoom che non se ne va più.
+   Safari su iPhone ingrandisce la pagina da solo quando tocchi un campo
+   il cui testo è sotto i 16px — e, finito di scrivere, non la rimpicciolisce.
+   Ogni volta tocca stringerla a mano.
+
+   Non si disinnesca con maximum-scale: quello toglie lo zoom automatico
+   togliendo anche il pinch-to-zoom, e su un'app piena di numeri è un danno
+   di accessibilità. L'unico rimedio pulito è che nessun campo scritto stia
+   sotto i 16px. Vale solo dove si tocca con il dito, così sul desktop la
+   grafica resta quella disegnata.
+
+   L'!important non è pigrizia. La frase è «nessun campo sotto i 16, punto»,
+   e deve valere anche contro una regola più specifica scritta domani: qui
+   una specificità maggiore sarebbe un errore, non una precisazione. Serviva
+   già oggi, per i campi che portano .miniBtn. E non schiaccia niente:
+   nessun campo dell'app chiede di essere più grande di 16px.
+
+   Presidiata da tests/ui/zoom.mjs, che misura ogni campo di ogni vista su
+   un iPhone emulato e va in rosso se uno riscende sotto i 16. */
+@media (pointer: coarse){
+  input,select,textarea{font-size:16px!important}
+}
