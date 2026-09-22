@@ -97,13 +97,42 @@ const righe=await pg.evaluate(()=>[...document.querySelectorAll('#app .list .row
 ok(righe.some(r=>/Equans/.test(r)),'compare nella scheda del cliente',righe.join(' | ')||'nessuna riga');
 ok(righe.some(r=>/1 commessa/.test(r)),'con la sua commessa contata',righe.find(r=>/Equans/.test(r))||'');
 
+console.log('\n--- 4b. una SECONDA commessa sullo stesso progetto ---');
+// e' il caso dell'anno nuovo o dell'ordine aggiuntivo: dal progetto
+// si deve poter aprire un'altra commessa, e deve essere scritta
+await pg.evaluate(()=>window.go('projects'));await pg.waitForTimeout(400);
+await pg.evaluate(()=>[...document.querySelectorAll('#app .list .row')]
+  .find(r=>/Equans/.test(r.textContent)).click());await pg.waitForTimeout(450);
+ok(await V()==='projectDetail','si apre la scheda del progetto',await V());
+ok(await premi('Nuova commessa'),'il pulsante per la commessa nuova risponde');
+await pg.waitForTimeout(500);
+ok(await V()==='engagementNew','e si apre il modulo',await V());
+const campiC=await pg.evaluate(()=>[...document.querySelectorAll('#app form.form [name]')].map(e=>e.name));
+ok(campiC.includes('project_id')&&campiC.includes('year'),'compilabile',campiC.join(', ')||'NESSUN MODULO');
+const sceltoC=await pg.evaluate(()=>{const s=document.querySelector('#app [name="project_id"]');
+  return s?(s.options[s.selectedIndex]||{}).textContent||'':''});
+ok(/Equans/.test(sceltoC),'col progetto di partenza gia\' scelto',sceltoC.trim()||'nessuno');
+const engPrima=(await store('engagements')).length;
+await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
+  f.year.value='2027';f.name.value='Contratto 2027';f.requestSubmit()});
+await pg.waitForTimeout(1200);
+const engDopo=await store('engagements');
+ok(engDopo.length===engPrima+1,'LA SECONDA COMMESSA VIENE SCRITTA',engDopo.length+' commesse, erano '+engPrima);
+const seconda=engDopo.find(x=>x.name==='Contratto 2027');
+ok(seconda&&seconda.project_id===prj[0].id,'sotto il progetto giusto',seconda?'ok':'non trovata');
+ok(seconda&&String(seconda.year)==='2027','e nell\'anno scelto',seconda?String(seconda.year):'—');
+
 console.log('\n--- 5. ci si registra sopra un consuntivo ---');
 await pg.evaluate(()=>window.go('dailyForm'));await pg.waitForTimeout(500);
 // il modulo si apre sul primo cliente dell'elenco: qui serve Solution
 await pg.selectOption('#app form.form [name="client_id"]','c1');await pg.waitForTimeout(400);
 const vis=await pg.evaluate(()=>{const o={};for(const id of ['prjField','engField','wbsField']){const e=document.getElementById(id);o[id]=e?(e.hidden?'nascosto':'visibile'):'assente'}return o});
-ok(vis.prjField==='nascosto'&&vis.engField==='nascosto'&&vis.wbsField==='nascosto',
-  'il modulo non chiede niente: ce n\'è uno solo di ogni livello',JSON.stringify(vis));
+// il progetto e' uno solo e non si chiede; le commesse sono due — la
+// 2026 nata da se' e la 2027 aggiunta al punto 4b — quindi quella si'
+ok(vis.prjField==='nascosto','il progetto non viene chiesto: ce n\'è uno solo',JSON.stringify(vis));
+ok(vis.engField==='visibile','la commessa sì, perché adesso sono due',JSON.stringify(vis));
+ok(vis.wbsField==='nascosto','e l\'attività no, ce n\'è una sola per commessa',JSON.stringify(vis));
+await pg.selectOption('#app form.form [name="engagement_id"]',eng[0].id);await pg.waitForTimeout(300);
 await pg.evaluate(()=>{const f=document.querySelector('#app form.form');f.hours.value='8';f.requestSubmit()});
 await pg.waitForTimeout(1000);
 const voci=await store('timesheet_entries');
