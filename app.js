@@ -94,7 +94,7 @@ function back(){if(!guardUnsavedChanges())return;const prev=state.history.pop()|
 function toggleMainMenu(){if(!guardUnsavedChanges())return;state.menuOpen=!state.menuOpen;render()}
 const MENU=[
   {v:'home',ic:'⌂',l:'Dashboard'},
-  {main:'timesheet',ic:'◷',l:'Timesheet',sub:[{v:'newChoice',l:'Nuovo consuntivo'},{v:'calendario',l:'Calendario'},{v:'griglia',l:'Consuntivo mensile'},{v:'pivot',l:'Analisi consuntivi'},{v:'reportWbs',l:'Report analitico WBS'},{v:'tmManage',l:'Incarichi continuativi'}]},
+  {main:'timesheet',ic:'◷',l:'Timesheet',sub:[{v:'newChoice',l:'Nuovo consuntivo'},{v:'calendario',l:'Calendario'},{v:'griglia',l:'Consuntivo mensile'},{v:'pivot',l:'Analisi consuntivi'},{v:'reportWbs',l:'Report analitico WBS'},{v:'tmManage',l:'Incarichi continuativi'},{v:'importaConsuntivi',l:'Carica da foglio'}]},
   {main:'expenses',ic:'▦',l:'Spese',sub:[{v:'expenseForm',l:'Nuova spesa'}]},
   {main:'billing',ic:'€',l:'Fatturazione',sub:[{v:'billing',l:'Mensile per cliente'},{v:'fatturazioneCommessa',l:'Per commessa'},{v:'reportEconomico',l:'Report economico'}]},
   {v:'balance',ic:'∑',l:'Bilancio'},
@@ -106,7 +106,7 @@ const MENU=[
 // le viste nuove — Commesse per prima — e sembrava che il menu si
 // chiudesse da solo a ogni clic.
 const NAV_CHILDREN={
-  timesheet:['timesheet','newChoice','calendario','giorno','griglia','pivot','reportWbs','tmManage','tmForm','dailyForm','dailyEdit','monthlyForm','monthlyEdit','manualForm','manualEdit','annualMonths','summary'],
+  timesheet:['timesheet','newChoice','calendario','giorno','griglia','pivot','reportWbs','tmManage','tmForm','importaConsuntivi','dailyForm','dailyEdit','monthlyForm','monthlyEdit','manualForm','manualEdit','annualMonths','summary'],
   expenses:['expenses','expenseForm','expenseEdit'],
   billing:['billing','billingDetail','annualInvoices','incassi','fatturatoDetail','fatturazioneCommessa','reportEconomico'],
   tax:['tax','tasseFuture','taxPayments','taxPaymentEdit','taxSettings'],
@@ -363,7 +363,11 @@ function newChoice(){return appShell(`<h1>Nuovo consuntivo</h1><p class="sub">Un
 <button class="menuBtn" onclick="openGriglia()"><span><b>Consuntivo mensile</b><br><span class='sub'>Tutto il mese in una griglia: una riga per commessa, una colonna per giorno</span></span><span>›</span></button>
 <button class="menuBtn" onclick="goForDay('manualForm')"><span><b>Compenso una tantum</b><br><span class='sub'>Importo fisso, indipendente da ore e giornate</span></span><span>›</span></button>
 </div>`)}
-function sediOptions(selected=''){const sedi=['Remoto','Casa','Ufficio','Sede cliente','Onsite cliente','Altro'];return `<option></option>${sedi.map(x=>`<option value="${esc(x)}" ${x===selected?'selected':''}>${esc(x)}</option>`).join('')}`}
+// Il lavoro si fa da remoto quasi sempre: "Remoto" e' il valore di
+// partenza, e la trasferta la si segna quando capita. Passando una
+// sede esplicita — anche vuota, in modifica — comanda quella.
+const SEDE_DEFAULT='Remoto';
+function sediOptions(selected=SEDE_DEFAULT){const sedi=['Remoto','Casa','Ufficio','Sede cliente','Onsite cliente','Altro'];return `<option></option>${sedi.map(x=>`<option value="${esc(x)}" ${x===selected?'selected':''}>${esc(x)}</option>`).join('')}`}
 function projectOptions(clientId,selected=''){return `<option value=""></option>${sortEntities('projects',data.projects.filter(p=>p.active&&p.client_id===clientId)).map(p=>`<option value="${p.id}" ${p.id===selected?'selected':''}>${esc(p.name)}</option>`).join('')}`}
 function activityOptions(selected=''){return `<option value=""></option>${sortEntities('activities',data.activities.filter(a=>a.active)).map(a=>`<option value="${a.id}" ${a.id===selected?'selected':''}>${esc(a.name)}</option>`).join('')}`}
 function expenseOptions(selected=''){return `<option value=""></option>${sortEntities('expenseCategories',data.expenseCategories.filter(x=>x.active)).map(x=>`<option value="${x.id}" ${x.id===selected?'selected':''}>${esc(x.name)}</option>`).join('')}`}
@@ -652,9 +656,9 @@ async function dopoIlSalvataggio(f){
   setMsg('Salvato. Ora '+fmtDMY(iso)+'.',4000);
 }
 function prefillDate(){const v=state.editType;return (typeof v==='string'&&v.length===10&&v.charAt(4)==='-')?v:new Date().toISOString().slice(0,10)}
-function dailyForm(){const clients=dailyClients();const pre=state.prefill||{};const selected=(pre.client_id&&clients.some(c=>c.id===pre.client_id))?pre.client_id:(clients[0]?.id||'');return appShell(`<h1>Consuntivo giornaliero</h1><p class="sub">Ore effettivamente lavorate, valorizzate secondo tariffa (tariffa oraria = tariffa giornaliera / 8h).</p>${clients.length?`<form class="form" onsubmit="saveDaily(event)"><div class="field"><label>Data</label><input name="entry_date" type="date" required value="${pre.dataVuota?'':prefillDate()}">${pre.dataVuota?'<div class="small">Copia di un consuntivo esistente: scegli la data.</div>':''}</div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)">${clients.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div><div id="hierBlock">${hierAvailable(selected)?hierFields(selected,pre.wbs_id||'')+'<input type="hidden" name="project_id" value="'+esc(pre.project_id||'')+'">':campiSenzaGerarchia(selected,pre.project_id||'',pre.activity_id||'')}</div><details class="moreFields"><summary>Altri dettagli (sede, luogo, descrizione)</summary><div class="field"><label>Sede</label><select name="work_site">${sediOptions(pre.work_site||'')}</select></div><div class="field"><label>Luogo/Città</label><input name="work_city" value="${esc(pre.work_city||'')}" placeholder="Es. Verona, Milano, Canicattì"></div><div class="field"><label>Descrizione</label><textarea name="description">${esc(pre.description||'')}</textarea></div></details><div class="field"><label>Ore consuntivate</label><input name="hours" type="number" step="0.25" value="${pre.hours!=null?esc(String(pre.hours)):'8'}"></div><div class="field"><label>Note</label><textarea name="notes" placeholder="Note interne opzionali"></textarea></div><div class="actions"><button class="primary" data-busy="Salvataggio…">Salva</button><button type="button" class="secondary" onclick="salvaEVai(this,1)">Salva e vai al giorno dopo ›</button><button type="button" class="secondary" onclick="go('home')">Annulla</button></div></form>`:`<div class="card">Crea prima un cliente con tariffa giornaliera in Configurazione.</div>`}`)}
+function dailyForm(){const clients=dailyClients();const pre=state.prefill||{};const selected=(pre.client_id&&clients.some(c=>c.id===pre.client_id))?pre.client_id:(clients[0]?.id||'');return appShell(`<h1>Consuntivo giornaliero</h1><p class="sub">Ore effettivamente lavorate, valorizzate secondo tariffa (tariffa oraria = tariffa giornaliera / 8h).</p>${clients.length?`<form class="form" onsubmit="saveDaily(event)"><div class="field"><label>Data</label><input name="entry_date" type="date" required value="${pre.dataVuota?'':prefillDate()}">${pre.dataVuota?'<div class="small">Copia di un consuntivo esistente: scegli la data.</div>':''}</div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)">${clients.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div><div id="hierBlock">${hierAvailable(selected)?hierFields(selected,pre.wbs_id||'')+'<input type="hidden" name="project_id" value="'+esc(pre.project_id||'')+'">':campiSenzaGerarchia(selected,pre.project_id||'',pre.activity_id||'')}</div><details class="moreFields"><summary>Altri dettagli (sede, luogo, descrizione)</summary><div class="field"><label>Sede</label><select name="work_site">${sediOptions(pre.work_site||SEDE_DEFAULT)}</select></div><div class="field"><label>Luogo/Città</label><input name="work_city" value="${esc(pre.work_city||'')}" placeholder="Es. Verona, Milano, Canicattì"></div><div class="field"><label>Descrizione</label><textarea name="description">${esc(pre.description||'')}</textarea></div></details><div class="field"><label>Ore consuntivate</label><input name="hours" type="number" step="0.25" value="${pre.hours!=null?esc(String(pre.hours)):'8'}"></div><div class="field"><label>Note</label><textarea name="notes" placeholder="Note interne opzionali"></textarea></div><div class="actions"><button class="primary" data-busy="Salvataggio…">Salva</button><button type="button" class="secondary" onclick="salvaEVai(this,1)">Salva e vai al giorno dopo ›</button><button type="button" class="secondary" onclick="go('home')">Annulla</button></div></form>`:`<div class="card">Crea prima un cliente con tariffa giornaliera in Configurazione.</div>`}`)}
 async function saveDaily(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));if(!guardDay(f.entry_date))return;const c=clientById(f.client_id);const lin=f.wbs_id?wbsLineage(f.wbs_id):null;if(hierAvailable(f.client_id)&&!f.wbs_id)return setMsg('Scegli la WBS su cui registrare le ore.',5000);const payload={entry_date:f.entry_date,client_id:f.client_id,project_id:(lin?lin.project.id:f.project_id)||null,activity_id:(lin&&lin.wbs.activity_id?lin.wbs.activity_id:f.activity_id)||null,wbs_id:f.wbs_id||null,work_location:[norm(f.work_site),norm(f.work_city)].filter(Boolean).join(' - ')||null,work_site:norm(f.work_site)||null,work_city:norm(f.work_city)||null,description:f.description||null,notes:f.notes||null,hours:Number(f.hours||0),daily_rate_snapshot:Number(c?.daily_rate||0),standard_hours_snapshot:Number(c?.standard_hours||8)};const {error}=await insertResilient('timesheet_entries',payload);if(error)return setMsg(error.message,7000);await reload();await dopoIlSalvataggio(f)}
-function dailyEdit(){const e=data.entries.find(x=>x.id===state.edit);if(!e)return timesheet();const clients=dailyClients();return appShell(`<h1>Modifica consuntivo</h1><form class="form" onsubmit="saveDailyEdit(event)"><div class="field"><label>Data</label><input name="entry_date" type="date" value="${esc(e.entry_date)}"></div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)">${clients.map(c=>`<option value="${c.id}" ${c.id===e.client_id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div id="hierBlock">${hierAvailable(e.client_id)?hierFields(e.client_id,e.wbs_id||'')+'<input type="hidden" name="project_id" value="'+(e.project_id||'')+'">':campiSenzaGerarchia(e.client_id,e.project_id||'',e.activity_id||'')}</div><div class="field"><label>Sede</label><select name="work_site">${sediOptions(e.work_site||'')}</select></div><div class="field"><label>Luogo/Città</label><input name="work_city" value="${esc(e.work_city||'')}" placeholder="Es. Verona, Milano, Canicattì"></div><div class="field"><label>Descrizione</label><textarea name="description">${esc(e.description||'')}</textarea></div><div class="field"><label>Ore consuntivate</label><input name="hours" type="number" step="0.25" value="${Number(e.hours||0)}"></div><div class="field"><label>Note</label><textarea name="notes">${esc(e.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary" onclick="salvaEVai(this,1)">Salva e vai al giorno dopo ›</button><button type="button" class="secondary" onclick="salvaEVai(this,-1)">‹ Salva e vai al giorno prima</button><button type="button" class="secondary" onclick="duplicateDaily('${e.id}')">Duplica</button><button type="button" class="secondary danger" onclick="deleteDaily('${e.id}')">Elimina</button><button type="button" class="secondary" onclick="go('timesheet')">Annulla</button></div></form>`)}
+function dailyEdit(){const e=data.entries.find(x=>x.id===state.edit);if(!e)return timesheet();const clients=dailyClients();return appShell(`<h1>Modifica consuntivo</h1><form class="form" onsubmit="saveDailyEdit(event)"><div class="field"><label>Data</label><input name="entry_date" type="date" value="${esc(e.entry_date)}"></div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)">${clients.map(c=>`<option value="${c.id}" ${c.id===e.client_id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div id="hierBlock">${hierAvailable(e.client_id)?hierFields(e.client_id,e.wbs_id||'')+'<input type="hidden" name="project_id" value="'+(e.project_id||'')+'">':campiSenzaGerarchia(e.client_id,e.project_id||'',e.activity_id||'')}</div><div class="field"><label>Sede</label><select name="work_site">${sediOptions(e.work_site==null?SEDE_DEFAULT:e.work_site)}</select></div><div class="field"><label>Luogo/Città</label><input name="work_city" value="${esc(e.work_city||'')}" placeholder="Es. Verona, Milano, Canicattì"></div><div class="field"><label>Descrizione</label><textarea name="description">${esc(e.description||'')}</textarea></div><div class="field"><label>Ore consuntivate</label><input name="hours" type="number" step="0.25" value="${Number(e.hours||0)}"></div><div class="field"><label>Note</label><textarea name="notes">${esc(e.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary" onclick="salvaEVai(this,1)">Salva e vai al giorno dopo ›</button><button type="button" class="secondary" onclick="salvaEVai(this,-1)">‹ Salva e vai al giorno prima</button><button type="button" class="secondary" onclick="duplicateDaily('${e.id}')">Duplica</button><button type="button" class="secondary danger" onclick="deleteDaily('${e.id}')">Elimina</button><button type="button" class="secondary" onclick="go('timesheet')">Annulla</button></div></form>`)}
 async function saveDailyEdit(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));if(!guardDay(f.entry_date))return;const c=clientById(f.client_id);const lin=f.wbs_id?wbsLineage(f.wbs_id):null;if(hierAvailable(f.client_id)&&!f.wbs_id)return setMsg('Scegli la WBS su cui registrare le ore.',5000);const payload={entry_date:f.entry_date,client_id:f.client_id,project_id:(lin?lin.project.id:f.project_id)||null,activity_id:(lin&&lin.wbs.activity_id?lin.wbs.activity_id:f.activity_id)||null,wbs_id:f.wbs_id||null,work_location:[norm(f.work_site),norm(f.work_city)].filter(Boolean).join(' - ')||null,work_site:norm(f.work_site)||null,work_city:norm(f.work_city)||null,description:f.description||null,notes:f.notes||null,hours:Number(f.hours||0),daily_rate_snapshot:Number(c?.daily_rate||0),standard_hours_snapshot:Number(c?.standard_hours||8)};const {error}=await updateResilient('timesheet_entries',payload,state.edit);if(error)return setMsg(error.message,7000);await reload();state.edit=null;await dopoIlSalvataggio(f)}
 // Duplicare non scrive piu' di nascosto su oggi: apre il modulo gia'
 // pieno con la data vuota, cosi' la data la si sceglie apposta. Prima
@@ -666,7 +670,7 @@ function duplicateDaily(idv){
   navigateTo('dailyForm',{prefill:{dataVuota:true,
     client_id:e.client_id,wbs_id:e.wbs_id||'',project_id:e.project_id||'',
     activity_id:e.activity_id||'',hours:e.hours,
-    work_site:e.work_site||'',work_city:e.work_city||'',description:e.description||''}});
+    work_site:e.work_site||SEDE_DEFAULT,work_city:e.work_city||'',description:e.description||''}});
   setMsg('Copia pronta: scegli la data e salva.',4500);
 }
 async function deleteDaily(idv){if(!confirm('Eliminare questo consuntivo?'))return;const {error}=await sb.from('timesheet_entries').delete().eq('id',idv);if(error)return setMsg(error.message,7000);await reload();state.view='timesheet';render()}
@@ -680,7 +684,7 @@ async function deleteMonthly(idv){if(!confirm('Eliminare questo compenso mensile
 
 function manualForm(){const clients=activeClients();const selected=clients[0]?.id||'';return appShell(`<h1>Compenso una tantum</h1>${clients.length?`<form class="form" onsubmit="saveManual(event)"><div class="field"><label>Data</label><input name="entry_date" type="date" value="${prefillDate()}"></div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)">${clients.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Cliente/Progetto</label><select name="project_id">${projectOptions(selected)}</select></div><div class="field"><label>Attività</label><select name="activity_id">${activityOptions()}</select></div><details class="moreFields"><summary>Altri dettagli (sede, luogo, descrizione)</summary><div class="field"><label>Sede</label><select name="work_site">${sediOptions()}</select></div><div class="field"><label>Luogo/Città</label><input name="work_city"></div><div class="field"><label>Descrizione</label><textarea name="description"></textarea></div></details><div class="field"><label>Importo manuale</label><input name="amount" type="number" step="0.01" value="0"></div><div class="field"><label>Note</label><textarea name="notes"></textarea></div><div class="actions"><button class="primary" data-busy="Salvataggio…">Salva</button><button type="button" class="secondary" onclick="go('home')">Annulla</button></div></form>`:`<div class="card">Crea prima un cliente in Configurazione.</div>`}`)}
 async function saveManual(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));if(!guardDay(f.entry_date))return;const payload={entry_date:f.entry_date,client_id:f.client_id,project_id:f.project_id||null,activity_id:f.activity_id||null,work_site:norm(f.work_site)||null,work_city:norm(f.work_city)||null,description:f.description||null,amount:Number(f.amount||0),notes:f.notes||null};const {error}=await insertResilient('manual_entries',payload);if(error)return setMsg(error.message,7000);await reload();state.view='timesheet';render()}
-function manualEdit(){const e=data.manualEntries.find(x=>x.id===state.edit);if(!e)return timesheet();const clients=activeClients();return appShell(`<h1>Modifica compenso una tantum</h1><form class="form" onsubmit="saveManualEdit(event)"><div class="field"><label>Data</label><input name="entry_date" type="date" value="${esc(e.entry_date)}"></div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)">${clients.map(c=>`<option value="${c.id}" ${c.id===e.client_id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Cliente/Progetto</label><select name="project_id">${projectOptions(e.client_id,e.project_id||'')}</select></div><div class="field"><label>Attività</label><select name="activity_id">${activityOptions(e.activity_id||'')}</select></div><div class="field"><label>Sede</label><select name="work_site">${sediOptions(e.work_site||'')}</select></div><div class="field"><label>Luogo/Città</label><input name="work_city" value="${esc(e.work_city||'')}"></div><div class="field"><label>Descrizione</label><textarea name="description">${esc(e.description||'')}</textarea></div><div class="field"><label>Importo manuale</label><input name="amount" type="number" step="0.01" value="${Number(e.amount||0)}"></div><div class="field"><label>Note</label><textarea name="notes">${esc(e.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary" onclick="duplicateManual('${e.id}')">Duplica</button><button type="button" class="secondary danger" onclick="deleteManual('${e.id}')">Elimina</button><button type="button" class="secondary" onclick="go('timesheet')">Annulla</button></div></form>`)}
+function manualEdit(){const e=data.manualEntries.find(x=>x.id===state.edit);if(!e)return timesheet();const clients=activeClients();return appShell(`<h1>Modifica compenso una tantum</h1><form class="form" onsubmit="saveManualEdit(event)"><div class="field"><label>Data</label><input name="entry_date" type="date" value="${esc(e.entry_date)}"></div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)">${clients.map(c=>`<option value="${c.id}" ${c.id===e.client_id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Cliente/Progetto</label><select name="project_id">${projectOptions(e.client_id,e.project_id||'')}</select></div><div class="field"><label>Attività</label><select name="activity_id">${activityOptions(e.activity_id||'')}</select></div><div class="field"><label>Sede</label><select name="work_site">${sediOptions(e.work_site==null?SEDE_DEFAULT:e.work_site)}</select></div><div class="field"><label>Luogo/Città</label><input name="work_city" value="${esc(e.work_city||'')}"></div><div class="field"><label>Descrizione</label><textarea name="description">${esc(e.description||'')}</textarea></div><div class="field"><label>Importo manuale</label><input name="amount" type="number" step="0.01" value="${Number(e.amount||0)}"></div><div class="field"><label>Note</label><textarea name="notes">${esc(e.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary" onclick="duplicateManual('${e.id}')">Duplica</button><button type="button" class="secondary danger" onclick="deleteManual('${e.id}')">Elimina</button><button type="button" class="secondary" onclick="go('timesheet')">Annulla</button></div></form>`)}
 async function saveManualEdit(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));if(!guardDay(f.entry_date))return;const payload={entry_date:f.entry_date,client_id:f.client_id,project_id:f.project_id||null,activity_id:f.activity_id||null,work_site:norm(f.work_site)||null,work_city:norm(f.work_city)||null,description:f.description||null,amount:Number(f.amount||0),notes:f.notes||null};const {error}=await updateResilient('manual_entries',payload,state.edit);if(error)return setMsg(error.message,7000);await reload();state.view='timesheet';state.edit=null;render()}
 async function duplicateManual(idv){const e=data.manualEntries.find(x=>x.id===idv);if(!e)return;const copy={entry_date:new Date().toISOString().slice(0,10),client_id:e.client_id,project_id:e.project_id,activity_id:e.activity_id,wbs_id:e.wbs_id||null,work_site:e.work_site,work_city:e.work_city,description:e.description,amount:e.amount,notes:e.notes};const {error}=await insertResilient('manual_entries',copy,['wbs_id']);if(error)return setMsg(error.message,7000);await reload();state.view='timesheet';render()}
 async function deleteManual(idv){if(!confirm('Eliminare questo consuntivo manuale?'))return;const {error}=await sb.from('manual_entries').delete().eq('id',idv);if(error)return setMsg(error.message,7000);await reload();state.view='timesheet';render()}
@@ -1864,6 +1868,255 @@ function messaggioWbs(e){
   return m;
 }
 
+/* ==================================================================
+   Caricare i consuntivi da un foglio di calcolo
+
+   Il tracciato e' quello che l'app stessa esporta: Data, Cliente,
+   Progetto, Attivita', Sede, Descrizione, Ore. Cosi' il giro si
+   chiude — si scarica, si lavora in Excel, si ricarica.
+
+   Il file puo' arrivare in tre forme e si riconoscono dal contenuto,
+   non dall'estensione: l'XML di Excel (quello che scarichi da qui),
+   una tabella HTML (l'altro export), oppure CSV. Il .xlsx vero e'
+   un archivio compresso e non si legge senza una libreria: in quel
+   caso si dice chiaro cosa fare invece di fallire in silenzio.
+   ================================================================== */
+const IMPORT_COLONNE=['data','cliente','progetto','attività','sede','descrizione','ore'];
+function normIntestazione(t){return String(t||'').trim().toLowerCase()
+  .replace(/\s+/g,' ').replace(/attivita'?/,'attività').replace(/^cliente\/progetto$/,'progetto');}
+
+// --- lettura del file ---------------------------------------------
+function leggiTabella(testo){
+  const t=String(testo||'');
+  if(/^PK\x03\x04/.test(t))throw new Error('Questo è un .xlsx, che è un archivio compresso e non si può leggere qui. In Excel fai «Salva con nome» e scegli CSV (oppure «Cartella di lavoro XML 2003»).');
+  if(/<\?mso-application|<Workbook/i.test(t))return daXmlExcel(t);
+  if(/<table/i.test(t))return daTabellaHtml(t);
+  return daCsv(t);
+}
+function daXmlExcel(t){
+  const doc=new DOMParser().parseFromString(t,'application/xml');
+  if(doc.querySelector('parsererror'))throw new Error('Il file XML non si lascia leggere.');
+  // il foglio giusto e' quello che ha le colonne attese
+  const fogli=[...doc.getElementsByTagName('Worksheet')];
+  for(const f of fogli){
+    const righe=[...f.getElementsByTagName('Row')].map(r=>
+      [...r.getElementsByTagName('Cell')].map(c=>{
+        const d=c.getElementsByTagName('Data')[0];return d?d.textContent:'';}));
+    const trovato=trovaIntestazione(righe);
+    if(trovato)return trovato;
+  }
+  throw new Error('Nel file non c\'è un foglio con le colonne Data, Cliente, Progetto, Attività, Ore.');
+}
+function daTabellaHtml(t){
+  const doc=new DOMParser().parseFromString(t,'text/html');
+  for(const tab of [...doc.getElementsByTagName('table')]){
+    const righe=[...tab.getElementsByTagName('tr')].map(tr=>
+      [...tr.children].map(td=>td.textContent));
+    const trovato=trovaIntestazione(righe);
+    if(trovato)return trovato;
+  }
+  throw new Error('Nel file non c\'è una tabella con le colonne attese.');
+}
+function daCsv(t){
+  const sep=(t.split('\n')[0]||'').includes(';')?';':(t.includes('\t')?'\t':',');
+  const righe=t.split(/\r?\n/).filter(r=>r.trim()!=='').map(r=>splitCsv(r,sep));
+  const trovato=trovaIntestazione(righe);
+  if(!trovato)throw new Error('Nella prima riga non ci sono le colonne Data, Cliente, Progetto, Attività, Ore.');
+  return trovato;
+}
+// Una riga CSV puo' avere virgole e a capo dentro le virgolette.
+function splitCsv(riga,sep){
+  const out=[];let cur='',dentro=false;
+  for(let i=0;i<riga.length;i++){
+    const ch=riga[i];
+    if(ch==='"'){ if(dentro&&riga[i+1]==='"'){cur+='"';i++} else dentro=!dentro; }
+    else if(ch===sep&&!dentro){out.push(cur);cur=''}
+    else cur+=ch;
+  }
+  out.push(cur);return out.map(x=>x.trim());
+}
+// L'intestazione non e' per forza la prima riga: nell'export dell'app
+// sopra c'e' il titolo. Si cerca la riga che contiene le colonne.
+function trovaIntestazione(righe){
+  for(let i=0;i<righe.length;i++){
+    const h=righe[i].map(normIntestazione);
+    if(h.includes('data')&&h.includes('cliente')&&h.includes('ore')){
+      const idx={};IMPORT_COLONNE.forEach(c=>{idx[c]=h.indexOf(c)});
+      const corpo=righe.slice(i+1)
+        .filter(r=>r.some(x=>String(x).trim()!==''))
+        .filter(r=>!/^totale$/i.test(String(r[idx.data]||'').trim()))
+        .map(r=>{const o={};IMPORT_COLONNE.forEach(c=>{o[c]=idx[c]>=0?String(r[idx[c]]||'').trim():''});return o});
+      return {colonne:h,righe:corpo};
+    }
+  }
+  return null;
+}
+
+// --- interpretazione dei valori -----------------------------------
+function dataDaFoglio(v){
+  const t=String(v||'').trim();
+  let m=t.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);       // 01/09/2026
+  if(m)return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+  m=t.match(/^(\d{4})-(\d{2})-(\d{2})/);                             // 2026-09-01
+  if(m)return `${m[1]}-${m[2]}-${m[3]}`;
+  return null;
+}
+function oreDaFoglio(v){
+  const t=String(v||'').trim().replace(/\s/g,'').replace(',','.');
+  if(t==='')return null;
+  const n=Number(t);
+  return Number.isFinite(n)&&n>0?n:null;
+}
+const perNome=(lista,nome)=>{
+  const n=String(nome||'').trim().toLowerCase();
+  return n?(lista||[]).find(x=>String(x.name||'').trim().toLowerCase()===n):null;
+};
+
+// --- cosa succederebbe, riga per riga -----------------------------
+// Si guarda tutto prima di scrivere: chi ha il posto suo, chi porta
+// un'attivita' nuova da creare, chi non si riesce ad agganciare, e chi
+// c'e' gia'. Un import che scrive e poi dice com'e' andata e' un
+// import che non si puo' annullare.
+function analizzaImport(righe){
+  return righe.map((r,i)=>{
+    const out={n:i+2,...r,esito:'',motivo:'',wbs_id:'',client_id:'',project_id:''};
+    const iso=dataDaFoglio(r.data);
+    const ore=oreDaFoglio(r.ore);
+    if(!iso){out.esito='errore';out.motivo='data non riconosciuta';return out}
+    if(ore===null){out.esito='errore';out.motivo='ore non valide';return out}
+    out.iso=iso;out.oreNum=ore;
+    const cli=perNome(data.clients,r.cliente);
+    if(!cli){out.esito='errore';out.motivo='cliente «'+(r.cliente||'vuoto')+'» non trovato';return out}
+    out.client_id=cli.id;
+    if(!wbsReady()){
+      // senza gerarchia si registra come si e' sempre fatto
+      const prj=perNome((data.projects||[]).filter(p=>p.client_id===cli.id),r.progetto);
+      out.project_id=prj?prj.id:'';
+      out.esito=duplicatoImport(out)?'duplicato':'ok';
+      return out;
+    }
+    const prj=perNome(projectsOfClient(cli.id),r.progetto);
+    if(!prj){out.esito='errore';out.motivo='progetto «'+(r.progetto||'vuoto')+'» non trovato sotto '+cli.name;return out}
+    out.project_id=prj.id;
+    const comm=engagementsOfProject(prj.id);
+    if(!comm.length){out.esito='errore';out.motivo='il progetto '+prj.name+' non ha commesse';return out}
+    // l'attivita' si cerca in tutte le commesse del progetto
+    let w=null;
+    for(const e of comm){ w=perNome(wbsOfEngagement(e.id),r.attività); if(w)break; }
+    if(w){out.wbs_id=w.id;out.esito=duplicatoImport(out)?'duplicato':'ok';return out}
+    if(!String(r.attività||'').trim()){
+      // nessuna attivita' indicata: se ce n'e' una sola si usa quella
+      const sola=wbsUnica(comm[0].id);
+      if(sola){out.wbs_id=sola.id;out.esito=duplicatoImport(out)?'duplicato':'ok';return out}
+      out.esito='errore';out.motivo='attività non indicata e la commessa ne ha più d\'una';return out;
+    }
+    out.esito='nuova';out.engagement_id=comm[0].id;out.motivo='attività «'+r.attività+'» da creare in '+comm[0].code;
+    return out;
+  });
+}
+function chiaveImport(r){return importKey(['consuntivo',r.iso,r.cliente,r.progetto,r.attività,r.descrizione,r.oreNum]);}
+function duplicatoImport(r){const k=chiaveImport(r);return (data.entries||[]).some(e=>e.import_key===k);}
+function contaImport(a){const c={ok:0,nuova:0,duplicato:0,errore:0};a.forEach(r=>{c[r.esito]=(c[r.esito]||0)+1});return c}
+
+// --- la schermata ---------------------------------------------------
+function importaConsuntivi(){
+  const a=state.importAnalisi;
+  const c=a?contaImport(a):null;
+  return appShell(`<h1>Carica consuntivi da foglio</h1>
+    <p class="sub">Il tracciato è quello che l'app esporta: <b>Data · Cliente · Progetto · Attività · Sede · Descrizione · Ore</b>.
+    Scarichi l'Excel del mese, lo lavori, e lo ricarichi qui.</p>
+    <div class="card"><b>Scegli il file</b>
+      <div class="field" style="margin-top:12px">
+        <input type="file" accept=".xls,.xml,.csv,.txt,text/csv" onchange="importaFile(this)">
+        <div class="small">Va bene l'<b>.xls</b> che scarichi da qui, oppure un <b>CSV</b>.
+        Se hai un .xlsx, da Excel fai «Salva con nome» e scegli CSV.</div></div>
+      ${state.importErrore?`<div class="copybox">${esc(state.importErrore)}</div>`:''}
+    </div>
+    ${a?`<div class="card"><b>Cosa succederà</b>
+      <div class="kpiGrid three" style="margin-top:14px">
+        <div><span>Da caricare</span><strong>${c.ok+c.nuova}</strong><small>righe</small></div>
+        <div><span>Già presenti</span><strong>${c.duplicato}</strong><small>si saltano</small></div>
+        <div><span>Da sistemare</span><strong>${c.errore}</strong><small>righe</small></div>
+      </div>
+      ${c.nuova?`<div class="metricLine" style="margin-top:10px"><span class="tag orange">Attività nuove</span> ${c.nuova} da creare nella commessa</div>`:''}
+      <div class="scrollGriglia" style="margin-top:12px"><table class="griglia prospetto">
+        <thead><tr><th class="riga">Riga</th><th>Data</th><th>Cliente · Progetto</th><th>Attività</th><th>Ore</th><th>Esito</th></tr></thead>
+        <tbody>${a.slice(0,80).map(r=>`<tr>
+          <td class="riga"><div class="n">${r.n}</div></td>
+          <td>${esc(r.data||'')}</td>
+          <td>${esc(r.cliente||'')} · ${esc(r.progetto||'')}</td>
+          <td>${esc(r.attività||'—')}</td>
+          <td class="num">${esc(r.ore||'')}</td>
+          <td>${esitoImport(r)}</td></tr>`).join('')}</tbody>
+      </table></div>
+      ${a.length>80?`<div class="desc" style="margin-top:8px">Mostrate le prime 80 di ${a.length}.</div>`:''}
+      <div class="actions" style="margin-top:14px">
+        ${(c.ok+c.nuova)?`<button type="button" class="primary" data-busy="Caricamento…" onclick="eseguiImport()">Carica ${c.ok+c.nuova} righe</button>`:''}
+        <button type="button" class="secondary" onclick="annullaImport()">Scegli un altro file</button></div>
+    </div>`:''}
+    <button type="button" class="secondary" onclick="go('timesheet')">Torna al timesheet</button>`);
+}
+function esitoImport(r){
+  if(r.esito==='ok')return '<span class="tag green">si carica</span>';
+  if(r.esito==='nuova')return '<span class="tag orange">attività da creare</span>';
+  if(r.esito==='duplicato')return '<span class="tag gray">già presente</span>';
+  return '<span class="tag red">'+esc(r.motivo||'errore')+'</span>';
+}
+function annullaImport(){state.importAnalisi=null;state.importErrore='';render()}
+function importaFile(input){
+  const f=input.files&&input.files[0];if(!f)return;
+  const fr=new FileReader();
+  fr.onload=()=>{
+    try{
+      const {righe}=leggiTabella(fr.result);
+      if(!righe.length)throw new Error('Il foglio non ha righe sotto l\'intestazione.');
+      state.importErrore='';state.importAnalisi=analizzaImport(righe);
+    }catch(e){ state.importAnalisi=null;state.importErrore=String(e&&e.message||e); }
+    render();
+  };
+  fr.onerror=()=>{state.importAnalisi=null;state.importErrore='Il file non si è lasciato leggere.';render()};
+  fr.readAsText(f);
+}
+// Scrive solo quello che l'anteprima ha promesso. La chiave di
+// importazione fa si' che ricaricare lo stesso foglio non duplichi:
+// si riconosce la riga e la si aggiorna invece di aggiungerla.
+async function eseguiImport(){
+  const a=state.importAnalisi;if(!a)return;
+  const daFare=a.filter(r=>r.esito==='ok'||r.esito==='nuova');
+  if(!daFare.length)return setMsg('Non c\'è niente da caricare.',4000);
+  state.busy=true;render();
+  let fatte=0,create=0,falliti=[];
+  for(const r of daFare){
+    try{
+      let wbs=r.wbs_id;
+      if(r.esito==='nuova'){
+        const esistenti=wbsOfEngagement(r.engagement_id);
+        const codice=String((esistenti.length+1)*10);
+        const ins=await insertResilient('wbs_items',{engagement_id:r.engagement_id,activity_code:codice,
+          name:r.attività,kind:'activity',billable:true,status:'active',sort_order:Number(codice)});
+        if(ins.error)throw ins.error;
+        await reload();
+        const w=wbsOfEngagement(r.engagement_id).find(x=>String(x.name).trim()===String(r.attività).trim());
+        if(!w)throw new Error('attività creata ma non ritrovata');
+        wbs=w.id;create++;
+      }
+      const c=clientById(r.client_id)||{};
+      const payload={entry_date:r.iso,client_id:r.client_id,project_id:r.project_id||null,
+        wbs_id:wbs||null,hours:r.oreNum,
+        work_site:r.sede||SEDE_DEFAULT,work_location:r.sede||SEDE_DEFAULT,description:r.descrizione||null,
+        daily_rate_snapshot:Number(c.daily_rate||0),standard_hours_snapshot:Number(c.standard_hours||8)};
+      const {res}=await upsertByKey('timesheet_entries',data.entries,payload,chiaveImport(r),['wbs_id']);
+      if(res.error)throw res.error;
+      fatte++;
+    }catch(e){ falliti.push('riga '+r.n+': '+String(e&&e.message||e)); }
+  }
+  state.busy=false;state.importAnalisi=null;
+  await reload();
+  navigateTo('timesheet');
+  setMsg(fatte+' righe caricate'+(create?', '+create+' attività create':'')+
+    (falliti.length?' · '+falliti.length+' non riuscite: '+falliti[0]:'.'),falliti.length?12000:6000);
+}
+
 /* ---------- Scheda cliente: la testa della cascata ----------
    Da qui si scende: progetto (cliente finale) > commessa > attivita'.
    Non ci sono anagrafiche separate da tenere allineate a mano. */
@@ -2518,7 +2771,7 @@ function render(){
       <button type="button" class="primary" onclick="go('home')">Torna alla dashboard</button>`;
   }
 }
-function renderInterno(){document.documentElement.setAttribute('data-view',state.view||'home');if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,newChoice,reportWbs,reportEconomico,fatturazioneCommessa,engagements,engagementNew,engagementEdit,engagementDetail,projectNew,projectDetail,projectWbs:projectDetail,clientDetail,wbsEdit,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,timesheet,griglia,pivot,summary,billing,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,incassi,balance,taxSettings,tasseFuture,fatturatoDetail,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
+function renderInterno(){document.documentElement.setAttribute('data-view',state.view||'home');if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,newChoice,reportWbs,reportEconomico,fatturazioneCommessa,engagements,engagementNew,engagementEdit,engagementDetail,projectNew,projectDetail,projectWbs:projectDetail,clientDetail,wbsEdit,importaConsuntivi,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,timesheet,griglia,pivot,summary,billing,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,incassi,balance,taxSettings,tasseFuture,fatturatoDetail,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
 
 Object.assign(window,{
   setRep,
@@ -2529,6 +2782,7 @@ Object.assign(window,{
   hierChanged,refreshHierForForm,wbsLineage,hierAvailable,
   normCode,wbsReady,engagementsOf,openEngagement,openProjectWbs,editWbs,setEngFilter,
   openClient,openProject,nuovoProgettoDi,nuovaCommessaDi,nuovoProgettoScegliCliente,
+  importaFile,eseguiImport,annullaImport,
   previewEngCode,previewPrjCode,previewWbsCode,addEngagement,saveEngagement,addEngagementRef,
   addProjectOfClient,saveProjectFull,addWbs,saveWbs,deleteWbs,
   salvaEVai,
