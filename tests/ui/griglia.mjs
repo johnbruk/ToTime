@@ -149,20 +149,31 @@ ok(await pgd.evaluate(()=>getComputedStyle(document.querySelector('table.griglia
 ok(await pgd.evaluate(()=>getComputedStyle(document.querySelector('.settimanaNav')).display==='none'),'la navigazione per settimana non compare dove non serve');
 await pgd.close();
 
-console.log('\n=== J. Nuovo consuntivo: solo giornaliero, mensile e una tantum ===');
-await pg.evaluate(()=>window.go('newChoice'));await pg.waitForTimeout(350);
-const voci=await pg.evaluate(()=>[...document.querySelectorAll('.menuBtn b')].map(x=>x.textContent.trim()));
-console.log('  voci:',JSON.stringify(voci));
-ok(voci.join('|')==='Consuntivo giornaliero|Consuntivo mensile|Compenso una tantum','tre voci, nell\'ordine giusto',JSON.stringify(voci));
-ok(!voci.some(v=>/Impegno continuativo|Rimborso spese|Time & Material|forfettario/i.test(v)),'niente impegno continuativo né rimborso spese qui');
-await pg.evaluate(()=>{[...document.querySelectorAll('.menuBtn')].find(x=>/Consuntivo mensile/.test(x.textContent)).click()});
-await pg.waitForTimeout(500);
-ok(/Consuntivo mensile/.test(await pg.evaluate(()=>document.querySelector('h1')?.textContent||'')),'la voce apre il consuntivo mensile');
-ok(await pg.evaluate(()=>!!document.querySelector('table.griglia')),'e la griglia c\'è davvero');
-await pg.evaluate(()=>window.go('newChoice'));await pg.waitForTimeout(300);
-await pg.evaluate(()=>{[...document.querySelectorAll('.menuBtn')].find(x=>/una tantum/.test(x.textContent)).click()});
-await pg.waitForTimeout(400);
-ok(/Compenso una tantum/.test(await pg.evaluate(()=>document.querySelector('h1')?.textContent||'')),'la terza voce apre il compenso una tantum',await pg.evaluate(()=>document.querySelector('h1')?.textContent));
+console.log('\n=== J. Nuovo consuntivo: si entra dritti nel modulo ===');
+// Prima il menu apriva una scheda con tre scelte, di cui una era gia'
+// una voce di menu per conto suo. Ora punta al modulo, e gli altri due
+// tipi di compenso stanno in fondo a quello — a un tocco come prima,
+// ma senza un bivio da attraversare ogni volta.
+await pg.evaluate(()=>window.newEntryChoice());await pg.waitForTimeout(400);
+ok(/Nuovo consuntivo|Consuntivo giornaliero/i.test(await pg.evaluate(()=>document.querySelector('h1')?.textContent||'')),
+   'il pulsante della dashboard apre il modulo, non un elenco di scelte',
+   await pg.evaluate(()=>document.querySelector('h1')?.textContent));
+ok(await pg.evaluate(()=>!!document.querySelector('form.form [name=hours]')),'e il modulo e\' gia\' li\' pronto');
+const coda=await pg.evaluate(()=>[...document.querySelectorAll('.altriCompensi button')].map(x=>x.textContent.trim()));
+ok(coda.length===2&&/una tantum/i.test(coda[0])&&/mensile/i.test(coda[1]),
+   'in fondo ci sono gli altri due tipi di compenso',JSON.stringify(coda));
+await pg.evaluate(()=>{[...document.querySelectorAll('.altriCompensi button')].find(x=>/una tantum/i.test(x.textContent)).click()});
+await pg.waitForTimeout(450);
+ok(/una tantum/i.test(await pg.evaluate(()=>document.querySelector('h1')?.textContent||'')),
+   'il compenso una tantum si apre',await pg.evaluate(()=>document.querySelector('h1')?.textContent));
+await pg.evaluate(()=>window.newEntryChoice());await pg.waitForTimeout(400);
+await pg.evaluate(()=>{[...document.querySelectorAll('.altriCompensi button')].find(x=>/mensile/i.test(x.textContent)).click()});
+await pg.waitForTimeout(450);
+// Questa e' la porta che mancava del tutto: il compenso mensile si
+// poteva modificare ma non creare, perche' nessun pulsante lo apriva.
+ok(/mensile/i.test(await pg.evaluate(()=>document.querySelector('h1')?.textContent||'')),
+   'e il compenso mensile, che prima non aveva nessuna porta',
+   await pg.evaluate(()=>document.querySelector('h1')?.textContent));
 
 console.log('\n=== K. Quello che ho tolto dal menu resta raggiungibile ===');
 await pg.evaluate(()=>window.go('tmManage'));await pg.waitForTimeout(400);
@@ -176,13 +187,19 @@ const spese=await pg.evaluate(()=>{const m=window.MENU;return true});
 await pg.evaluate(()=>window.go('expenseForm'));await pg.waitForTimeout(400);
 ok(/Nuova spesa/.test(await pg.evaluate(()=>document.querySelector('h1')?.textContent||'')),'il rimborso spese resta nella sua sezione Spese');
 
-// il consuntivo mensile aperto dal dettaglio di un giorno si posiziona su quel mese
+// Dal dettaglio di un giorno si arrivava al modulo passando da una
+// scheda di scelta. Ora si arriva diritti, e per giunta con la data di
+// quel giorno gia' compilata: un tocco in meno e un campo in meno da
+// riempire. Qui si verifica proprio quello.
 await pg.evaluate(()=>window.openDay('2026-05-12'));await pg.waitForTimeout(350);
 await pg.evaluate(()=>{const b=[...document.querySelectorAll('button')].find(x=>/Aggiungi consuntivo/.test(x.textContent));b&&b.click()});
-await pg.waitForTimeout(350);
-await pg.evaluate(()=>{const b=[...document.querySelectorAll('.menuBtn')].find(x=>/Consuntivo mensile/.test(x.textContent));b&&b.click()});
-await pg.waitForTimeout(500);
-ok((await pg.evaluate(()=>document.querySelector('.month strong')?.textContent||'')).startsWith('Maggio 2026'),'aperto da un giorno, si posiziona sul suo mese',await pg.evaluate(()=>document.querySelector('.month strong')?.textContent.trim()));
+await pg.waitForTimeout(450);
+ok(/Consuntivo giornaliero/i.test(await pg.evaluate(()=>document.querySelector('h1')?.textContent||'')),
+   'dal giorno si entra diritti nel modulo, senza bivi',
+   await pg.evaluate(()=>document.querySelector('h1')?.textContent));
+ok(await pg.evaluate(()=>document.querySelector('[name=entry_date]')?.value)==='2026-05-12',
+   'con la data di quel giorno gia\' compilata',
+   await pg.evaluate(()=>document.querySelector('[name=entry_date]')?.value));
 
 console.log('\n=== L. La griglia su telefono: una settimana per volta ===');
 const pgw=await b.newPage({viewport:{width:390,height:844},deviceScaleFactor:2});

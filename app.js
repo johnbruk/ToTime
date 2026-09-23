@@ -82,33 +82,63 @@ function fmtDays(hours){return fmtNum(Number(hours||0)/8,2)}
 function metricLine(hours,amount){return `${fmtNum(hours,1)} h <span class="dot">·</span> ${fmtDays(hours)} gg/u <span class="dot">·</span> ${fmtEUR(amount)}`}
 function amountLine(label,amount){return `${esc(label)} <span class="dot">·</span> ${fmtEUR(amount)}`}
 function dateIT(v){if(!v)return'';const s=String(v);return `${s.slice(8,10)}/${s.slice(5,7)}`}
-function viewLabel(v){return ({home:'Dashboard',timesheet:'Timesheet',summary:'Riepiloghi',billing:'Fatturazione',incassi:'Incassi',billingDetail:'Dettaglio fattura',tax:'Profilo fiscale',taxPayments:'Pagamenti fiscali',taxPaymentEdit:'Pagamento fiscale',annualMonths:'Consuntivato annuale',annualInvoices:'Elenco fatture',settings:'Configurazione',clients:'Clienti',clientEdit:'Cliente',projects:'Progetti',projectEdit:'Progetto',activities:'Attività',activityEdit:'Attività',expenseCategories:'Voci spesa',expenseCategoryEdit:'Voce spesa',invoiceTemplates:'Template fattura',invoiceTemplateEdit:'Template fattura',appearance:'Aspetto',exportTimesheet:'Export timesheet',newChoice:'Nuovo consuntivo',dailyForm:'Consuntivo giornaliero',dailyEdit:'Consuntivo giornaliero',monthlyForm:'Compenso mensile',monthlyEdit:'Compenso mensile',manualForm:'Consuntivo manuale',manualEdit:'Consuntivo manuale',expenseForm:'Spesa trasferta',expenseEdit:'Spesa trasferta'})[v]||'schermata precedente'}
+function viewLabel(v){return ({home:'Dashboard',timesheet:'Timesheet',billing:'Fatturazione',billingDetail:'Dettaglio fattura',tax:'Profilo fiscale',taxPayments:'Pagamenti fiscali',taxPaymentEdit:'Pagamento fiscale',annualMonths:'Consuntivato annuale',annualInvoices:'Elenco fatture',settings:'Configurazione',clients:'Clienti',clientEdit:'Cliente',projects:'Progetti',projectEdit:'Progetto',activities:'Attività',activityEdit:'Attività',expenseCategories:'Voci spesa',expenseCategoryEdit:'Voce spesa',invoiceTemplates:'Template fattura',invoiceTemplateEdit:'Template fattura',appearance:'Aspetto',exportTimesheet:'Export timesheet',dailyForm:'Consuntivo giornaliero',dailyEdit:'Consuntivo giornaliero',monthlyForm:'Compenso mensile',monthlyEdit:'Compenso mensile',manualForm:'Consuntivo manuale',manualEdit:'Consuntivo manuale',expenseForm:'Spesa trasferta',expenseEdit:'Spesa trasferta'})[v]||'schermata precedente'}
 function guardUnsavedChanges(){if(!state.dirty)return true;const leave=confirm('Hai modifiche non salvate. Vuoi uscire da questa schermata e perdere i dati inseriti?');if(leave){state.dirty=false;return true}return false}
 function pushHistory(){const last=state.history[state.history.length-1];const cur={view:state.view,edit:state.edit,editType:state.editType,parent:state.parent};if(!last||last.view!==cur.view||last.edit!==cur.edit||last.editType!==cur.editType)state.history.push(cur);if(state.history.length>30)state.history.shift()}
 // `parent` e' il livello sopra: il cliente di un progetto nuovo, il
 // progetto di una commessa nuova. Senza di lui quelle due maschere non
 // sanno sotto cosa stanno creando e ricadono sull'elenco, in silenzio.
-function navigateTo(v,{edit=null,editType=null,track=true,resetEdit=true,prefill=null,parent=null}={}){if(!guardUnsavedChanges())return;if(track&&state.view!==v)pushHistory();state.view=v;state.edit=resetEdit?edit:state.edit;state.editType=resetEdit?editType:state.editType;state.prefill=prefill;state.parent=parent;state.menuOpen=false;clearSel();render()}
+function navigateTo(v,{edit=null,editType=null,track=true,resetEdit=true,prefill=null,parent=null,keepMenu=false}={}){if(!guardUnsavedChanges())return;if(track&&state.view!==v)pushHistory();state.view=v;state.edit=resetEdit?edit:state.edit;state.editType=resetEdit?editType:state.editType;state.prefill=prefill;state.parent=parent;if(!keepMenu)state.menuOpen=false;clearSel();render()}
 function go(v){navigateTo(v)}
+// Le intestazioni del menu aprono la sezione senza chiudere il menu:
+// cosi' le sottovoci si vedono subito, con un tocco invece di tre.
+function apriGruppo(v){navigateTo(v,{keepMenu:true})}
 function back(){if(!guardUnsavedChanges())return;const prev=state.history.pop()||{view:'home',edit:null,editType:null};state.view=prev.view||'home';state.edit=prev.edit||null;state.editType=prev.editType||null;state.parent=prev.parent||null;state.menuOpen=false;render()}
 function toggleMainMenu(){if(!guardUnsavedChanges())return;state.menuOpen=!state.menuOpen;render()}
 const MENU=[
   {v:'home',ic:'⌂',l:'Dashboard'},
-  {main:'timesheet',ic:'◷',l:'Timesheet',sub:[{v:'newChoice',l:'Nuovo consuntivo'},{v:'calendario',l:'Calendario'},{v:'griglia',l:'Consuntivo mensile'},{v:'pivot',l:'Analisi consuntivi'},{v:'reportWbs',l:'Report analitico WBS'},{v:'tmManage',l:'Incarichi continuativi'},{v:'importaConsuntivi',l:'Carica da foglio'}]},
+  // Il gruppo che si apre ogni giorno. «Nuovo consuntivo» punta diritto
+  // al modulo: prima passava da una scheda di scelta con tre voci, di cui
+  // una era gia' una voce di menu per conto suo. Gli altri due tipi di
+  // compenso stanno in fondo al modulo, a un tocco come prima.
+  {main:'timesheet',ic:'◷',l:'Consuntivi',sub:[
+    {v:'dailyForm',l:'Nuovo consuntivo'},
+    {v:'griglia',l:'Consuntivo mensile'},
+    {v:'calendario',l:'Calendario'},
+    {v:'importaConsuntivi',l:'Carica da foglio'},
+    {v:'tmManage',l:'Incarichi continuativi'},
+    {v:'pivot',l:'Analisi consuntivi'}]},
   {main:'expenses',ic:'▦',l:'Spese',sub:[{v:'expenseForm',l:'Nuova spesa'}]},
-  {main:'billing',ic:'€',l:'Fatturazione',sub:[{v:'billing',l:'Mensile per cliente'},{v:'fatturazioneCommessa',l:'Per commessa'},{v:'reportEconomico',l:'Report economico'}]},
+  // «Per commessa» e «Report analitico WBS» non stanno piu' qui: si
+  // aprono dalla commessa a cui si riferiscono, che e' il posto dove
+  // uno le cerca. Il menu non e' un elenco di tutto quello che esiste.
+  {main:'billing',ic:'€',l:'Fatturazione',sub:[
+    {v:'billing',l:'Mensile per cliente'},
+    {v:'reportEconomico',l:'Report economico'}]},
   {v:'balance',ic:'∑',l:'Bilancio'},
-  {main:'tax',ic:'%',l:'Tassazione',sub:[{v:'tasseFuture',l:'Tasse future'},{v:'taxPayments',l:'Pagamenti fiscali (INPS)'},{v:'taxSettings',l:'Configurazione fiscale'}]},
-  {main:'settings',ic:'⚙',l:'Impostazioni',sub:[{v:'clients',l:'Clienti'},{v:'engagements',l:'Commesse'},{v:'projects',l:'Progetti'},{v:'activities',l:'Attività'},{v:'expenseCategories',l:'Voci di costo/spesa'},{v:'invoiceTemplates',l:'Template fattura'},{v:'appearance',l:'Aspetto / Tema'},{v:'account',l:'Account'}]}
+  {main:'tax',ic:'%',l:'Tassazione',sub:[
+    {v:'tasseFuture',l:'Tasse future'},
+    {v:'taxPayments',l:'Pagamenti fiscali (INPS)'},
+    {v:'taxSettings',l:'Configurazione fiscale'}]},
+  // Clienti, progetti e commesse sono una gerarchia sola: il progetto si
+  // crea dentro il cliente e la commessa dentro il progetto. Tre voci
+  // separate erano tre porte per la stessa stanza.
+  {main:'settings',ic:'⚙',l:'Impostazioni',sub:[
+    {v:'clients',l:'Clienti e progetti'},
+    {v:'activities',l:'Attività'},
+    {v:'expenseCategories',l:'Voci di costo/spesa'},
+    {v:'invoiceTemplates',l:'Template fattura'},
+    {v:'appearance',l:'Aspetto / Tema'},
+    {v:'account',l:'Account'}]}
 ];
 // A quale voce di menu appartiene ogni vista. Una vista che manca da
 // qui fa richiudere il gruppo appena la si apre: era il caso di tutte
 // le viste nuove — Commesse per prima — e sembrava che il menu si
 // chiudesse da solo a ogni clic.
 const NAV_CHILDREN={
-  timesheet:['timesheet','newChoice','calendario','giorno','griglia','pivot','reportWbs','tmManage','tmForm','importaConsuntivi','dailyForm','dailyEdit','monthlyForm','monthlyEdit','manualForm','manualEdit','annualMonths','summary'],
+  timesheet:['timesheet','calendario','giorno','griglia','pivot','reportWbs','tmManage','tmForm','importaConsuntivi','dailyForm','dailyEdit','monthlyForm','monthlyEdit','manualForm','manualEdit','annualMonths'],
   expenses:['expenses','expenseForm','expenseEdit'],
-  billing:['billing','billingDetail','annualInvoices','incassi','fatturatoDetail','fatturazioneCommessa','reportEconomico'],
+  billing:['billing','billingDetail','annualInvoices','fatturatoDetail','fatturazioneCommessa','reportEconomico'],
   tax:['tax','tasseFuture','taxPayments','taxPaymentEdit','taxSettings'],
   settings:['settings','clients','clientEdit','clientDetail','engagements','engagementDetail','engagementNew','engagementEdit','projects','projectEdit','projectDetail','projectNew','wbsEdit','activities','activityEdit','expenseCategories','expenseCategoryEdit','invoiceTemplates','invoiceTemplateEdit','appearance','account','exportTimesheet']
 };
@@ -116,7 +146,7 @@ function navSectionLabel(view){for(const m of MENU){const key=m.main||m.v;const 
 function navMenu(){const cur=navSectionLabel(state.view);return MENU.map(m=>{
   if(!m.sub)return `<button class="${cur===m.l?'active':''}" onclick="go('${m.v}')"><span>${m.ic}</span><b>${m.l}</b></button>`;
   const open=cur===m.l;
-  const parent=`<button class="navParentBtn ${open?'active':''}" onclick="go('${m.main}')"><span>${m.ic}</span><b>${m.l}</b><i class="navChev">${open?'▾':'▸'}</i></button>`;
+  const parent=`<button class="navParentBtn ${open?'active':''}" onclick="apriGruppo('${m.main}')"><span>${m.ic}</span><b>${m.l}</b><i class="navChev">${open?'▾':'▸'}</i></button>`;
   const subs=open?`<div class="navSubList">${m.sub.map(s=>`<button class="navSubItem ${state.view===s.v?'active':''}" onclick="${s.edit?`goNav('${s.v}','${s.edit}')`:`go('${s.v}')`}">${s.l}</button>`).join('')}</div>`:'';
   return parent+subs;
 }).join('')}
@@ -351,18 +381,12 @@ function openAnnualInvoices(mode){navigateTo('annualInvoices',{edit:mode})}
 function openMonthTimesheet(year,month){state.month=`${year}-${String(month).padStart(2,'0')}`;navigateTo('timesheet')}
 function openInvoiceDetail(clientId,year,month){state.month=`${year}-${String(month).padStart(2,'0')}`;navigateTo('billingDetail',{edit:clientId})}
 function annualMonths(){const year=currentYear();const md=annualMonthData(year);const tot=annualTotals(year);return appShell(`<h1>Consuntivato ${year}</h1><p class="sub">Dettaglio mese per mese. Tocca un mese per aprire il relativo timesheet.</p><div class="card"><b>Totale anno ${year}</b><div class="kpiGrid" style="margin-top:14px"><div><span>Consuntivato</span><strong>${fmtEUR(tot.consuntivato)}</strong></div><div><span>Fatturato</span><strong>${fmtEUR(tot.fatturato)}</strong></div><div><span>Incassato</span><strong>${fmtEUR(tot.incassato)}</strong></div><div><span>Speso</span><strong>${fmtEUR(tot.spese)}</strong></div></div>${tot.pianificato>0?`<div class="metricLine" style="margin-top:12px"><span class="tag blue">Pianificato</span> ${fmtEUR(tot.pianificato)} · giorni futuri (non nel consuntivato)</div>`:''}</div><div class="list">${md.map(m=>`<div class="row" onclick="openMonthTimesheet(${year},${m.month})"><div class="date">${m.label}</div><div><div class="title">${monthNames[m.month-1]} ${year}</div><div class="desc">Consuntivato ${fmtEUR(m.consuntivato)} · Fatturato ${fmtEUR(m.fatturato)}<br>Incassato ${fmtEUR(m.incassato)} · Speso ${fmtEUR(m.spese)}${m.pianificato>0?' · Pianificato '+fmtEUR(m.pianificato):''}</div></div><div class="value">${fmtEUR(m.consuntivato)}</div></div>`).join('')}</div>`)}
-function incassi(){return annualInvoices('collected')}
 function annualInvoices(modeArg){const year=currentYear();const mode=modeArg||(state.edit==='collected'?'collected':'issued');let rows=data.billingHeaders.filter(h=>Number(h.year)===Number(year)&&['invoice_issued','collected'].includes(h.status));if(mode==='collected')rows=rows.filter(h=>h.status==='collected');rows=rows.sort((a,b)=>(Number(b.month)-Number(a.month))||clientName(a.client_id).localeCompare(clientName(b.client_id)));const title=mode==='collected'?`Incassi ${year}`:`Fatture emesse ${year}`;const amountOf=h=>mode==='collected'?Number(h.collected_amount||h.invoice_total_amount||h.total_amount||0):Number(h.invoice_total_amount||h.total_amount||0);const total=rows.reduce((s,h)=>s+amountOf(h),0);return appShell(`<h1>${title}</h1><p class="sub">Tocca una voce per aprire il dettaglio della fattura.</p><div class="card"><b>Totale ${mode==='collected'?'incassato':'fatturato'} ${year}</b><div class="amount" style="margin-top:8px">${fmtEUR(total)}</div></div><div class="list">${rows.map(h=>`<div class="row" onclick="openInvoiceDetail('${h.client_id}',${h.year},${h.month})"><div class="date">${String(h.month).padStart(2,'0')}/${h.year}</div><div><div class="title">${esc(clientName(h.client_id))}</div><div class="desc">${h.invoice_number?'Fattura '+esc(h.invoice_number)+' · ':''}${statusLabel(h.status)}${h.invoice_date?' · '+dateIT(h.invoice_date):''}</div></div><div class="value">${fmtEUR(amountOf(h))}</div></div>`).join('')||`<div class="empty">${mode==='collected'?'Nessun incasso registrato':'Nessuna fattura emessa'} nel ${year}.</div>`}</div>`)}
 function home(){const t=totals();const y=annualTotals(currentYear());return appShell(`<h1 class="srOnly">Dashboard</h1><button class="primary cta" onclick="newEntryChoice()">+ Nuovo consuntivo</button><div class="homeTop">${monthSelector()}</div><div class="card cardLink" onclick="go('timesheet')" role="button" title="Apri il timesheet di ${monthLabel(state.month)}"><b>Consuntivo mese <span class="cardLinkArrow">›</span></b><div class="kpiGrid" style="margin-top:14px"><div><span>Ore consuntivate</span><strong>${fmtNum(t.hours,1)} h</strong><small>${fmtNum(t.days,2)} gg/u</small></div><div><span>Importo mese</span><strong>${fmtEUR(t.amount)}</strong><small>consuntivato</small></div></div>${t.plannedAmount>0?`<div class="metricLine" style="margin-top:10px"><span class="tag blue">Pianificato</span> ${fmtNum(t.plannedHours,1)} h · ${fmtEUR(t.plannedAmount)}</div>`:''}</div><div class="dashboardCard heroCard cardLink" onclick="openAnnualMonths()" role="button" title="Dettaglio consuntivato mese per mese"><b>Consuntivato anno ${currentYear()} <span class="cardLinkArrow">›</span></b><div class="kpiGrid" style="${y.pianificato>0?'':'grid-template-columns:1fr;'}margin-top:14px"><div style="${y.pianificato>0?'':'border-right:0'}"><span>Anno in corso</span><strong>${fmtEUR(y.consuntivato)}</strong><small>consuntivato</small></div>${y.pianificato>0?`<div style="border-right:0"><span>Pianificato</span><strong>${fmtEUR(y.pianificato)}</strong><small>giorni futuri</small></div>`:''}</div><div class="chartWrap"><div class="chartTitle"><span>Andamento mese per mese</span><span>consuntivato · pianificato</span></div>${annualChartSvg()}</div></div>${homeFatturatoCard()}${homeIncassiCard()}${dashFull()?homeBalanceCharts()+homeMultiChart():''}<button type="button" class="secondary dashToggle" onclick="toggleDashFull()">${dashFull()?'▴ Nascondi analisi e grafici':'▾ Mostra analisi e grafici'}</button>`)}
 function dashFull(){return settingValue('dash_full')==='1'}
 async function toggleDashFull(){const r=await saveSetting('dash_full',dashFull()?'0':'1');if(r.error)return setMsg(r.error.message,7000);await reload();render()}
-function newEntryChoice(){navigateTo('newChoice')}
+function newEntryChoice(){navigateTo('dailyForm')}
 function openGriglia(){const v=state.editType;if(typeof v==='string'&&v.length===10&&v.charAt(4)==='-')state.month=v.slice(0,7);navigateTo('griglia')}
-function newChoice(){return appShell(`<h1>Nuovo consuntivo</h1><p class="sub">Un giorno alla volta, oppure tutto il mese insieme.</p><div class="actions">
-<button class="menuBtn" onclick="goForDay('dailyForm')"><span><b>Consuntivo giornaliero</b><br><span class='sub'>Un giorno, una voce: ore lavorate valorizzate secondo tariffa</span></span><span>›</span></button>
-<button class="menuBtn" onclick="openGriglia()"><span><b>Consuntivo mensile</b><br><span class='sub'>Tutto il mese in una griglia: una riga per commessa, una colonna per giorno</span></span><span>›</span></button>
-<button class="menuBtn" onclick="goForDay('manualForm')"><span><b>Compenso una tantum</b><br><span class='sub'>Importo fisso, indipendente da ore e giornate</span></span><span>›</span></button>
-</div>`)}
 // Il lavoro si fa da remoto quasi sempre: "Remoto" e' il valore di
 // partenza, e la trasferta la si segna quando capita. Passando una
 // sede esplicita — anche vuota, in modifica — comanda quella.
@@ -489,7 +513,7 @@ function giorno(){
   return appShell(`<h1>${wdName} ${fmtDMY(iso)}</h1>${badges?`<p class="sub">${badges}</p>`:''}<div class="dayNav"><button type="button" onclick="dayShift(-1)">‹ Giorno prec.</button><button type="button" onclick="go('calendario')">Calendario</button><button type="button" onclick="dayShift(1)">Giorno succ. ›</button></div><div class="card"><b>Riepilogo giornata</b><div class="kpiGrid three" style="margin-top:14px"><div><span>Ore</span><strong>${fmtNum(ore,1)} h</strong><small>${fmtDays(ore)} gg/u</small></div><div><span>Voci</span><strong>${rows.length}</strong></div><div><span>Importo</span><strong>${fmtEUR(imp)}</strong></div></div></div>${selBar('giorno',rows.length)}${list}${rows.length?`<button type="button" class="secondary" onclick="newEntryForDay()">+ Aggiungi consuntivo in questo giorno</button>`:''}`);
 }
 function goForDay(v){navigateTo(v,{editType:state.editType})}
-function newEntryForDay(){navigateTo('newChoice',{editType:state.edit||todayISO()})}
+function newEntryForDay(){navigateTo('dailyForm',{editType:state.edit||todayISO()})}
 async function saveAssenza(ev){
   ev.preventDefault();
   const f=Object.fromEntries(new FormData(ev.target));
@@ -658,7 +682,11 @@ async function dopoIlSalvataggio(f){
   setMsg('Salvato. Ora '+fmtDMY(iso)+'.',4000);
 }
 function prefillDate(){const v=state.editType;return (typeof v==='string'&&v.length===10&&v.charAt(4)==='-')?v:new Date().toISOString().slice(0,10)}
-function dailyForm(){const clients=dailyClients();const pre=state.prefill||{};const selected=(pre.client_id&&clients.some(c=>c.id===pre.client_id))?pre.client_id:(clients[0]?.id||'');return appShell(`<h1>Consuntivo giornaliero</h1><p class="sub">Ore effettivamente lavorate, valorizzate secondo tariffa (tariffa oraria = tariffa giornaliera / 8h).</p>${clients.length?`<form class="form" onsubmit="saveDaily(event)"><div class="field"><label>Data</label><input name="entry_date" type="date" required value="${pre.dataVuota?'':prefillDate()}">${pre.dataVuota?'<div class="small">Copia di un consuntivo esistente: scegli la data.</div>':''}</div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)">${clients.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div><div id="hierBlock">${hierAvailable(selected)?hierFields(selected,pre.wbs_id||'')+'<input type="hidden" name="project_id" value="'+esc(pre.project_id||'')+'">':campiSenzaGerarchia(selected,pre.project_id||'',pre.activity_id||'')}</div><details class="moreFields"><summary>Altri dettagli (sede, luogo, descrizione)</summary><div class="field"><label>Sede</label><select name="work_site">${sediOptions(pre.work_site||SEDE_DEFAULT)}</select></div><div class="field"><label>Luogo/Città</label><input name="work_city" value="${esc(pre.work_city||'')}" placeholder="Es. Verona, Milano, Canicattì"></div><div class="field"><label>Descrizione</label><textarea name="description">${esc(pre.description||'')}</textarea></div></details><div class="field"><label>Ore consuntivate</label><input name="hours" type="number" step="0.25" value="${pre.hours!=null?esc(String(pre.hours)):'8'}"></div><div class="field"><label>Note</label><textarea name="notes" placeholder="Note interne opzionali"></textarea></div><div class="actions"><button class="primary" data-busy="Salvataggio…">Salva</button><button type="button" class="secondary" onclick="salvaEVai(this,1)">Salva e vai al giorno dopo ›</button><button type="button" class="secondary" onclick="go('home')">Annulla</button></div></form>`:`<div class="card">Crea prima un cliente con tariffa giornaliera in Configurazione.</div>`}`)}
+function dailyForm(){const clients=dailyClients();const pre=state.prefill||{};const selected=(pre.client_id&&clients.some(c=>c.id===pre.client_id))?pre.client_id:(clients[0]?.id||'');return appShell(`<h1>Consuntivo giornaliero</h1><p class="sub">Ore effettivamente lavorate, valorizzate secondo tariffa (tariffa oraria = tariffa giornaliera / 8h).</p>${clients.length?`<form class="form" onsubmit="saveDaily(event)"><div class="field"><label>Data</label><input name="entry_date" type="date" required value="${pre.dataVuota?'':prefillDate()}">${pre.dataVuota?'<div class="small">Copia di un consuntivo esistente: scegli la data.</div>':''}</div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)">${clients.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div><div id="hierBlock">${hierAvailable(selected)?hierFields(selected,pre.wbs_id||'')+'<input type="hidden" name="project_id" value="'+esc(pre.project_id||'')+'">':campiSenzaGerarchia(selected,pre.project_id||'',pre.activity_id||'')}</div><details class="moreFields"><summary>Altri dettagli (sede, luogo, descrizione)</summary><div class="field"><label>Sede</label><select name="work_site">${sediOptions(pre.work_site||SEDE_DEFAULT)}</select></div><div class="field"><label>Luogo/Città</label><input name="work_city" value="${esc(pre.work_city||'')}" placeholder="Es. Verona, Milano, Canicattì"></div><div class="field"><label>Descrizione</label><textarea name="description">${esc(pre.description||'')}</textarea></div></details><div class="field"><label>Ore consuntivate</label><input name="hours" type="number" step="0.25" value="${pre.hours!=null?esc(String(pre.hours)):'8'}"></div><div class="field"><label>Note</label><textarea name="notes" placeholder="Note interne opzionali"></textarea></div><div class="actions"><button class="primary" data-busy="Salvataggio…">Salva</button><button type="button" class="secondary" onclick="salvaEVai(this,1)">Salva e vai al giorno dopo ›</button><button type="button" class="secondary" onclick="go('home')">Annulla</button></div></form>
+      <div class="altriCompensi"><b>Ti serve un altro tipo di compenso?</b>
+        <button type="button" onclick="goForDay('manualForm')">Compenso una tantum ›</button>
+        <button type="button" onclick="goForDay('monthlyForm')">Compenso mensile ›</button>
+      </div>`:`<div class="card">Crea prima un cliente con tariffa giornaliera in Configurazione.</div>`}`)}
 async function saveDaily(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));if(!guardDay(f.entry_date))return;const c=clientById(f.client_id);const lin=f.wbs_id?wbsLineage(f.wbs_id):null;if(hierAvailable(f.client_id)&&!f.wbs_id)return setMsg('Scegli la WBS su cui registrare le ore.',5000);const payload={entry_date:f.entry_date,client_id:f.client_id,project_id:(lin?lin.project.id:f.project_id)||null,activity_id:(lin&&lin.wbs.activity_id?lin.wbs.activity_id:f.activity_id)||null,wbs_id:f.wbs_id||null,work_location:[norm(f.work_site),norm(f.work_city)].filter(Boolean).join(' - ')||null,work_site:norm(f.work_site)||null,work_city:norm(f.work_city)||null,description:f.description||null,notes:f.notes||null,hours:Number(f.hours||0),daily_rate_snapshot:Number(c?.daily_rate||0),standard_hours_snapshot:Number(c?.standard_hours||8)};const {error}=await insertResilient('timesheet_entries',payload);if(error)return setMsg(error.message,7000);await reload();await dopoIlSalvataggio(f)}
 function dailyEdit(){const e=data.entries.find(x=>x.id===state.edit);if(!e)return timesheet();const clients=dailyClients();return appShell(`<h1>Modifica consuntivo</h1><form class="form" onsubmit="saveDailyEdit(event)"><div class="field"><label>Data</label><input name="entry_date" type="date" value="${esc(e.entry_date)}"></div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)">${clients.map(c=>`<option value="${c.id}" ${c.id===e.client_id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div id="hierBlock">${hierAvailable(e.client_id)?hierFields(e.client_id,e.wbs_id||'')+'<input type="hidden" name="project_id" value="'+(e.project_id||'')+'">':campiSenzaGerarchia(e.client_id,e.project_id||'',e.activity_id||'')}</div><div class="field"><label>Sede</label><select name="work_site">${sediOptions(e.work_site==null?SEDE_DEFAULT:e.work_site)}</select></div><div class="field"><label>Luogo/Città</label><input name="work_city" value="${esc(e.work_city||'')}" placeholder="Es. Verona, Milano, Canicattì"></div><div class="field"><label>Descrizione</label><textarea name="description">${esc(e.description||'')}</textarea></div><div class="field"><label>Ore consuntivate</label><input name="hours" type="number" step="0.25" value="${Number(e.hours||0)}"></div><div class="field"><label>Note</label><textarea name="notes">${esc(e.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary" onclick="salvaEVai(this,1)">Salva e vai al giorno dopo ›</button><button type="button" class="secondary" onclick="salvaEVai(this,-1)">‹ Salva e vai al giorno prima</button><button type="button" class="secondary" onclick="duplicateDaily('${e.id}')">Duplica</button><button type="button" class="secondary danger" onclick="deleteDaily('${e.id}')">Elimina</button><button type="button" class="secondary" onclick="go('timesheet')">Annulla</button></div></form>`)}
 async function saveDailyEdit(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));if(!guardDay(f.entry_date))return;const c=clientById(f.client_id);const lin=f.wbs_id?wbsLineage(f.wbs_id):null;if(hierAvailable(f.client_id)&&!f.wbs_id)return setMsg('Scegli la WBS su cui registrare le ore.',5000);const payload={entry_date:f.entry_date,client_id:f.client_id,project_id:(lin?lin.project.id:f.project_id)||null,activity_id:(lin&&lin.wbs.activity_id?lin.wbs.activity_id:f.activity_id)||null,wbs_id:f.wbs_id||null,work_location:[norm(f.work_site),norm(f.work_city)].filter(Boolean).join(' - ')||null,work_site:norm(f.work_site)||null,work_city:norm(f.work_city)||null,description:f.description||null,notes:f.notes||null,hours:Number(f.hours||0),daily_rate_snapshot:Number(c?.daily_rate||0),standard_hours_snapshot:Number(c?.standard_hours||8)};const {error}=await updateResilient('timesheet_entries',payload,state.edit);if(error)return setMsg(error.message,7000);await reload();state.edit=null;await dopoIlSalvataggio(f)}
@@ -1120,7 +1148,6 @@ if(r.kind==='manual')return `<div ${rowAttrs('manual',r.id)}><div class="date">$
 return `<div ${rowAttrs('expense',r.id)}><div class="date">${selBox('expense',r.id)}${dateIT(r.expense_date)}</div><div><div class="title">${esc(clientName(r.client_id))}${projectName(r.project_id)?' / '+esc(projectName(r.project_id)):''}</div><div class="desc">Spesa · ${esc(expenseCategoryName(r.expense_category_id))} ${r.work_site||r.work_city?'· '+esc([r.work_site,r.work_city].filter(Boolean).join(' - ')):''}</div><div class="desc">${esc(r.description||'')}</div></div><div class="value">Spesa</div></div>`}
 
 function annualSummaryCard(){const y=currentYear();const at=annualTotals(y);return `<div class="card cardLink" onclick="openAnnualMonths()" role="button" title="Dettaglio consuntivato mese per mese"><b>Annuale ${y} <span class="cardLinkArrow">›</span></b><div class="kpiGrid three" style="margin-top:14px"><div><span>Consuntivato</span><strong>${fmtEUR(at.consuntivato)}</strong></div><div><span>Fatturato</span><strong>${fmtEUR(at.fatturato)}</strong></div><div><span>Incassato</span><strong>${fmtEUR(at.incassato)}</strong></div></div><div class="metricLine" style="margin-top:12px">Da incassare <span class="dot">·</span> ${fmtEUR(at.daIncassare)}</div></div>`}
-function summary(){const groups=groupSummary();const t=totals();return appShell(`<h1>Riepilogo</h1><h2>Mese</h2>${monthSelector()}<div class="card"><b>Totale mese</b><div class="metricLine">${metricLine(t.hours,t.amount)}</div><div class="chartWrap"><div class="chartTitle"><span>Andamento mese</span><span>1 → fine mese</span></div>${monthChartSvg()}</div></div><div class="list">${groups.map(r=>`<div class="row summaryRow"><div></div><div><div class="title">${esc(clientName(r.client_id))}</div><div class="desc">${esc(projectName(r.project_id)||'Senza progetto')} · ${esc(r.label)}</div><div class="metricLine">${r.type==='daily_rate_8h'?metricLine(r.hours,r.amount):amountLine(r.label,r.amount)}</div></div><div class="value"></div></div>`).join('')||emptyState('Nessun riepilogo in questo mese.','+ Registra un consuntivo','newEntryChoice()')}</div><h2>Anno</h2>${annualSummaryCard()}`)}
 function billingGroupsByClient(){const lines=groupSummary();const by={};lines.forEach(l=>{if(!by[l.client_id])by[l.client_id]={client_id:l.client_id,lines:[],baseTotal:0,total:0,hours:0};by[l.client_id].lines.push(l);by[l.client_id].baseTotal+=Number(l.amount||0);by[l.client_id].hours+=Number(l.hours||0)});Object.values(by).forEach(g=>{const header=headerForClient(g.client_id)||{};g.calc=billingCalc(g,header);g.total=g.calc.total});return Object.values(by).sort((a,b)=>clientName(a.client_id).localeCompare(clientName(b.client_id)))}
 function billingMonthlyView(){const {year,month}=periodParts();const md=annualMonthData(year);const m=md[month-1]||{};const fat=m.fatturato||0;const inc=m.incassato||0;const daInc=Math.max(0,fat-inc);const daFat=Math.max(0,(m.consuntivato||0)-(m.fatturatoBase||0));return `<div class="card"><b>Vista mensile · ${monthLabel(state.month)}</b><div class="kpiGrid" style="margin-top:14px"><div><span>Fatturato mese</span><strong>${fmtEUR(fat)}</strong></div><div><span>Incassato mese</span><strong>${fmtEUR(inc)}</strong></div></div><div class="metricLine" style="margin-top:12px">Da fatturare ${fmtEUR(daFat)} <span class="dot">·</span> Da incassare ${fmtEUR(daInc)}</div></div>`}
 function billingAnnualView(){const year=currentYear();const at=annualTotals(year);return `<div class="card"><b>Vista annuale · ${year}</b><div class="kpiGrid" style="margin-top:14px"><div><span>Fatturato anno</span><strong>${fmtEUR(at.fatturato)}</strong></div><div><span>Incassato anno</span><strong>${fmtEUR(at.incassato)}</strong></div></div><div class="metricLine" style="margin-top:12px">Da fatturare ${fmtEUR(at.daFatturare)} <span class="dot">·</span> Da incassare ${fmtEUR(at.daIncassare)}</div><div class="grid" style="margin-top:12px"><button class="secondary" onclick="openAnnualInvoices('issued')">Fatture emesse ›</button><button class="secondary" onclick="openAnnualInvoices('collected')">Incassi ›</button></div></div>`}
@@ -1655,6 +1682,15 @@ function engagementDetail(){
         <div class="field"><label>Valido dal</label><input name="valid_from" type="date"></div>
         <div class="field"><label>Valido al</label><input name="valid_to" type="date"></div>
         <button class="primary">Aggiungi riferimento</button></form></details>
+    <h2>Report di questa commessa</h2>
+    <div class="list">
+      <div class="row" onclick="go('fatturazioneCommessa')"><div></div>
+        <div><div class="title">Fatturazione per commessa</div>
+        <div class="desc">Quanto è maturato e quanto è già stato fatturato.</div></div><div class="chev">›</div></div>
+      <div class="row" onclick="go('reportWbs')"><div></div>
+        <div><div class="title">Report analitico WBS</div>
+        <div class="desc">Il dettaglio per voce di lavoro.</div></div><div class="chev">›</div></div>
+    </div>
     <button type="button" class="secondary" onclick="${p?`openProject('${p.id}')`:`go('engagements')`}">${p?'Torna al progetto':'Torna alle commesse'}</button>`);
 }
 const STATI_RIF={active:'Attivo',expired:'Scaduto',superseded:'Sostituito',cancelled:'Annullato'};
@@ -2777,7 +2813,7 @@ function render(){
       <button type="button" class="primary" onclick="go('home')">Torna alla dashboard</button>`;
   }
 }
-function renderInterno(){document.documentElement.setAttribute('data-view',state.view||'home');if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,newChoice,reportWbs,reportEconomico,fatturazioneCommessa,engagements,engagementNew,engagementEdit,engagementDetail,projectNew,projectDetail,projectWbs:projectDetail,clientDetail,wbsEdit,importaConsuntivi,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,timesheet,griglia,pivot,summary,billing,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,incassi,balance,taxSettings,tasseFuture,fatturatoDetail,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
+function renderInterno(){document.documentElement.setAttribute('data-view',state.view||'home');if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,reportWbs,reportEconomico,fatturazioneCommessa,engagements,engagementNew,engagementEdit,engagementDetail,projectNew,projectDetail,clientDetail,wbsEdit,importaConsuntivi,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,timesheet,griglia,pivot,billing,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,balance,taxSettings,tasseFuture,fatturatoDetail,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
 
 Object.assign(window,{
   setRep,
@@ -2843,6 +2879,7 @@ Object.assign(window,{
   amountLine,
   dateIT,
   go,
+  apriGruppo,
   goNav,
   saveTM,
   setSortMode,
@@ -2919,7 +2956,6 @@ Object.assign(window,{
   openInvoiceDetail,
   annualMonths,
   annualInvoices,
-  incassi,
   expReimbursable,
   isMissingColumnError,
   missingColumnName,
@@ -2948,7 +2984,6 @@ Object.assign(window,{
   settingsRow,
   home,
   newEntryChoice,
-  newChoice,
   sediOptions,
   projectOptions,
   activityOptions,
@@ -2986,7 +3021,6 @@ Object.assign(window,{
   timesheet,
   timesheetRow,
   annualSummaryCard,
-  summary,
   billingGroupsByClient,
   billing,
   openBillingClient,

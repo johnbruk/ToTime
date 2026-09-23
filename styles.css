@@ -612,3 +612,14 @@ table.griglia.prospetto td.riga{padding:10px;text-align:left}
 @media (max-width:699px){
   .calCell .calFest{display:none}
 }
+
+/* Gli altri tipi di compenso, in fondo al consuntivo giornaliero.
+   Prima stavano dietro una scheda di scelta che si attraversava ogni
+   volta anche per il caso normale. Qui restano a un tocco senza
+   intralciare: sono la coda del modulo, non un bivio prima di entrarci. */
+.altriCompensi{margin-top:26px;padding-top:16px;border-top:1px solid var(--line)}
+.altriCompensi b{display:block;color:var(--muted);font-size:13px;font-weight:750;margin-bottom:10px}
+.altriCompensi button{display:block;width:100%;text-align:left;border:1px solid var(--line);
+  background:var(--surface2);color:var(--text);border-radius:0;padding:13px 14px;
+  margin-bottom:8px;font-size:14px;font-weight:600;min-height:44px;box-shadow:none}
+.altriCompensi button:hover{background:var(--surface)}

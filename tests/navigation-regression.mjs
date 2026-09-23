@@ -113,14 +113,14 @@ await new Promise(resolve => setTimeout(resolve, 0));
 await new Promise(resolve => setTimeout(resolve, 0));
 
 assert.match(appNode.innerHTML, /Nuovo consuntivo/);
-assert.match(appNode.innerHTML, /Timesheet/);
+assert.match(appNode.innerHTML, /Consuntivi/);
 
 window.toggleMainMenu();
 assert.match(appNode.innerHTML, /topMenu/);
 assert.match(appNode.innerHTML, /Fatturazione/);
 
-window.go('summary');
-assert.match(appNode.innerHTML, /Riepilogo/);
+window.go('calendario');
+assert.match(appNode.innerHTML, /Calendario/);
 assert.match(appNode.innerHTML, /Indietro/);
 
 window.back();
