@@ -68,6 +68,14 @@ const PERCORSI=[
    passi:[/^☰$/,/Consuntivi|Timesheet/,/^Carica da foglio$/], arrivo:/foglio|Carica/i},
   {nome:'Anagrafica clienti dal menu', tetto:3,
    passi:[/^☰$/,/Impostazioni/,/^Clienti/], arrivo:/Clienti/i},
+  // Fatturazione non e' piu' un gruppo: si apre con un tocco in meno.
+  {nome:'Fatturazione dal menu', tetto:2,
+   passi:[/^☰$/,/Fatturazione$/], arrivo:/Fatturazione/i},
+  // Il report economico e' uscito dal menu. Se la porta dalla
+  // fatturazione si rompesse, diventerebbe irraggiungibile in silenzio:
+  // e' esattamente il guasto che avevo trovato su monthlyForm.
+  {nome:'Report economico dalla fatturazione', tetto:3,
+   passi:[/^☰$/,/Fatturazione$/,/^Report economico/], arrivo:/Report economico/i},
 ];
 
 console.log('\n=== I percorsi di ogni giorno ===');
@@ -104,6 +112,40 @@ for(;k<sorgente.length;k++){ if(sorgente[k]==='[')d++; else if(sorgente[k]===']'
 const foglie=[...sorgente.slice(im,k+1).matchAll(/\{v:'[a-zA-Z]+',l:'([^']+)'/g)].map(m=>m[1]);
 console.log('  voci:',foglie.length);
 ok(foglie.length<=20,'il menu sta entro venti voci',foglie.length+' voci');
+
+console.log('\n=== Ogni scheda ha una porta ===');
+// Il guasto piu' costoso di questi giorni: monthlyForm esisteva, era
+// nella mappa del render, ma nessun pulsante la apriva — i compensi
+// mensili si potevano modificare e non creare. Lo stesso valeva per
+// summary e incassi.
+//
+// Qui si prende la mappa del render e si controlla che il nome di ogni
+// scheda compaia da qualche altra parte nel codice: in un go(), in un
+// navigateTo(), dentro un ternario, in un onclick. Se compare solo nella
+// mappa e nelle tabelle di servizio, quella scheda non ha una porta.
+const testo=fs.readFileSync(ALT||path.join(ROOT,'app.js'),'utf8');
+const im2=testo.indexOf("let html='';const map={");
+let dd=0,kk=testo.indexOf('{',im2+14);
+const inizioMappa=kk;
+for(;kk<testo.length;kk++){ if(testo[kk]==='{')dd++; else if(testo[kk]==='}'){dd--;if(!dd)break} }
+const schede=testo.slice(inizioMappa+1,kk).split(',').map(x=>x.split(':')[0].trim()).filter(Boolean);
+// Si toglie la mappa del render e le due tabelle che elencano i nomi
+// senza aprirli: NAV_CHILDREN, che dice quale gruppo di menu tenere
+// aperto, e viewLabel, che tiene i titoli. Il MENU invece resta: una
+// voce di menu e' una porta a tutti gli effetti.
+let resto=testo.slice(0,inizioMappa)+testo.slice(kk+1);
+for(const blocco of ['NAV_CHILDREN={','function viewLabel(v){']){
+  const a=resto.indexOf(blocco);
+  if(a<0)continue;
+  const ap='{', ch='}';
+  let e=0,z=resto.indexOf(ap,a);
+  for(;z<resto.length;z++){ if(resto[z]===ap)e++; else if(resto[z]===ch){e--;if(!e)break} }
+  resto=resto.slice(0,a)+resto.slice(z+1);
+}
+const senzaPorta=schede.filter(v=>!new RegExp(`['"\`]${v}['"\`]`).test(resto));
+console.log('  schede nella mappa:',schede.length);
+ok(senzaPorta.length===0,'ogni scheda della mappa e\' aperta da qualche parte',
+   senzaPorta.length?'SENZA PORTA: '+senzaPorta.join(', '):schede.length+' schede, tutte con almeno una porta');
 
 console.log('\n=== Niente si rompe per strada ===');
 ok(errs.length===0,'nessun errore JS lungo i percorsi',errs.slice(0,2).join(' | ')||'nessuno');
