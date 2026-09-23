@@ -104,16 +104,17 @@ for(const [larghezza,etichetta] of [[360,'telefono stretto (360px)'],[1440,'desk
       return {sx:Math.round(sx),dx:Math.round(dx),w:Math.round(r.width)}});
     ok(cta&&Math.abs(cta.sx-cta.dx)<=2,'il pulsante «Nuovo consuntivo» è centrato',
       cta?cta.sx+'px a sinistra · '+cta.dx+'px a destra':'non trovato');
-    // Le voci di «Nuovo consuntivo»: testo a sinistra, freccia a destra
-    await pg.evaluate(()=>window.go('newChoice'));await pg.waitForTimeout(250);
-    const voci=await pg.evaluate(()=>[...document.querySelectorAll('.menuBtn')].map(b=>{
-      const t=b.firstElementChild.getBoundingClientRect(),f=b.lastElementChild.getBoundingClientRect();
-      const r=b.getBoundingClientRect(),cs=getComputedStyle(b);
-      return {sx:Math.round(t.left-(r.left+parseFloat(cs.paddingLeft))),
-              dx:Math.round((r.right-parseFloat(cs.paddingRight))-f.right)}}));
-    ok(voci.length>0&&voci.every(v=>v.sx<=2&&v.dx<=2),
-      'nelle voci di menu il testo parte da sinistra e la freccia sta a destra',
-      voci.map(v=>v.sx+'/'+v.dx).join(' '));
+    // La coda del consuntivo giornaliero: gli altri tipi di compenso.
+    // Ha preso il posto della scheda di scelta che si attraversava ogni
+    // volta; qui si verifica che sia allineata come il resto del modulo.
+    await pg.evaluate(()=>window.go('dailyForm'));await pg.waitForTimeout(250);
+    const coda=await pg.evaluate(()=>[...document.querySelectorAll('.altriCompensi button')].map(b=>{
+      const r=b.getBoundingClientRect(),f=b.closest('.app').getBoundingClientRect();
+      const cs=getComputedStyle(b.closest('.app'));
+      return {sx:Math.round(r.left-(f.left+parseFloat(cs.paddingLeft))),h:Math.round(r.height)}}));
+    ok(coda.length===2,'il modulo offre gli altri due tipi di compenso',coda.length+' voci');
+    ok(coda.every(v=>Math.abs(v.sx)<=2),'allineate al bordo del modulo',coda.map(v=>v.sx).join('/')+'px');
+    ok(coda.every(v=>v.h>=44),'e alte almeno 44px sotto il dito',coda.map(v=>v.h).join('/')+'px');
     // I moduli non sono larghi un metro
     await pg.evaluate(()=>window.go('dailyForm'));await pg.waitForTimeout(250);
     const modulo=await pg.evaluate(()=>{const f=document.querySelector('form.form');

@@ -25,10 +25,16 @@ const gruppo=async()=>pg.evaluate(()=>{
 
 console.log('\n=== Ogni vista tiene aperto il suo gruppo ===');
 const ATTESI={
+  // il gruppo dei consuntivi, che e' quello che si apre ogni giorno
+  dailyForm:'Consuntivi', griglia:'Consuntivi', calendario:'Consuntivi',
+  importaConsuntivi:'Consuntivi', tmManage:'Consuntivi', pivot:'Consuntivi',
+  // le anagrafiche stanno tutte sotto Impostazioni, anche quelle che non
+  // hanno piu' una voce propria: ci si arriva da dentro il cliente, ma il
+  // menu deve comunque restare aperto sul gruppo giusto
   clients:'Impostazioni', engagements:'Impostazioni', projects:'Impostazioni',
   activities:'Impostazioni', expenseCategories:'Impostazioni', appearance:'Impostazioni',
-  griglia:'Timesheet', calendario:'Timesheet', pivot:'Timesheet', reportWbs:'Timesheet',
-  billing:'Fatturazione', fatturazioneCommessa:'Fatturazione', reportEconomico:'Fatturazione',
+  billing:'Fatturazione', reportEconomico:'Fatturazione',
+  fatturazioneCommessa:'Fatturazione', reportWbs:'Consuntivi',
   expenses:'Spese', tasseFuture:'Tassazione'};
 const persi=[];
 for(const [vista,atteso] of Object.entries(ATTESI)){
@@ -38,14 +44,37 @@ for(const [vista,atteso] of Object.entries(ATTESI)){
 }
 ok(persi.length===0,'nessuna vista fa richiudere il menu',persi.slice(0,4).join(' | ')||Object.keys(ATTESI).length+' viste controllate');
 
-console.log('\n=== Aprendo Commesse le sottovoci restano ===');
+console.log('\n=== Le anagrafiche hanno una porta sola ===');
+// Clienti, progetti e commesse sono una gerarchia: il progetto si crea
+// dentro il cliente e la commessa dentro il progetto. Nel menu c'e' una
+// voce sola, «Clienti e progetti», ma aprendo una commessa il gruppo
+// giusto deve restare aperto lo stesso.
 await pg.evaluate(()=>window.go('engagements'));await pg.waitForTimeout(250);
 const g=await gruppo();
-ok(g.aperto==='Impostazioni','il gruppo Impostazioni resta aperto',g.aperto||'chiuso');
-ok(g.sottovoci.includes('Commesse')&&g.sottovoci.includes('Clienti'),
-  'e si vedono ancora Clienti, Commesse, Progetti',g.sottovoci.join(', '));
-const attiva=await pg.evaluate(()=>{const a=document.querySelector('.sidebarNav .navSubItem.active');return a?a.textContent.trim():null});
-ok(attiva==='Commesse','con Commesse evidenziata come voce corrente',attiva||'nessuna');
+ok(g.aperto==='Impostazioni','aprendo una commessa resta aperto Impostazioni',g.aperto||'chiuso');
+ok(g.sottovoci.includes('Clienti e progetti'),'e la porta alle anagrafiche e\' una sola',g.sottovoci.join(', '));
+ok(!g.sottovoci.includes('Commesse')&&!g.sottovoci.includes('Progetti'),
+   'senza piu\' tre voci separate per la stessa gerarchia',g.sottovoci.join(', '));
+
+console.log('\n=== Il menu non elenca piu\' quello che non si usa ===');
+// Le voci si leggono dalla definizione, non dal DOM: cliccare i gruppi
+// ne apre uno e ne chiude un altro, e una lista raccolta cosi' sarebbe
+// incompleta — un controllo che passerebbe perche' non ha guardato.
+const fsMod=await import('node:fs');
+const sorgente=fsMod.readFileSync(new URL('../../app.js',import.meta.url).pathname,'utf8');
+const im=sorgente.indexOf('const MENU=[');
+let d=0,k=sorgente.indexOf('[',im);
+for(;k<sorgente.length;k++){ if(sorgente[k]==='[')d++; else if(sorgente[k]===']'){d--;if(!d)break} }
+const bloccoMenu=sorgente.slice(im,k+1);
+const etichette=[...bloccoMenu.matchAll(/\{v:'([a-zA-Z]+)',l:'([^']+)'/g)].map(m=>m[2]);
+const viste=[...bloccoMenu.matchAll(/\{v:'([a-zA-Z]+)'/g)].map(m=>m[1]);
+console.log('  voci di menu:',etichette.length,'→',etichette.join(', '));
+ok(etichette.length<=20,'il menu resta sotto le venti voci',etichette.length+' voci');
+for(const [vista,nome] of [['fatturazioneCommessa','Per commessa'],['reportWbs','Report analitico WBS'],
+                           ['engagements','Commesse'],['projects','Progetti'],['newChoice','la scheda di scelta']])
+  ok(!viste.includes(vista),`«${nome}» non e\' piu\' una voce di menu`);
+// ...ma il menu deve puntare al modulo, non a un bivio prima del modulo
+ok(viste.includes('dailyForm'),'e «Nuovo consuntivo» punta diritto al modulo',viste.slice(0,4).join(', '));
 
 await b.close();srv.close();
 console.log(`\nRISULTATO: ${pass} OK / ${fail} KO`);
