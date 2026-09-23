@@ -623,3 +623,18 @@ table.griglia.prospetto td.riga{padding:10px;text-align:left}
   background:var(--surface2);color:var(--text);border-radius:0;padding:13px 14px;
   margin-bottom:8px;font-size:14px;font-weight:600;min-height:44px;box-shadow:none}
 .altriCompensi button:hover{background:var(--surface)}
+
+/* La misura minima di un bersaglio da toccare.
+   Apple indica 44px: sotto, il dito manca il bersaglio o ne prende un
+   altro. Questi comandi stavano a 40-42px — le frecce del mese, le
+   icone della barra, la ✕ del menu, i pulsanti di spostamento e le
+   linguette dei periodi. Si toccavano, ma sotto la linea.
+
+   Solo dove si tocca: sul desktop il puntatore è preciso e la grafica
+   disegnata resta quella. Presidiato da tests/ui/dita.mjs. */
+@media (pointer: coarse){
+  .headerIcon,.iconbtn,.topMenuClose{width:44px;height:44px}
+  .month button{width:44px;height:44px}
+  .moveBtns button{width:44px;height:44px}
+  .scopeNav .tabs button,.tabs button{min-height:44px}
+}
