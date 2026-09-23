@@ -33,8 +33,7 @@ const ATTESI={
   // menu deve comunque restare aperto sul gruppo giusto
   clients:'Impostazioni', engagements:'Impostazioni', projects:'Impostazioni',
   activities:'Impostazioni', expenseCategories:'Impostazioni', appearance:'Impostazioni',
-  billing:'Fatturazione', reportEconomico:'Fatturazione',
-  fatturazioneCommessa:'Fatturazione', reportWbs:'Consuntivi',
+  reportWbs:'Consuntivi',
   expenses:'Spese', tasseFuture:'Tassazione'};
 const persi=[];
 for(const [vista,atteso] of Object.entries(ATTESI)){
@@ -42,6 +41,23 @@ for(const [vista,atteso] of Object.entries(ATTESI)){
   const g=await gruppo();
   if(g.aperto!==atteso)persi.push(vista+' → '+(g.aperto||'nessun gruppo aperto')+' (atteso '+atteso+')');
 }
+// Fatturazione e Bilancio non sono gruppi: sono voci dirette, quindi
+// non c'e' un gruppo da tenere aperto. Quello che deve succedere e' che
+// restino evidenziate come voce corrente anche dalle schede che stanno
+// sotto di loro — il report economico, per esempio, che dal menu e'
+// uscito e si apre dalla fatturazione.
+const spente=[];
+for(const [vista,atteso] of [['billing','Fatturazione'],['reportEconomico','Fatturazione'],
+                             ['fatturazioneCommessa','Fatturazione'],['balance','Bilancio']]){
+  await pg.evaluate(v=>window.go(v),vista);await pg.waitForTimeout(160);
+  const acc=await pg.evaluate(()=>[...document.querySelectorAll('.sidebarNav button')]
+    .filter(b=>b.classList.contains('active'))
+    .map(b=>b.textContent.replace(/[^A-Za-zÀ-ú ]/g,'').trim()));
+  if(!acc.includes(atteso))spente.push(`${vista} → ${acc.join(',')||'nessuna'} (atteso ${atteso})`);
+}
+ok(spente.length===0,'le voci dirette restano evidenziate da dentro le loro schede',
+   spente.join(' | ')||'Fatturazione e Bilancio');
+
 ok(persi.length===0,'nessuna vista fa richiudere il menu',persi.slice(0,4).join(' | ')||Object.keys(ATTESI).length+' viste controllate');
 
 console.log('\n=== Le anagrafiche hanno una porta sola ===');
@@ -71,6 +87,7 @@ const viste=[...bloccoMenu.matchAll(/\{v:'([a-zA-Z]+)'/g)].map(m=>m[1]);
 console.log('  voci di menu:',etichette.length,'→',etichette.join(', '));
 ok(etichette.length<=20,'il menu resta sotto le venti voci',etichette.length+' voci');
 for(const [vista,nome] of [['fatturazioneCommessa','Per commessa'],['reportWbs','Report analitico WBS'],
+                           ['reportEconomico','Report economico'],
                            ['engagements','Commesse'],['projects','Progetti'],['newChoice','la scheda di scelta']])
   ok(!viste.includes(vista),`«${nome}» non e\' piu\' una voce di menu`);
 // ...ma il menu deve puntare al modulo, non a un bivio prima del modulo
