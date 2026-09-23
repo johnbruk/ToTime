@@ -88,6 +88,53 @@ for(const v of ['dailyForm','tmForm','manualForm']){
 ok(indietro.length===0,'ogni modulo che scrive ore o compensi chiede la voce',
   indietro.join(' | ')||'dailyForm, tmForm, manualForm');
 
+console.log('\n=== E. La sede parte da «Remoto» ===');
+// Richiesta esplicita: i consuntivi nascono da remoto, la trasferta la
+// si mette a mano quando capita. Vale su tutti i moduli d'inserimento,
+// e non deve valere in modifica: una sede gia' scelta non si tocca.
+const senzaDefault=[];
+for(const v of ['dailyForm','tmForm','manualForm']){
+  await pg.evaluate(x=>window.go(x),v);await pg.waitForTimeout(400);
+  const r=await pg.evaluate(()=>{const s=document.querySelector('#app [name=work_site]');
+    return s?{val:s.value,opzioni:[...s.options].map(o=>o.value)}:null});
+  if(!r)senzaDefault.push(v+': nessun campo sede');
+  // Il confronto e' col valore vero, non con «non vuoto»: se qualcuno
+  // rinominasse l'opzione, il select ricadrebbe a stringa vuota in
+  // silenzio e un controllo piu' largo non se ne accorgerebbe.
+  else if(r.val!=='Remoto')senzaDefault.push(`${v}: «${r.val}» invece di «Remoto»`+
+    (r.opzioni.includes('Remoto')?'':' — «Remoto» non e\' nemmeno fra le opzioni'));
+}
+ok(senzaDefault.length===0,'ogni modulo d\'inserimento parte da «Remoto»',
+   senzaDefault.join(' | ')||'dailyForm, tmForm, manualForm');
+
+// Il rovescio, che e' la parte che potrebbe fare danno: se su quella
+// registrazione una sede c'era gia', il default non deve calpestarla.
+// Il banco di prova parte senza consuntivi, quindi ne creiamo uno con
+// una trasferta gia' scritta e lo riapriamo in modifica. Si legge dallo
+// store del mock e non da `data`, che e' interno al modulo e da fuori
+// non si vede.
+await pg.evaluate(()=>{
+  window.__stores.timesheet_entries.push({id:'ed1',user_id:'u1',entry_date:'2026-07-15',
+    client_id:'c1',project_id:'p1',activity_id:'a1',wbs_id:'w10',hours:8,
+    work_site:'Sede cliente',work_city:'Milano',
+    daily_rate_snapshot:480,standard_hours_snapshot:8});
+});
+await pg.evaluate(async()=>{await window.reload()});await pg.waitForTimeout(700);
+const mod=await pg.evaluate(()=>{
+  const e=window.__stores.timesheet_entries.find(x=>x.id==='ed1');
+  window.navigateTo('dailyEdit',{edit:'ed1',editType:'timesheet'});
+  const f=document.querySelector('#app form.form');
+  const s=document.querySelector('#app [name=work_site]');
+  return {salvato:e?e.work_site:'(consuntivo sparito)',
+          mostrato:s?s.value:'(nessun campo sede)',
+          // se la modifica non si fosse aperta, il modulo mostrerebbe
+          // una riga vuota e il confronto sarebbe vero per sbaglio
+          ore:f?(f.querySelector('[name=hours]')||{}).value:null};});
+ok(mod.ore==='8','il consuntivo di prova si apre davvero in modifica','ore nel modulo: '+mod.ore);
+ok(mod.mostrato===mod.salvato,
+   'e in modifica la sede gia\' scelta resta quella',
+   `salvata «${mod.salvato}», mostrata «${mod.mostrato}»`);
+
 ok(errs.length===0,'nessun errore JS',errs.slice(0,2).join(' | ')||'nessuno');
 await pg.close();await b.close();srv.close();
 console.log(`\nRISULTATO: ${pass} OK / ${fail} KO`);
