@@ -11,6 +11,7 @@ import {
   today,
   ym
 } from './src/app-utils.js';
+import { xlsxBlob, XLSX_MIME, leggiXlsx } from './src/xlsx.js';
 import { createRepository } from './src/dataRepository.js';
 import { loadAppData } from './src/appDataLoader.js';
 
@@ -741,53 +742,77 @@ function emptyState(text,ctaLabel,ctaAction){return `<div class="empty">${text}<
 function emptyForm(text){return emptyState(text,'\u2191 Vai al modulo','focusForm()')}
 function editEntry(id,type){navigateTo(type==='monthly'?'monthlyEdit':type==='manual'?'manualEdit':type==='expense'?'expenseEdit':'dailyEdit',{edit:id})}
 function fmtDMY(s){const p=String(s||'').split('-');return p.length===3?p[2]+'/'+p[1]+'/'+p[0]:String(s||'');}
-function monthWorkbookXml(){
+function monthWorkbookFogli(){
+  // Gli stessi due fogli di prima — Dettaglio e Pivot mese — ma come
+  // dati per il generatore .xlsx invece che come XML SpreadsheetML.
+  // Il contenuto non cambia: cambia il formato del file, che prima era
+  // XML di Excel 2003 travestito da .xls e su Excel mobile non si apriva.
   const [year,mo]=String(state.month).split('-').map(Number);
   const days=new Date(year,mo,0).getDate();
   const rows=rowsForMonth().slice().sort((a,b)=>String(a.entry_date).localeCompare(String(b.entry_date)));
   const prof=(data.profiles||[])[0]||{};
   const uname=[prof.first_name,prof.last_name].filter(Boolean).join(' ')||prof.company_name||'Consulente';
   const monLabel=monthLabel(state.month);
-  const palette=['#DDEBF7','#E2EFDA','#FFF2CC','#FCE4D6','#EDEDED','#EAD1DC','#D9E1F2','#FFE699'];
+  const palette=['DDEBF7','E2EFDA','FFF2CC','FCE4D6','EDEDED','EAD1DC','D9E1F2','FFE699'];
+
+  // stili ricorrenti, scritti una volta
+  const hdr={b:true,fill:'FFC000',align:'center'}, hdrL={b:true,fill:'FFC000'};
+  const num={align:'center',fmt:'0.0'}, txt={};
+  const totL={b:true,fill:'D9D9D9'}, totN={b:true,fill:'D9D9D9',align:'center',fmt:'0.0'};
+  const rigaTot={b:true,fill:'F2F2F2',align:'center',fmt:'0.0'};
+
+  // ── Foglio 1: il dettaglio riga per riga ──
+  const det=[[{v:'Data',s:hdrL},{v:'Cliente',s:hdrL},{v:'Progetto',s:hdrL},
+              {v:'Attività',s:hdrL},{v:'Sede',s:hdrL},{v:'Descrizione',s:hdrL},{v:'Ore',s:hdr}]];
+  let oreTot=0;
+  rows.forEach(e=>{
+    const ore=Number(e.hours||0);oreTot+=ore;
+    const sede=e.work_location||[e.work_site,e.work_city].filter(Boolean).join(' - ')||'';
+    // la data come data vera: cosi' si ordina e si filtra in Excel
+    det.push([{v:e.entry_date,t:'d',s:{fmt:'dd/mm/yyyy'}},
+      {v:clientName(e.client_id),s:txt},{v:projectName(e.project_id)||'',s:txt},
+      {v:activityName(e.activity_id)||'',s:txt},{v:sede,s:txt},
+      {v:e.description||'',s:txt},{v:ore,t:'n',s:num}]);
+  });
+  det.push([{v:'Totale',s:totL},{v:'',s:totL},{v:'',s:totL},{v:'',s:totL},
+            {v:'',s:totL},{v:'',s:totL},{v:oreTot,t:'n',s:totN}]);
+
+  // ── Foglio 2: il pivot del mese ──
   const pv={},order=[],dayTot=new Array(days+1).fill(0);let grand=0;const clientColor={};let ci=0;
-  rows.forEach(e=>{const cName=clientName(e.client_id);const key=cName+' - '+(projectName(e.project_id)||'—')+' - '+(activityName(e.activity_id)||'—');if(!pv[key]){pv[key]={d:new Array(days+1).fill(0),tot:0,client:cName};order.push(key);}if(!(cName in clientColor)){clientColor[cName]=ci%palette.length;ci++;}const d=Number(String(e.entry_date).slice(8,10));const h=Number(e.hours||0);pv[key].d[d]+=h;pv[key].tot+=h;if(d>=1&&d<=days)dayTot[d]+=h;grand+=h;});
-  const B='<Borders><Border ss:Position="Bottom" ss:LineStyle="Continuous"/><Border ss:Position="Top" ss:LineStyle="Continuous"/><Border ss:Position="Left" ss:LineStyle="Continuous"/><Border ss:Position="Right" ss:LineStyle="Continuous"/></Borders>';
-  const styles='<Style ss:ID="t"><Font ss:Bold="1" ss:Size="13"/></Style>'
-    +'<Style ss:ID="nm"><Font ss:Bold="1" ss:Italic="1"/></Style>'
-    +'<Style ss:ID="h"><Font ss:Bold="1"/><Interior ss:Color="#FFC000" ss:Pattern="Solid"/><Alignment ss:Horizontal="Center"/>'+B+'</Style>'
-    +'<Style ss:ID="hl"><Font ss:Bold="1"/><Interior ss:Color="#FFC000" ss:Pattern="Solid"/>'+B+'</Style>'
-    +'<Style ss:ID="n"><Alignment ss:Horizontal="Center"/>'+B+'</Style>'
-    +'<Style ss:ID="e">'+B+'</Style>'
-    +'<Style ss:ID="num2"><NumberFormat ss:Format="#,##0.00"/>'+B+'</Style>'
-    +'<Style ss:ID="tt"><Font ss:Bold="1"/><Interior ss:Color="#F2F2F2" ss:Pattern="Solid"/><Alignment ss:Horizontal="Center"/>'+B+'</Style>'
-    +'<Style ss:ID="tot"><Font ss:Bold="1"/><Interior ss:Color="#D9D9D9" ss:Pattern="Solid"/>'+B+'</Style>'
-    +'<Style ss:ID="totn"><Font ss:Bold="1"/><Interior ss:Color="#D9D9D9" ss:Pattern="Solid"/><Alignment ss:Horizontal="Center"/>'+B+'</Style>'
-    +palette.map((c,i)=>'<Style ss:ID="lbl'+i+'"><Font ss:Bold="1"/><Interior ss:Color="'+c+'" ss:Pattern="Solid"/>'+B+'</Style>').join('');
-  const cS=(v,st)=>'<Cell ss:StyleID="'+st+'"><Data ss:Type="String">'+esc(v)+'</Data></Cell>';
-  const cN=(v,st)=>'<Cell ss:StyleID="'+st+'"><Data ss:Type="Number">'+Number(v||0)+'</Data></Cell>';
-  const cE=st=>'<Cell ss:StyleID="'+st+'"/>';
-  let dayHdr='';for(let d=1;d<=days;d++)dayHdr+=cN(d,'h');
-  let pivotRows='';
-  order.forEach(key=>{const r=pv[key];let cells=cS(key,'lbl'+clientColor[r.client]);for(let d=1;d<=days;d++){cells+=r.d[d]>0?cN(r.d[d],'n'):cE('e');}cells+=cN(r.tot,'tt');pivotRows+='<Row>'+cells+'</Row>';});
-  let totCells=cS('Totale','tot');for(let d=1;d<=days;d++){totCells+=dayTot[d]>0?cN(dayTot[d],'totn'):cE('tot');}totCells+=cN(grand,'totn');
-  let cols='<Column ss:Width="210"/>';for(let d=1;d<=days;d++)cols+='<Column ss:Width="24"/>';cols+='<Column ss:Width="54"/>';
-  const pivotSheet='<Worksheet ss:Name="Pivot mese"><Table>'+cols
-    +'<Row><Cell ss:StyleID="t"><Data ss:Type="String">Attività mese di: '+esc(monLabel)+'</Data></Cell></Row>'
-    +'<Row><Cell ss:StyleID="nm"><Data ss:Type="String">'+esc(uname)+'</Data></Cell></Row>'
-    +'<Row>'+cS('Data','hl')+dayHdr+cS('Tot.Ore','h')+'</Row>'
-    +pivotRows+'<Row>'+totCells+'</Row></Table></Worksheet>';
-  let detRows='';let oreTot=0;
-  rows.forEach(e=>{const ore=Number(e.hours||0);oreTot+=ore;const sede=e.work_location||[e.work_site,e.work_city].filter(Boolean).join(' - ')||'';detRows+='<Row>'+cS(fmtDMY(e.entry_date),'e')+cS(clientName(e.client_id),'e')+cS(projectName(e.project_id)||'','e')+cS(activityName(e.activity_id)||'','e')+cS(sede,'e')+cS(e.description||'','e')+cN(ore,'n')+'</Row>';});
-  const detHdr='<Row>'+cS('Data','hl')+cS('Cliente','hl')+cS('Progetto','hl')+cS('Attività','hl')+cS('Sede','hl')+cS('Descrizione','hl')+cS('Ore','h')+'</Row>';
-  const detTot='<Row>'+cS('Totale','tot')+cE('tot')+cE('tot')+cE('tot')+cE('tot')+cE('tot')+cN(oreTot,'totn')+'</Row>';
-  const detCols='<Column ss:Width="70"/><Column ss:Width="110"/><Column ss:Width="140"/><Column ss:Width="120"/><Column ss:Width="120"/><Column ss:Width="220"/><Column ss:Width="50"/>';
-  const detailSheet='<Worksheet ss:Name="Dettaglio"><Table>'+detCols+detHdr+detRows+detTot+'</Table></Worksheet>';
-  return '<?xml version="1.0" encoding="UTF-8"?>\n<?mso-application progid="Excel.Sheet"?>\n<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"><Styles>'+styles+'</Styles>'+detailSheet+pivotSheet+'</Workbook>';
+  rows.forEach(e=>{
+    const cName=clientName(e.client_id);
+    const key=cName+' - '+(projectName(e.project_id)||'—')+' - '+(activityName(e.activity_id)||'—');
+    if(!pv[key]){pv[key]={d:new Array(days+1).fill(0),tot:0,client:cName};order.push(key)}
+    if(!(cName in clientColor)){clientColor[cName]=ci%palette.length;ci++}
+    const d=Number(String(e.entry_date).slice(8,10)),h=Number(e.hours||0);
+    pv[key].d[d]+=h;pv[key].tot+=h;if(d>=1&&d<=days)dayTot[d]+=h;grand+=h;
+  });
+  const piv=[[{v:'Attività mese di: '+monLabel,s:{b:true}}],[{v:uname,s:{b:true}}]];
+  const intest=[{v:'Data',s:hdrL}];
+  for(let d=1;d<=days;d++)intest.push({v:d,t:'n',s:hdr});
+  intest.push({v:'Tot.Ore',s:hdr});
+  piv.push(intest);
+  order.forEach(key=>{
+    const r=pv[key],fill=palette[clientColor[r.client]];
+    const riga=[{v:key,s:{b:true,fill}}];
+    for(let d=1;d<=days;d++)riga.push(r.d[d]>0?{v:r.d[d],t:'n',s:num}:{v:'',s:txt});
+    riga.push({v:r.tot,t:'n',s:rigaTot});
+    piv.push(riga);
+  });
+  const rigaTotale=[{v:'Totale',s:totL}];
+  for(let d=1;d<=days;d++)rigaTotale.push(dayTot[d]>0?{v:dayTot[d],t:'n',s:totN}:{v:'',s:totL});
+  rigaTotale.push({v:grand,t:'n',s:totN});
+  piv.push(rigaTotale);
+
+  // le larghezze sono in caratteri, non in punti come nel formato vecchio
+  const colPiv=[30];for(let d=1;d<=days;d++)colPiv.push(4.5);colPiv.push(9);
+  return [{nome:'Dettaglio',cols:[11,16,20,17,17,31,7],righe:det,blocca:1},
+          {nome:'Pivot mese',cols:colPiv,righe:piv,blocca:3}];
 }
-function monthExcelBlob(){return new Blob([monthWorkbookXml()],{type:'application/vnd.ms-excel'});}
-function monthExcelFilename(){return 'TOTIME_consuntivi_'+state.month+'.xls';}
+function monthExcelBlob(){return xlsxBlob(monthWorkbookFogli())}
+function monthExcelFilename(){return 'TOTIME_consuntivi_'+state.month+'.xlsx'}
 function downloadMonthExcel(){const url=URL.createObjectURL(monthExcelBlob());const a=document.createElement('a');a.href=url;a.download=monthExcelFilename();document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500);setMsg('Excel dei consuntivi di '+monthLabel(state.month)+' generato.',3500);}
-async function shareMonthExcel(){const file=new File([monthExcelBlob()],monthExcelFilename(),{type:'application/vnd.ms-excel'});try{if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],title:'Consuntivi '+monthLabel(state.month),text:'Consuntivi '+monthLabel(state.month)});return;}}catch(err){if(err&&err.name==='AbortError')return;}downloadMonthExcel();}
+async function shareMonthExcel(){const file=new File([monthExcelBlob()],monthExcelFilename(),{type:XLSX_MIME});try{if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],title:'Consuntivi '+monthLabel(state.month),text:'Consuntivi '+monthLabel(state.month)});return;}}catch(err){if(err&&err.name==='AbortError')return;}downloadMonthExcel();}
 function timesheetRows(){return rowsForMonth().map(e=>({...e,kind:'daily',date:e.entry_date})).concat(monthlyRows().map(m=>({...m,kind:'monthly',date:`${m.year}-${String(m.month).padStart(2,'0')}-01`}))).concat(manualRows().map(e=>({...e,kind:'manual',date:e.entry_date}))).concat(expenseRows().map(e=>({...e,kind:'expense',date:e.expense_date}))).sort((a,b)=>String(b.date).localeCompare(String(a.date)))}
 function timesheet(){const rows=timesheetRows();const t=totals();const groups=groupSummary();return appShell(`<h1>Timesheet</h1>${monthSelector()}<div class="card"><b>Riepilogo ${monthLabel(state.month)}</b><div class="kpiGrid" style="margin-top:14px"><div><span>Ore consuntivate</span><strong>${fmtNum(t.hours,1)} h</strong><small>${fmtNum(t.days,2)} gg/u</small></div><div><span>Importo mese</span><strong>${fmtEUR(t.amount)}</strong><small>consuntivato</small></div></div>${t.plannedAmount>0?`<div class="metricLine" style="margin-top:10px"><span class="tag blue">Pianificato</span> ${fmtNum(t.plannedHours,1)} h · ${fmtNum(t.plannedDays,2)} gg/u · ${fmtEUR(t.plannedAmount)}</div>`:''}<div class="chartWrap"><div class="chartTitle"><span>Andamento mese</span><span>1 → fine mese</span></div>${monthChartSvg()}</div></div><div class="miniActions"><button type="button" class="miniBtn" onclick="go('griglia')" title="Compila tutto il mese in una griglia">Mensile</button><button type="button" class="miniBtn" onclick="go('pivot')" title="Analizza i consuntivi per cliente, progetto, attività">Analisi</button><button type="button" class="miniBtn" onclick="downloadMonthExcel()" title="Scarica l'Excel del mese">⤓ Excel</button><button type="button" class="miniBtn" onclick="shareMonthExcel()" title="Condividi o invia i consuntivi">↗ Condividi</button></div>${groups.length?`<div class="card"><b>Per cliente</b><div class="list" style="box-shadow:none;margin:10px 0 0">${groups.map(r=>`<div class="row"><div></div><div><div class="title">${esc(clientName(r.client_id))}</div><div class="desc">${esc(projectName(r.project_id)||'Senza progetto')} · ${esc(r.label)}</div></div><div class="value">${fmtEUR(r.amount)}</div></div>`).join('')}</div></div>`:''}<button class="primary" onclick="newEntryChoice()">+ Nuovo consuntivo</button>${selBar('timesheet',rows.length)}<div class="list">${rows.map(r=>timesheetRow(r)).join('')||'<div class="empty">Nessun consuntivo in questo mese.<button type="button" class="secondary emptyCta" onclick="newEntryChoice()">+ Aggiungi il primo consuntivo</button></div>'}</div>`)}
 /* ===== Analisi consuntivi (pivot) ===== */
@@ -1498,9 +1523,46 @@ function canonHeader(h){return String(h||'').toLowerCase().trim().normalize('NFD
 function parseAmount(v){return Number(String(v||'0').replace(/\./g,'').replace(',','.').replace(/[^0-9.-]/g,''))||0}
 function toDate(v){v=norm(v);if(!v)return'';if(/^\d{4}-\d{2}-\d{2}$/.test(v))return v;const m=v.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);if(m)return`${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;return''}
 function toMonth(v){const d=toDate(v);if(d)return d.slice(0,7);v=norm(v);if(/^\d{4}-\d{2}$/.test(v))return v;return''}
-function excelSafe(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 function exportRowsFor(month,clientId,projectId){const byFilters=(x,cid,pid)=>{if(clientId&&cid!==clientId)return false;if(projectId&&(pid||'')!==projectId)return false;return true};let rows=[];data.entries.filter(e=>String(e.entry_date||'').startsWith(month)&&byFilters(e,e.client_id,e.project_id)).forEach(e=>rows.push({tipo:'Consuntivo',data:e.entry_date,cliente:clientName(e.client_id),progetto:projectName(e.project_id),attivita:activityName(e.activity_id),descrizione:e.description||'',ore:Number(e.hours||0),quantita:'',sede:e.work_site||'',citta:e.work_city||'',note:e.notes||'',importo:dailyAmount(e)}));data.manualEntries.filter(e=>String(e.entry_date||'').startsWith(month)&&byFilters(e,e.client_id,e.project_id)).forEach(e=>rows.push({tipo:'Manuale',data:e.entry_date,cliente:clientName(e.client_id),progetto:projectName(e.project_id),attivita:activityName(e.activity_id),descrizione:e.description||'',ore:'',quantita:'',sede:e.work_site||'',citta:e.work_city||'',note:e.notes||'',importo:Number(e.amount||0)}));data.travelExpenses.filter(e=>String(e.expense_date||'').startsWith(month)&&byFilters(e,e.client_id,e.project_id)).forEach(e=>rows.push({tipo:'Spesa trasferta',data:e.expense_date,cliente:clientName(e.client_id),progetto:projectName(e.project_id),attivita:expenseCategoryName(e.expense_category_id),descrizione:e.description||'',ore:'',quantita:e.quantity||'',sede:e.work_site||'',citta:e.work_city||'',note:e.notes||'',importo:Number(e.amount||0)}));return rows.sort((a,b)=>String(a.data).localeCompare(String(b.data)))}
-function downloadTimesheetExcel(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const month=f.month||state.month;const include=f.include_amount==='true';const rows=exportRowsFor(month,f.client_id||'',f.project_id||'');if(!rows.length)return setMsg('Nessuna riga da esportare per i filtri selezionati.',5000);const headers=['Tipo','Data','Cliente','Cliente/Progetto','Attività / Voce','Descrizione','Ore','Quantità','Sede','Luogo/Città','Note'].concat(include?['Importo']:[]);const totalHours=rows.reduce((s,r)=>s+(Number(r.ore)||0),0);const totalAmount=rows.reduce((s,r)=>s+(Number(r.importo)||0),0);const html=`<html><head><meta charset="utf-8"><style>table{border-collapse:collapse;font-family:Arial,sans-serif;font-size:11pt}th{background:#0b1b31;color:white;font-weight:bold}td,th{border:1px solid #b7c0cf;padding:6px}.tot{font-weight:bold;background:#eaf2ff}</style></head><body><table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr><td>${excelSafe(r.tipo)}</td><td>${excelSafe(dateIT(r.data))}</td><td>${excelSafe(r.cliente)}</td><td>${excelSafe(r.progetto)}</td><td>${excelSafe(r.attivita)}</td><td>${excelSafe(r.descrizione)}</td><td>${r.ore!==''?fmtNum(r.ore,2):''}</td><td>${excelSafe(r.quantita)}</td><td>${excelSafe(r.sede)}</td><td>${excelSafe(r.citta)}</td><td>${excelSafe(r.note)}</td>${include?`<td>${fmtNum(r.importo,2)}</td>`:''}</tr>`).join('')}<tr class="tot"><td colspan="6">Totale</td><td>${fmtNum(totalHours,2)}</td><td></td><td></td><td></td><td></td>${include?`<td>${fmtNum(totalAmount,2)}</td>`:''}</tr></tbody></table></body></html>`;const blob=new Blob(['\ufeff',html],{type:'application/vnd.ms-excel;charset=utf-8'});const a=document.createElement('a');const c=f.client_id?clientName(f.client_id).replace(/\W+/g,'_'):'TuttiClienti';const p=f.project_id?projectName(f.project_id).replace(/\W+/g,'_'):'TuttiProgetti';a.href=URL.createObjectURL(blob);a.download=`TOTIME_Timesheet_${c}_${p}_${month}.xls`;a.click();setMsg(`Export creato: ${rows.length} righe.`,5000)}
+function downloadTimesheetExcel(ev){
+  ev.preventDefault();
+  const f=Object.fromEntries(new FormData(ev.target));
+  const month=f.month||state.month;
+  const include=f.include_amount==='true';
+  const rows=exportRowsFor(month,f.client_id||'',f.project_id||'');
+  if(!rows.length)return setMsg('Nessuna riga da esportare per i filtri selezionati.',5000);
+  const hdr={b:true,fill:'0B1B31',bianco:true}, tot={b:true,fill:'EAF2FF'};
+  const intest=['Tipo','Data','Cliente','Cliente/Progetto','Attività / Voce','Descrizione',
+                'Ore','Quantità','Sede','Luogo/Città','Note'].concat(include?['Importo']:[]);
+  const righe=[intest.map(h=>({v:h,s:hdr}))];
+  const totOre=rows.reduce((s,r)=>s+(Number(r.ore)||0),0);
+  const totImp=rows.reduce((s,r)=>s+(Number(r.importo)||0),0);
+  rows.forEach(r=>{
+    // la data come data vera, le ore e gli importi come numeri: in Excel
+    // si ordinano, si filtrano e si sommano. Prima erano testo.
+    const riga=[{v:r.tipo},{v:r.data,t:'d',s:{fmt:'dd/mm/yyyy'}},{v:r.cliente},{v:r.progetto},
+      {v:r.attivita},{v:r.descrizione},
+      r.ore!==''?{v:Number(r.ore),t:'n',s:{fmt:'0.00'}}:{v:''},
+      {v:r.quantita},{v:r.sede},{v:r.citta},{v:r.note}];
+    if(include)riga.push({v:Number(r.importo)||0,t:'n',s:{fmt:'0.00'}});
+    righe.push(riga);
+  });
+  const finale=[{v:'Totale',s:tot},{v:'',s:tot},{v:'',s:tot},{v:'',s:tot},{v:'',s:tot},{v:'',s:tot},
+                {v:totOre,t:'n',s:{b:true,fill:'EAF2FF',fmt:'0.00'}},
+                {v:'',s:tot},{v:'',s:tot},{v:'',s:tot},{v:'',s:tot}];
+  if(include)finale.push({v:totImp,t:'n',s:{b:true,fill:'EAF2FF',fmt:'0.00'}});
+  righe.push(finale);
+  const cols=[15,11,20,20,20,30,8,10,14,16,24].concat(include?[12]:[]);
+  const blob=xlsxBlob([{nome:'Timesheet',cols,righe,blocca:1}]);
+  const c=f.client_id?clientName(f.client_id).replace(/\W+/g,'_'):'TuttiClienti';
+  const p=f.project_id?projectName(f.project_id).replace(/\W+/g,'_'):'TuttiProgetti';
+  const a=document.createElement('a');
+  const url=URL.createObjectURL(blob);
+  a.href=url;a.download=`TOTIME_Timesheet_${c}_${p}_${month}.xlsx`;
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1500);
+  setMsg(`Export creato: ${rows.length} righe.`,5000);
+}
 
 async function importCsv(ev){const file=ev.target.files?.[0];if(!file)return;const reader=new FileReader();reader.onload=async()=>{try{const text=reader.result.replace(/^\uFEFF/,'').trim();if(!text)return setMsg('CSV vuoto.');const lines=text.split(/\r?\n/).filter(Boolean);const sep=(lines[0].match(/;/g)||[]).length>=(lines[0].match(/,/g)||[]).length?';':',';const headers=parseCsvLine(lines.shift(),sep).map(canonHeader);const get=(row,names)=>{for(const n of names.map(canonHeader)){const i=headers.indexOf(n);if(i>=0)return row[i]||''}return''};let count=0,updated=0,skipped=0,createdClients=0,createdProjects=0,createdActivities=0;for(const line of lines){const row=parseCsvLine(line,sep);if(!row.some(x=>norm(x))){skipped++;continue}const cliente=norm(get(row,['cliente','client']));if(!cliente){skipped++;continue}const tipoRaw=get(row,['tipo','type']);const tipo=(tipoRaw||'Tariffa giornaliera 8h').toLowerCase();const isMonthly=tipo.includes('mens')||tipo.includes('monthly')||tipo.includes('una tantum');const ore=parseAmount(get(row,['ore','hours']));const amount=parseAmount(get(row,['importo','amount']));let rowRate=amount>0&&ore>0?amount/ore*8:0;const beforeC=data.clients.length;const client=await ensureClient(cliente,isMonthly?'monthly':'daily',rowRate);if(data.clients.length>beforeC)createdClients++;if(!client.daily_rate&&rowRate>0){await updateResilient('clients',{daily_rate:rowRate},client.id);client.daily_rate=rowRate}const progetto=norm(get(row,['cliente/progetto','progetto','cliente finale','project']));const beforeP=data.projects.length;const project=await ensureProject(client.id,progetto);if(data.projects.length>beforeP)createdProjects++;const att=norm(get(row,['attività','attivita','activity']));const beforeA=data.activities.length;const activity=await ensureActivity(att);if(data.activities.length>beforeA)createdActivities++;const descrizione=get(row,['descrizione','description']);const sede=norm(get(row,['sede','work_site','site']));const citta=norm(get(row,['luogo/città','luogo/citta','città','citta','luogo','work_city','city','location']));const luogo=[sede,citta].filter(Boolean).join(' - ');const note=get(row,['note','notes']);const idv=norm(get(row,['id','import_id','riga','key','chiave']));if(isMonthly){const mese=norm(get(row,['mese','month']))||toMonth(get(row,['data','date']))||state.month;const [year,month]=mese.split('-').map(Number);const payload={year,month,client_id:client.id,project_id:project?.id||null,description:descrizione||null,notes:note||null,amount};const key=idv?importKey(['mc',idv]):importKey(['mc',year,month,client.id,project?.id||'']);const {res,updated:u}=await upsertByKey('monthly_compensations',data.monthly,payload,key);if(res.error)throw res.error;if(u)updated++;else count++;}else{const date=toDate(get(row,['data','date']))||new Date().toISOString().slice(0,10);const rate=rowRate||Number(client.daily_rate||0);const payload={entry_date:date,client_id:client.id,project_id:project?.id||null,activity_id:activity?.id||null,work_location:luogo||null,work_site:sede||null,work_city:citta||null,description:descrizione||null,notes:note||null,hours:ore,daily_rate_snapshot:rate,standard_hours_snapshot:8};const key=idv?importKey(['ts',idv]):importKey(['ts',date,client.id,project?.id||'',activity?.id||'',descrizione,ore]);const {res,updated:u}=await upsertByKey('timesheet_entries',data.entries,payload,key);if(res.error)throw res.error;if(u)updated++;else count++;}}
 await fetchAll();state.view='timesheet';setMsg(`Import completato: ${count} inserite, ${updated} aggiornate. Clienti creati: ${createdClients}. Progetti: ${createdProjects}. Attività: ${createdActivities}. Scartate: ${skipped}.`,9000)}catch(e){console.error(e);setMsg('Errore import CSV: '+(e.message||e),9000)}};reader.readAsText(file,'windows-1252')}
@@ -1935,7 +1997,6 @@ function normIntestazione(t){return String(t||'').trim().toLowerCase()
 // --- lettura del file ---------------------------------------------
 function leggiTabella(testo){
   const t=String(testo||'');
-  if(/^PK\x03\x04/.test(t))throw new Error('Questo è un .xlsx, che è un archivio compresso e non si può leggere qui. In Excel fai «Salva con nome» e scegli CSV (oppure «Cartella di lavoro XML 2003»).');
   if(/<\?mso-application|<Workbook/i.test(t))return daXmlExcel(t);
   if(/<table/i.test(t))return daTabellaHtml(t);
   return daCsv(t);
@@ -2074,8 +2135,8 @@ function importaConsuntivi(){
     Scarichi l'Excel del mese, lo lavori, e lo ricarichi qui.</p>
     <div class="card"><b>Scegli il file</b>
       <div class="field" style="margin-top:12px">
-        <input type="file" accept=".xls,.xml,.csv,.txt,text/csv" onchange="importaFile(this)">
-        <div class="small">Va bene l'<b>.xls</b> che scarichi da qui, oppure un <b>CSV</b>.
+        <input type="file" accept=".xlsx,.xls,.xml,.csv,.txt,text/csv" onchange="importaFile(this)">
+        <div class="small">Va bene l'<b>.xlsx</b> che scarichi da qui, un file salvato da <b>Excel</b>, oppure un <b>CSV</b>.
         Se hai un .xlsx, da Excel fai «Salva con nome» e scegli CSV.</div></div>
       ${state.importErrore?`<div class="copybox">${esc(state.importErrore)}</div>`:''}
     </div>
@@ -2110,19 +2171,18 @@ function esitoImport(r){
   return '<span class="tag red">'+esc(r.motivo||'errore')+'</span>';
 }
 function annullaImport(){state.importAnalisi=null;state.importErrore='';render()}
-function importaFile(input){
+async function importaFile(input){
   const f=input.files&&input.files[0];if(!f)return;
-  const fr=new FileReader();
-  fr.onload=()=>{
-    try{
-      const {righe}=leggiTabella(fr.result);
-      if(!righe.length)throw new Error('Il foglio non ha righe sotto l\'intestazione.');
-      state.importErrore='';state.importAnalisi=analizzaImport(righe);
-    }catch(e){ state.importAnalisi=null;state.importErrore=String(e&&e.message||e); }
-    render();
-  };
-  fr.onerror=()=>{state.importAnalisi=null;state.importErrore='Il file non si è lasciato leggere.';render()};
-  fr.readAsText(f);
+  try{
+    const buf=await f.arrayBuffer();
+    const testa=new Uint8Array(buf.slice(0,4));
+    // un .xlsx e' un archivio: comincia per PK. Tutto il resto e' testo.
+    const xlsx=testa[0]===0x50&&testa[1]===0x4B&&testa[2]===0x03&&testa[3]===0x04;
+    const righe=xlsx?await leggiXlsx(buf):leggiTabella(new TextDecoder('utf-8').decode(buf)).righe;
+    if(!righe.length)throw new Error('Il foglio non ha righe sotto l\'intestazione.');
+    state.importErrore='';state.importAnalisi=analizzaImport(righe);
+  }catch(e){ state.importAnalisi=null;state.importErrore=String(e&&e.message||e); }
+  render();
 }
 // Scrive solo quello che l'anteprima ha promesso. La chiave di
 // importazione fa si' che ricaricare lo stesso foglio non duplichi:
@@ -2903,7 +2963,7 @@ Object.assign(window,{
   deleteTMBatch,
   downloadMonthExcel,
   shareMonthExcel,
-  monthWorkbookXml,
+  monthWorkbookFogli,
   viewLabel,
   guardUnsavedChanges,
   pushHistory,
@@ -3089,7 +3149,6 @@ Object.assign(window,{
   parseAmount,
   toDate,
   toMonth,
-  excelSafe,
   exportRowsFor,
   downloadTimesheetExcel,
   importCsv,
