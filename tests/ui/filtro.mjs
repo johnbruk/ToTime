@@ -32,10 +32,12 @@ const apri=async w=>{
   await pg.waitForTimeout(400);
   return pg;
 };
-// l'elenco dei consuntivi e' l'ultima lista della pagina: sopra c'e'
-// anche la scheda «Per cliente», che non si filtra
-const quante=pg=>pg.evaluate(()=>{const l=[...document.querySelectorAll('#app .list')].pop();
-  return l?l.querySelectorAll('.row').length:0});
+// l'elenco dei consuntivi ora e' spezzato in un gruppo per cliente:
+// si contano le righe di tutti i gruppi, non quelle dell'ultima lista
+// della pagina (che sarebbe solo l'ultimo cliente). La scheda
+// «Per cliente» resta fuori: non si filtra.
+const quante=pg=>pg.evaluate(()=>document.querySelectorAll('#app .cliGruppo .row').length);
+const righeElenco=pg=>pg.evaluate(()=>[...document.querySelectorAll('#app .cliGruppo .row')].map(r=>r.innerText));
 
 console.log('\n=== A. Nel Timesheet ===');
 const pg=await apri(1280);
@@ -56,8 +58,7 @@ ok(await pg.evaluate(()=>document.activeElement&&document.activeElement.id==='ce
    'e non perde il fuoco a ogni ridisegno');
 const dopo=await quante(pg);
 ok(dopo<tutte,'la lista si restringe',`${tutte} → ${dopo}`);
-ok(await pg.evaluate(()=>{const l=[...document.querySelectorAll('#app .list')].pop();
-    return [...l.querySelectorAll('.row')].every(r=>/seconda/i.test(r.innerText))}),
+ok((await righeElenco(pg)).every(t=>/seconda/i.test(t)),
    'e restano solo le righe che contengono quel testo');
 ok(/1 riga su/.test(await pg.evaluate(()=>document.querySelector('.cercaEsito')?.textContent||'')),
    'con scritto quante ne sono rimaste',await pg.evaluate(()=>document.querySelector('.cercaEsito')?.textContent));
