@@ -70,6 +70,44 @@ ok(ultima&&ultima.entry_date===g(4),'sulla data scelta',ultima&&ultima.entry_dat
 ok(ultima&&ultima.wbs_id==='w10','PORTANDOSI DIETRO LA VOCE: era questo a farla fallire',ultima&&ultima.wbs_id);
 ok(ultima&&Number(ultima.hours)===6,'con le ore giuste',ultima&&String(ultima.hours));
 
+console.log('\n=== Il messaggio che svanisce non cancella quello che stai scrivendo ===');
+// Il difetto segnalato: dopo «Duplica» bisognava scegliere la data piu'
+// volte, perche' alla prima si perdeva.
+//
+// La causa stava lontano: il messaggio a scomparsa, finito il suo
+// tempo, ridisegnava tutta la vista. Il ridisegno rifa' il modulo da
+// capo, e nella copia la data nasce vuota apposta — quindi tornava
+// vuota. Valeva per qualunque campo e qualunque modulo aperto mentre un
+// messaggio era in corso, non solo per il duplica.
+const idDup=await pg.evaluate(()=>{const e=(window.__stores.timesheet_entries||[])[0];return e?e.id:null});
+ok(!!idDup,'c\'è un consuntivo da duplicare',idDup||'nessuno');
+await pg.evaluate(id=>window.duplicateDaily(id),idDup);
+await pg.waitForTimeout(500);
+ok(!!await pg.evaluate(()=>document.querySelector('[name=entry_date]')),
+   'il modulo della copia si apre',
+   await pg.evaluate(()=>document.querySelector('#app h1')?.textContent||'—'));
+ok(!!await pg.evaluate(()=>document.querySelector('.toast')),'dopo «Duplica» compare il messaggio');
+ok(await pg.evaluate(()=>document.querySelector('[name=entry_date]')?.value)==='',
+   'e la data nasce vuota, da scegliere');
+await pg.evaluate(()=>{
+  const d=document.querySelector('[name=entry_date]');
+  d.value='2026-07-22';d.dispatchEvent(new Event('change',{bubbles:true}));
+  const h=document.querySelector('[name=hours]');if(h)h.value='7';
+  const n=document.querySelector('[name=notes]');if(n)n.value='scritto mentre il messaggio era a schermo';
+});
+// si aspetta che il messaggio finisca da solo
+await pg.waitForTimeout(5200);
+ok(await pg.evaluate(()=>document.querySelector('[name=entry_date]')?.value)==='2026-07-22',
+   'la data scelta resta quando il messaggio svanisce',
+   await pg.evaluate(()=>JSON.stringify(document.querySelector('[name=entry_date]')?.value)));
+ok(await pg.evaluate(()=>document.querySelector('[name=hours]')?.value)==='7',
+   'e anche le ore',await pg.evaluate(()=>document.querySelector('[name=hours]')?.value));
+ok(/scritto mentre/.test(await pg.evaluate(()=>document.querySelector('[name=notes]')?.value||'')),
+   'e le note',JSON.stringify(await pg.evaluate(()=>document.querySelector('[name=notes]')?.value)));
+ok(!await pg.evaluate(()=>document.querySelector('.toast')),'il messaggio però se n\'è andato');
+ok(await pg.evaluate(()=>{window.go('home');return !document.querySelector('.toast')}),
+   'e cambiando schermata non ricompare');
+
 ok(errs.length===0,'nessun errore JS',errs.slice(0,2).join(' | ')||'nessuno');
 await pg.close();await b.close();srv.close();
 console.log(`\nRISULTATO: ${pass} OK / ${fail} KO`);

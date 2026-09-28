@@ -65,7 +65,15 @@ async function saveThemeChoice(theme){state.theme=theme;applyTheme();const exist
 function monthLabel(m){const [y,mo]=m.split('-').map(Number);return `${monthNames[mo-1]} ${y}`}
 function periodParts(m=state.month){const [year,month]=m.split('-').map(Number);return {year,month}}
 function changeMonth(delta){let [y,m]=state.month.split('-').map(Number);m+=delta;if(m<1){m=12;y--}if(m>12){m=1;y++}state.month=`${y}-${String(m).padStart(2,'0')}`;render()}
-function setMsg(msg,timeout=4200){state.message=msg;render();setTimeout(()=>{if(state.message===msg){state.message='';render()}},timeout)}
+function setMsg(msg,timeout=4200){
+  state.message=msg;render();
+  setTimeout(()=>{
+    if(state.message!==msg)return;
+    state.message='';
+    const t=document.querySelector('#app .toast');
+    if(t)t.remove(); else render();
+  },timeout);
+}
 function clientById(id){return data.clients.find(c=>c.id===id)}
 function projectById(id){return data.projects.find(p=>p.id===id)}
 function activityById(id){return data.activities.find(a=>a.id===id)}
