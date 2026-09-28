@@ -87,6 +87,40 @@ await pg.evaluate(()=>[...document.querySelectorAll('#app button')].find(x=>/gio
 await pg.waitForTimeout(900);
 ok(await campo('entry_date')===g(8),'e si arriva al giorno prima',await campo('entry_date'));
 
+console.log('\n=== La riga si porta dietro se stessa, cliente compreso ===');
+// Il difetto segnalato: scegliendo un cliente diverso dal primo e
+// premendo «Salva e vai al giorno dopo», il modulo nuovo tornava sul
+// primo cliente dell'elenco. Il cliente giusto veniva calcolato — il
+// blocco delle commesse sotto era il suo — ma le <option> uscivano
+// senza «selected», e il browser sceglie da se': la prima.
+await pg.evaluate(()=>window.go('dailyForm'));await pg.waitForTimeout(500);
+const opz=await pg.evaluate(()=>{const s=document.querySelector('#app [name=client_id]');
+  return s?[...s.options].map(o=>o.value):[]});
+ok(opz.length>1,'nel banco di prova ci sono piu\' clienti',opz.join(', '));
+const altro=opz[1];
+await pg.evaluate(v=>{const s=document.querySelector('#app [name=client_id]');
+  s.value=v;s.dispatchEvent(new Event('change',{bubbles:true}))},altro);
+await pg.waitForTimeout(400);
+await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
+  f.querySelector('[name=entry_date]').value='2026-07-20';
+  f.querySelector('[name=hours]').value='6';
+  const d=f.querySelector('[name=description]');if(d)d.value='riga di prova';
+});
+await pg.evaluate(()=>{const b=[...document.querySelectorAll('#app button')]
+  .find(x=>/giorno dopo/.test(x.textContent));b&&b.click()});
+await pg.waitForTimeout(1500);
+ok(await campo('entry_date')==='2026-07-21','si passa al giorno dopo',await campo('entry_date'));
+const cli=await pg.evaluate(()=>document.querySelector('#app [name=client_id]')?.value);
+ok(cli===altro,'e il cliente resta quello scelto, non il primo dell\'elenco',
+   `atteso ${altro}, trovato ${cli}`);
+ok(await campo('hours')==='6','le ore si riportano',await campo('hours'));
+ok(await campo('description')==='riga di prova','e la descrizione pure',await campo('description'));
+// e quello salvato e' il cliente giusto, non quello mostrato per sbaglio
+const salvato=await pg.evaluate(()=>(window.__ins||[])
+  .filter(x=>x.__table==='timesheet_entries'&&x.entry_date==='2026-07-20').map(x=>x.client_id));
+ok(salvato.includes(altro),'e sul database era finito il cliente giusto fin dall\'inizio',
+   JSON.stringify(salvato));
+
 ok(errs.length===0,'nessun errore JS',errs.slice(0,2).join(' | ')||'nessuno');
 await pg.close();await b.close();srv.close();
 console.log(`\nRISULTATO: ${pass} OK / ${fail} KO`);
