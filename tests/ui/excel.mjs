@@ -63,6 +63,17 @@ const parti=buf=>{
 };
 const OBBLIGATORIE=['[Content_Types].xml','_rels/.rels','xl/workbook.xml','xl/worksheets/sheet1.xml'];
 
+// Si scrive una nota su una registrazione del mese, con dentro
+// caratteri che in XML vanno protetti: cosi' la colonna si verifica con
+// un contenuto vero e non solo per la sua presenza.
+const NOTA='Nota di prova & <controllo> "virgolette"';
+await pg.evaluate(async n=>{
+  const e=window.__stores.timesheet_entries.find(x=>String(x.entry_date).startsWith('2026-07'));
+  if(e)e.notes=n;
+  await window.reload();
+},NOTA);
+await pg.waitForTimeout(600);
+
 console.log('\n=== A. Il consuntivo mensile esce come .xlsx vero ===');
 const m=await scarica('window.downloadMonthExcel()');
 ok(m!==null,'il pulsante genera un file',m?'sì':'nessun file intercettato');
@@ -79,7 +90,15 @@ console.log('\n=== B. Il contenuto si rilegge, date comprese ===');
 const letto=(m&&m.righe)||[];
 ok(!m||!m.errore,'il file si rilegge senza errori',m&&m.errore?m.errore:'nessun errore');
 ok(letto.length>2,'il primo foglio ha righe',letto.length+' righe');
-ok(letto[0]&&letto[0][0]==='Data'&&letto[0][6]==='Ore','con le intestazioni al loro posto',JSON.stringify(letto[0]||[]));
+ok(letto[0]&&letto[0][0]==='Data'&&letto[0][6]==='Note'&&letto[0][7]==='Ore',
+   'con le intestazioni al loro posto, Note compresa',JSON.stringify(letto[0]||[]));
+// Le note servono per incrociarle in una pivot: devono stare in una
+// colonna propria, non annegate nella descrizione.
+const conNote=letto.slice(1).filter(r=>String(r[6]||'').trim()!=='');
+ok(conNote.length>0,'una nota scritta finisce davvero in quella colonna',
+   conNote.length?JSON.stringify(conNote[0][6]):'nessuna riga porta la nota');
+ok(conNote.some(r=>r[6]===NOTA),'per intero, caratteri speciali compresi',
+   conNote.length?JSON.stringify(conNote[0][6]):'—');
 const conData=letto.slice(1).filter(r=>/^\d{4}-\d{2}-\d{2}$/.test(r[0]));
 ok(conData.length>0,'le date tornano come date, non come numeri seriali',
    conData.length?conData[0][0]:'nessuna data riconosciuta: '+JSON.stringify(letto[1]||[]));
@@ -110,6 +129,39 @@ ok(g[0]===0x50&&letto.length>2,'un file appena esportato si rilegge senza conver
 const accept=await pg.evaluate(()=>{window.go('importaConsuntivi');
   const i=document.querySelector('#app input[type=file]');return i?i.getAttribute('accept'):null});
 ok(accept&&accept.includes('.xlsx'),'e il selettore dei file li accetta',accept||'nessun campo file');
+
+console.log('\n=== D2. Ricaricato davvero dal campo file ===');
+// Il controllo che mancava, e per cui e' passato un difetto vero: fin
+// qui il file lo rileggeva il lettore, non l'import. E l'import vuole le
+// righe con le colonne gia' agganciate ai loro nomi — passargliele
+// grezze faceva risultare ogni riga «data non riconosciuta», con il file
+// letto benissimo e zero righe caricabili.
+fs.writeFileSync('/tmp/totime-giro.xlsx',Buffer.from(g));
+await pg.evaluate(()=>window.go('importaConsuntivi'));await pg.waitForTimeout(350);
+await pg.setInputFiles('#app input[type=file]','/tmp/totime-giro.xlsx');
+await pg.waitForTimeout(1200);
+const imp=await pg.evaluate(()=>{
+  const t=document.querySelector('#app table');
+  const righe=t?[...t.querySelectorAll('tbody tr, tr')].slice(1)
+    .map(r=>[...r.cells].map(c=>c.innerText.trim())):[];
+  return {errore:window.state&&window.state.importErrore||'',
+          n:righe.length, esiti:righe.map(r=>r[r.length-1]),
+          date:righe.map(r=>r[1]), prima:righe[0]||[]};
+});
+ok(!imp.errore,'il file si carica senza errori',imp.errore||'nessun errore');
+ok(imp.n>0,'l\'anteprima elenca le righe',imp.n+' righe');
+ok(!imp.esiti.some(e=>/data non riconosciuta/i.test(e)),
+   'nessuna riga perde la data: le colonne sono agganciate',
+   imp.esiti.filter(e=>/data non riconosciuta/i.test(e)).length+' righe senza data · prima riga: '+JSON.stringify(imp.prima));
+ok(imp.date.every(d=>/^\d{4}-\d{2}-\d{2}$/.test(d)),'e le date arrivano tutte leggibili',
+   JSON.stringify(imp.date.slice(0,3)));
+// Il cliente dev'essere ritrovato: e' un nome che l'app stessa ha
+// scritto. Il progetto no, non sempre: una registrazione puo' non
+// averne, e con la gerarchia attiva una riga senza progetto non arriva
+// a una commessa. E' una regola del modello, non un difetto del file.
+ok(!imp.esiti.some(e=>/cliente «/i.test(e)),
+   'il cliente esportato dall\'app viene ritrovato al ricarico',
+   imp.esiti.filter(e=>/cliente «/i.test(e))[0]||'tutti ritrovati');
 
 console.log('\n=== E. Niente resti del formato vecchio ===');
 const src=fs.readFileSync(path.join(ROOT,'app.js'),'utf8');
