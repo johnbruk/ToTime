@@ -111,6 +111,39 @@ const accept=await pg.evaluate(()=>{window.go('importaConsuntivi');
   const i=document.querySelector('#app input[type=file]');return i?i.getAttribute('accept'):null});
 ok(accept&&accept.includes('.xlsx'),'e il selettore dei file li accetta',accept||'nessun campo file');
 
+console.log('\n=== D2. Ricaricato davvero dal campo file ===');
+// Il controllo che mancava, e per cui e' passato un difetto vero: fin
+// qui il file lo rileggeva il lettore, non l'import. E l'import vuole le
+// righe con le colonne gia' agganciate ai loro nomi — passargliele
+// grezze faceva risultare ogni riga «data non riconosciuta», con il file
+// letto benissimo e zero righe caricabili.
+fs.writeFileSync('/tmp/totime-giro.xlsx',Buffer.from(g));
+await pg.evaluate(()=>window.go('importaConsuntivi'));await pg.waitForTimeout(350);
+await pg.setInputFiles('#app input[type=file]','/tmp/totime-giro.xlsx');
+await pg.waitForTimeout(1200);
+const imp=await pg.evaluate(()=>{
+  const t=document.querySelector('#app table');
+  const righe=t?[...t.querySelectorAll('tbody tr, tr')].slice(1)
+    .map(r=>[...r.cells].map(c=>c.innerText.trim())):[];
+  return {errore:window.state&&window.state.importErrore||'',
+          n:righe.length, esiti:righe.map(r=>r[r.length-1]),
+          date:righe.map(r=>r[1]), prima:righe[0]||[]};
+});
+ok(!imp.errore,'il file si carica senza errori',imp.errore||'nessun errore');
+ok(imp.n>0,'l\'anteprima elenca le righe',imp.n+' righe');
+ok(!imp.esiti.some(e=>/data non riconosciuta/i.test(e)),
+   'nessuna riga perde la data: le colonne sono agganciate',
+   imp.esiti.filter(e=>/data non riconosciuta/i.test(e)).length+' righe senza data · prima riga: '+JSON.stringify(imp.prima));
+ok(imp.date.every(d=>/^\d{4}-\d{2}-\d{2}$/.test(d)),'e le date arrivano tutte leggibili',
+   JSON.stringify(imp.date.slice(0,3)));
+// Il cliente dev'essere ritrovato: e' un nome che l'app stessa ha
+// scritto. Il progetto no, non sempre: una registrazione puo' non
+// averne, e con la gerarchia attiva una riga senza progetto non arriva
+// a una commessa. E' una regola del modello, non un difetto del file.
+ok(!imp.esiti.some(e=>/cliente «/i.test(e)),
+   'il cliente esportato dall\'app viene ritrovato al ricarico',
+   imp.esiti.filter(e=>/cliente «/i.test(e))[0]||'tutti ritrovati');
+
 console.log('\n=== E. Niente resti del formato vecchio ===');
 const src=fs.readFileSync(path.join(ROOT,'app.js'),'utf8');
 ok(!/application\/vnd\.ms-excel/.test(src),'nessun tipo «vnd.ms-excel» nel codice');

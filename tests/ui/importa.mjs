@@ -94,11 +94,19 @@ const t2=await pg.evaluate(()=>document.getElementById('app').textContent.replac
 ok(/Data, Cliente, Progetto/.test(t2),'spiega quali colonne servono',(t2.match(/Nella prima riga[^<]{0,80}/)||[''])[0]);
 ok(!/Cosa succederà/.test(t2),'e non mostra un\'anteprima finta');
 
-console.log('\n=== E. Il .xlsx viene riconosciuto e spiegato ===');
+console.log('\n=== E. Un .xlsx rovinato lo dice, non fallisce in silenzio ===');
+// Gli .xlsx ora si leggono davvero, quindi qui non si verifica piu' che
+// l'app consigli di convertirli in CSV: quel consiglio non ha piu'
+// ragione di esserci. Si verifica il caso che resta scomodo — un file
+// che comincia come un archivio ma archivio non e' — dove l'utente deve
+// capire cosa e' successo invece di vedere una schermata muta.
 const fZip=path.join(dir,'finto.xlsx');fs.writeFileSync(fZip,'PK\x03\x04finto');
 await carica(fZip);
 const t3=await pg.evaluate(()=>document.getElementById('app').textContent.replace(/\s+/g,' '));
-ok(/Salva con nome/.test(t3),'dice cosa fare invece di fallire in silenzio');
+ok(/non sembra un \.xlsx|archivio/i.test(t3),'spiega che il file non è leggibile',
+   (t3.match(/Il file[^<]{0,70}/)||[''])[0]||t3.slice(0,80));
+ok(!/Cosa succederà/.test(t3),'e non mostra un\'anteprima finta');
+ok(!/Salva con nome/.test(t3),'senza piu\' consigliare di convertire in CSV: ora si leggono');
 
 console.log('\n=== F. La sede parte da Remoto ===');
 // quasi tutto il lavoro si fa da remoto: e' il valore di partenza, e

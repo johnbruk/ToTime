@@ -2137,7 +2137,7 @@ function importaConsuntivi(){
       <div class="field" style="margin-top:12px">
         <input type="file" accept=".xlsx,.xls,.xml,.csv,.txt,text/csv" onchange="importaFile(this)">
         <div class="small">Va bene l'<b>.xlsx</b> che scarichi da qui, un file salvato da <b>Excel</b>, oppure un <b>CSV</b>.
-        Se hai un .xlsx, da Excel fai «Salva con nome» e scegli CSV.</div></div>
+        </div></div>
       ${state.importErrore?`<div class="copybox">${esc(state.importErrore)}</div>`:''}
     </div>
     ${a?`<div class="card"><b>Cosa succederà</b>
@@ -2178,7 +2178,14 @@ async function importaFile(input){
     const testa=new Uint8Array(buf.slice(0,4));
     // un .xlsx e' un archivio: comincia per PK. Tutto il resto e' testo.
     const xlsx=testa[0]===0x50&&testa[1]===0x4B&&testa[2]===0x03&&testa[3]===0x04;
-    const righe=xlsx?await leggiXlsx(buf):leggiTabella(new TextDecoder('utf-8').decode(buf)).righe;
+    let righe;
+    if(xlsx){
+      const t=trovaIntestazione(await leggiXlsx(buf));
+      if(!t)throw new Error('Nella prima riga non ci sono le colonne Data, Cliente, Progetto, Attività, Ore.');
+      righe=t.righe;
+    }else{
+      righe=leggiTabella(new TextDecoder('utf-8').decode(buf)).righe;
+    }
     if(!righe.length)throw new Error('Il foglio non ha righe sotto l\'intestazione.');
     state.importErrore='';state.importAnalisi=analizzaImport(righe);
   }catch(e){ state.importAnalisi=null;state.importErrore=String(e&&e.message||e); }
