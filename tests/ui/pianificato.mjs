@@ -56,6 +56,23 @@ ok(dash.k.every(x=>/h$/.test(x.sotto||'')),'con le ore sotto',dash.k.map(x=>x.so
 ok(/consuntivato/.test(dash.riga||'')&&/pianificato/.test(dash.riga||'')&&/totale/.test(dash.riga||''),
    'e gli importi divisi allo stesso modo',dash.riga);
 
+console.log('\n=== A2. Gli stessi tre numeri nel riepilogo del Timesheet ===');
+// La domanda e' la stessa in tutte e due le schermate, quindi la
+// risposta dev'essere la stessa: due riepiloghi che contano in modo
+// diverso sarebbero peggio di uno solo.
+await pg.evaluate(()=>window.go('timesheet'));await pg.waitForTimeout(400);
+const ts=await pg.evaluate(()=>{
+  const c=document.querySelector('#app .card');
+  return [...c.querySelectorAll('.kpiGrid div')].map(d=>({
+    et:d.querySelector('span')?.textContent.trim(),
+    n:d.querySelector('strong')?.textContent.trim()}));
+});
+ok(ts.length===3&&ts[0].et==='Consuntivate'&&ts[1].et==='Pianificate'&&ts[2].et==='Totale',
+   'anche qui consuntivate, pianificate e totale',ts.map(x=>x.et).join(' · '));
+ok(ts.map(x=>x.n).join('|')===dash.k.map(x=>x.n).join('|'),
+   'e i numeri combaciano con quelli della dashboard',
+   ts.map(x=>x.n).join(' · ')+'  contro  '+dash.k.map(x=>x.n).join(' · '));
+
 console.log('\n=== B. La fattura comprende il pianificato ===');
 const totali=async()=>{await pg.evaluate(()=>window.go('billing'));await pg.waitForTimeout(400);
   return await pg.evaluate(()=>({

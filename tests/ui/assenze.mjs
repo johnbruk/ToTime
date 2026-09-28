@@ -80,8 +80,10 @@ ok(/Assenze 68 h/.test(await pg.evaluate(()=>document.querySelector('.metricLine
 
 console.log('\n=== F. Le assenze non sporcano il consuntivato ===');
 await pg.evaluate(()=>window.go('timesheet'));await pg.waitForTimeout(400);
-const ts=await pg.evaluate(()=>[...document.querySelectorAll('.kpiGrid strong')].map(x=>x.textContent.trim()));
-ok(ts[0]==='30,0 h','il timesheet conta solo le ore lavorate, non le assenze',ts[0]);
+const ts=await pg.evaluate(()=>{const d=document.querySelector('#app .kpiGrid div');
+  return {gg:d?.querySelector('strong')?.textContent.trim(),ore:d?.querySelector('small')?.textContent.trim()}});
+ok(ts.ore==='30,0 h','il timesheet conta solo le ore lavorate, non le assenze',ts.ore);
+ok(ts.gg==='3,75 gg','e le stesse ore in giornate',ts.gg);
 await pg.evaluate(()=>window.go('pivot'));await pg.waitForTimeout(500);
 const pv=await pg.evaluate(()=>[...document.querySelectorAll('.kpiGrid strong')].map(x=>x.textContent.trim()));
 ok(pv[0]==='30,0 h','nemmeno l\'analisi consuntivi le conta',pv[0]);

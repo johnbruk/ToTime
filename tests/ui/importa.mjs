@@ -108,6 +108,33 @@ ok(/non sembra un \.xlsx|archivio/i.test(t3),'spiega che il file non è leggibil
 ok(!/Cosa succederà/.test(t3),'e non mostra un\'anteprima finta');
 ok(!/Salva con nome/.test(t3),'senza piu\' consigliare di convertire in CSV: ora si leggono');
 
+console.log('\n=== E2. Le note tornano indietro dall\'import ===');
+// L'export mensile ha una colonna Note, per poterle incrociare in una
+// pivot. Se l'import non la leggesse, il giro perderebbe per strada
+// proprio quello che si e' aggiunto: si esporta con le note e si
+// ricarica senza.
+const fNote=path.join(dir,'note.csv');
+const NOTA='Concordato a voce, & con <segni> "strani"';
+// In CSV le virgolette dentro un campo si raddoppiano: scriverle
+// singole produce un file malformato, e il lettore fa bene a non
+// indovinare. Qui il file di prova dev'essere corretto, altrimenti si
+// starebbe provando la cosa sbagliata.
+fs.writeFileSync(fNote,['Data,Cliente,Progetto,Attività,Sede,Descrizione,Note,Ore',
+  `20/09/2026,Solution,Equans,AMS / Incident,Remoto,Intervento,"${NOTA.replace(/"/g,'""')}",2`].join('\n'));
+await carica(fNote);
+const kpiN=await pg.evaluate(()=>[...document.querySelectorAll('#app .kpiGrid strong')].map(x=>x.textContent.trim()));
+ok(kpiN[0]==='1','la riga con la nota si carica',kpiN.join(' / '));
+await pg.evaluate(()=>window.eseguiImport());
+await pg.waitForTimeout(1400);
+const scritte=await pg.evaluate(()=>(window.__ins||[])
+  .filter(x=>x.__table==='timesheet_entries'&&x.entry_date==='2026-09-20')
+  .map(x=>({note:x.notes,desc:x.description})));
+ok(scritte.length>0,'e viene scritta una registrazione',scritte.length+' scritte');
+ok(scritte.some(x=>x.note===NOTA),'con la nota dentro, per intero',
+   scritte.length?JSON.stringify(scritte[0].note):'nessuna');
+ok(scritte.some(x=>x.desc==='Intervento'),'e la descrizione resta cosa sua',
+   scritte.length?JSON.stringify(scritte[0].desc):'—');
+
 console.log('\n=== F. La sede parte da Remoto ===');
 // quasi tutto il lavoro si fa da remoto: e' il valore di partenza, e
 // la trasferta la si segna quando capita
