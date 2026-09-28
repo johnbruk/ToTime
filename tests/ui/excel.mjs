@@ -197,6 +197,48 @@ if(esito.startsWith('ERRORE')){
   ok(a1==='Data','e l\'intestazione al suo posto',a1);
 }
 
+console.log('\n=== G. Il file del mese e\' di un cliente solo ===');
+// Il file del mese si manda al cliente. Se dentro ci sono anche i
+// consuntivi degli altri, mandarlo significa mandargli i loro dati.
+await pg.evaluate(()=>window.go('timesheet'));await pg.waitForTimeout(400);
+const perUno=await scarica("window.downloadMonthExcel('c1')");
+ok(perUno!==null,'si scarica l\'Excel di un cliente solo',perUno?'sì':'nessun file');
+const clientiDentro=[...new Set(((perUno&&perUno.righe)||[]).slice(1)
+  .map(r=>String(r[1]||'').trim()).filter(x=>x&&x!=='Totale'))];
+ok(clientiDentro.length===1&&clientiDentro[0]==='Equans',
+   'e dentro c\'è un cliente solo, quello scelto',clientiDentro.join(', ')||'nessuno');
+ok(!!perUno&&/Equans/.test(perUno.nome||''),
+   'il nome del file dice di chi è',perUno?perUno.nome:'—');
+
+// Il pulsante di condivisione senza cliente non deve inventarsi un
+// destinatario: non condivide e lo dice.
+const senza=await scarica('window.shareMonthExcel()');
+ok(senza===null,'condividere senza cliente non produce nessun file',
+   senza?('ha prodotto '+senza.nome):'nessun file, come deve essere');
+ok(/un cliente alla volta/.test(await pg.evaluate(()=>
+     document.querySelector('#app .toast')?.textContent||'')),
+   'e lo spiega a schermo',await pg.evaluate(()=>document.querySelector('#app .toast')?.textContent||'(nessun messaggio)'));
+
+// L'archivio di tutti i clienti resta possibile, ma e' un'altra cosa
+const tutti=await scarica('window.downloadMonthExcel()');
+const clientiTutti=[...new Set(((tutti&&tutti.righe)||[]).slice(1)
+  .map(r=>String(r[1]||'').trim()).filter(x=>x&&x!=='Totale'))];
+ok(clientiTutti.length>1,'lo scarico d\'archivio li contiene ancora tutti',
+   clientiTutti.join(', ')||'nessuno');
+ok(!!tutti&&!/Equans|Zeta/.test(tutti.nome||''),
+   'e il suo nome non nomina nessun cliente',tutti?tutti.nome:'—');
+
+// I pulsanti stanno nella testata del gruppo, cioe' accanto al nome di
+// chi riceve: e' li' che si vede a chi si sta per mandare il file.
+const azioni=await pg.evaluate(()=>[...document.querySelectorAll('#app .cliGruppo')].map(g=>({
+  cliente:g.querySelector('.cliHead b')?.textContent.trim(),
+  pulsanti:[...g.querySelectorAll('.cliAzioni .miniBtn')].map(x=>x.getAttribute('onclick'))})));
+ok(azioni.length>0&&azioni.every(a=>a.pulsanti.length===2),
+   'ogni gruppo ha i suoi due pulsanti',JSON.stringify(azioni.map(a=>a.cliente+':'+a.pulsanti.length)));
+ok(azioni.every(a=>a.pulsanti.every(o=>/\('[^']+'\)/.test(o||''))),
+   'e tutti e due passano il cliente, nessuno esporta il mese intero',
+   JSON.stringify(azioni[0]&&azioni[0].pulsanti));
+
 await pg.close();await b.close();srv.close();
 console.log(`\nRISULTATO: ${pass} OK / ${fail} KO`);
 if(fail)process.exitCode=1;

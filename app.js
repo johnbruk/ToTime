@@ -82,7 +82,30 @@ function invoiceTemplateByType(type){return data.invoiceTemplates.filter(t=>t.ac
 function clientName(id){return clientById(id)?.name||'Senza cliente'}
 function projectName(id){return projectById(id)?.name||''}
 function activityName(id){return activityById(id)?.name||''}
-function activityTagClass(id){let h=0;const s=String(id||'');for(let i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))>>>0;return 'act'+(h%6)}
+// Il colore di un'attivita' la distingue dalle altre: due attivita' dello
+// stesso colore non distinguono niente. Prima il colore usciva da un hash
+// su sei slot, e con sei slot due attivita' su tre finivano appaiate.
+// Ora l'hash sceglie lo slot di partenza e, se e' gia' preso, si scorre:
+// finche' ci sono slot liberi non ci sono due attivita' uguali.
+// L'assegnazione gira sugli id ordinati, non sui nomi ne' sull'ordinamento
+// scelto per le liste, cosi' rinominare un'attivita' o cambiare
+// l'ordinamento non sposta nessun colore.
+const ACT_COLORI=12;
+let actSlotMappa=null,actSlotChiave=null;
+function actHash(id){let h=0;const s=String(id||'');for(let i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))>>>0;return h}
+function actSlots(){
+  const ids=(data.activities||[]).map(a=>a.id).sort();
+  const chiave=ids.join('|');
+  if(actSlotMappa&&actSlotChiave===chiave)return actSlotMappa;
+  const presi=new Set(),mappa={};
+  ids.forEach(id=>{
+    let slot=actHash(id)%ACT_COLORI;
+    for(let k=0;k<ACT_COLORI&&presi.has(slot);k++)slot=(slot+1)%ACT_COLORI;
+    presi.add(slot);mappa[id]=slot;
+  });
+  actSlotChiave=chiave;actSlotMappa=mappa;return mappa;
+}
+function activityTagClass(id){const s=actSlots()[id];return 'act'+(s===undefined?actHash(id)%ACT_COLORI:s)}
 function activityTag(id){const n=activityName(id);return n?`<span class="tag actTag ${activityTagClass(id)}">${esc(n)}</span>`:''}
 function expenseCategoryName(id){return expenseCategoryById(id)?.name||'Spesa'}
 function entryRate(e){return Number(e.daily_rate_snapshot ?? clientById(e.client_id)?.daily_rate ?? 0)}
@@ -779,14 +802,15 @@ function emptyState(text,ctaLabel,ctaAction){return `<div class="empty">${text}<
 function emptyForm(text){return emptyState(text,'\u2191 Vai al modulo','focusForm()')}
 function editEntry(id,type){navigateTo(type==='monthly'?'monthlyEdit':type==='manual'?'manualEdit':type==='expense'?'expenseEdit':'dailyEdit',{edit:id})}
 function fmtDMY(s){const p=String(s||'').split('-');return p.length===3?p[2]+'/'+p[1]+'/'+p[0]:String(s||'');}
-function monthWorkbookFogli(){
+function monthWorkbookFogli(clientId=''){
   // Gli stessi due fogli di prima — Dettaglio e Pivot mese — ma come
   // dati per il generatore .xlsx invece che come XML SpreadsheetML.
   // Il contenuto non cambia: cambia il formato del file, che prima era
   // XML di Excel 2003 travestito da .xls e su Excel mobile non si apriva.
   const [year,mo]=String(state.month).split('-').map(Number);
   const days=new Date(year,mo,0).getDate();
-  const rows=rowsForMonth().slice().sort((a,b)=>String(a.entry_date).localeCompare(String(b.entry_date)));
+  const rows=rowsForMonth().filter(e=>!clientId||e.client_id===clientId)
+    .slice().sort((a,b)=>String(a.entry_date).localeCompare(String(b.entry_date)));
   const prof=(data.profiles||[])[0]||{};
   const uname=[prof.first_name,prof.last_name].filter(Boolean).join(' ')||prof.company_name||'Consulente';
   const monLabel=monthLabel(state.month);
@@ -825,7 +849,7 @@ function monthWorkbookFogli(){
     const d=Number(String(e.entry_date).slice(8,10)),h=Number(e.hours||0);
     pv[key].d[d]+=h;pv[key].tot+=h;if(d>=1&&d<=days)dayTot[d]+=h;grand+=h;
   });
-  const piv=[[{v:'Attività mese di: '+monLabel,s:{b:true}}],[{v:uname,s:{b:true}}]];
+  const piv=[[{v:'Attività mese di: '+monLabel+(clientId?' · '+clientName(clientId):''),s:{b:true}}],[{v:uname,s:{b:true}}]];
   const intest=[{v:'Data',s:hdrL}];
   for(let d=1;d<=days;d++)intest.push({v:d,t:'n',s:hdr});
   intest.push({v:'Tot.Ore',s:hdr});
@@ -847,12 +871,76 @@ function monthWorkbookFogli(){
   return [{nome:'Dettaglio',cols:[11,16,20,17,17,31,26,7],righe:det,blocca:1},
           {nome:'Pivot mese',cols:colPiv,righe:piv,blocca:3}];
 }
-function monthExcelBlob(){return xlsxBlob(monthWorkbookFogli())}
-function monthExcelFilename(){return 'TOTIME_consuntivi_'+state.month+'.xlsx'}
-function downloadMonthExcel(){const url=URL.createObjectURL(monthExcelBlob());const a=document.createElement('a');a.href=url;a.download=monthExcelFilename();document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500);setMsg('Excel dei consuntivi di '+monthLabel(state.month)+' generato.',3500);}
-async function shareMonthExcel(){const file=new File([monthExcelBlob()],monthExcelFilename(),{type:XLSX_MIME});try{if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],title:'Consuntivi '+monthLabel(state.month),text:'Consuntivi '+monthLabel(state.month)});return;}}catch(err){if(err&&err.name==='AbortError')return;}downloadMonthExcel();}
+function monthExcelBlob(clientId=''){return xlsxBlob(monthWorkbookFogli(clientId))}
+// Nel nome del file ci va il cliente, perche' il file si manda al
+// cliente: se si chiamano tutti uguale, in cartella Download non si
+// distingue quello di uno da quello di un altro e si allega il primo.
+function nomeFile(t){return String(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+  .replace(/[^A-Za-z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,40)||'cliente'}
+function monthExcelFilename(clientId=''){
+  return 'TOTIME_consuntivi_'+state.month+(clientId?'_'+nomeFile(clientName(clientId)):'')+'.xlsx';
+}
+// Condividere il mese intero voleva dire mandare a un cliente i
+// consuntivi di tutti gli altri. Si esporta un cliente alla volta, e
+// chi condivide deve dire quale: senza cliente non si condivide.
+function downloadMonthExcel(clientId=''){
+  const url=URL.createObjectURL(monthExcelBlob(clientId));
+  const a=document.createElement('a');a.href=url;a.download=monthExcelFilename(clientId);
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1500);
+  setMsg('Excel di '+(clientId?clientName(clientId):'tutti i clienti')+' · '+monthLabel(state.month)+' generato.',3500);
+}
+async function shareMonthExcel(clientId=''){
+  if(!clientId)return setMsg('Scegli il cliente: il file del mese si condivide un cliente alla volta.',5000);
+  const nome=clientName(clientId);
+  const file=new File([monthExcelBlob(clientId)],monthExcelFilename(clientId),{type:XLSX_MIME});
+  try{
+    if(navigator.canShare&&navigator.canShare({files:[file]})){
+      await navigator.share({files:[file],title:'Consuntivi '+nome+' · '+monthLabel(state.month),
+        text:'Consuntivi '+nome+' · '+monthLabel(state.month)});
+      return;
+    }
+  }catch(err){if(err&&err.name==='AbortError')return;}
+  downloadMonthExcel(clientId);
+}
 function timesheetRows(){return rowsForMonth().map(e=>({...e,kind:'daily',date:e.entry_date})).concat(monthlyRows().map(m=>({...m,kind:'monthly',date:`${m.year}-${String(m.month).padStart(2,'0')}-01`}))).concat(manualRows().map(e=>({...e,kind:'manual',date:e.entry_date}))).concat(expenseRows().map(e=>({...e,kind:'expense',date:e.expense_date}))).sort((a,b)=>String(b.date).localeCompare(String(a.date)))}
-function timesheet(){const rows=timesheetRows();const t=totals();const groups=groupSummary();const filtrate=filtraRighe(rows);return appShell(`<h1>Timesheet</h1>${monthSelector()}<div class="card"><b>Riepilogo ${monthLabel(state.month)}</b><div class="kpiGrid three" style="margin-top:14px"><div><span>Consuntivate</span><strong>${fmtNum(t.days,2)} gg</strong><small>${fmtNum(t.hours,1)} h</small></div><div><span>Pianificate</span><strong>${fmtNum(t.plannedDays,2)} gg</strong><small>${fmtNum(t.plannedHours,1)} h</small></div><div><span>Totale</span><strong>${fmtNum(t.days+t.plannedDays,2)} gg</strong><small>${fmtNum(t.hours+t.plannedHours,1)} h</small></div></div><div class="metricLine" style="margin-top:12px">${fmtEUR(t.amount)} consuntivato${t.plannedAmount>0?` <span class="dot">·</span> ${fmtEUR(t.plannedAmount)} pianificato <span class="dot">·</span> <b>${fmtEUR(t.amount+t.plannedAmount)}</b> totale`:''}</div><div class="chartWrap"><div class="chartTitle"><span>Andamento mese</span><span>1 → fine mese</span></div>${monthChartSvg()}</div></div><div class="miniActions"><button type="button" class="miniBtn" onclick="go('griglia')" title="Compila tutto il mese in una griglia">Mensile</button><button type="button" class="miniBtn" onclick="go('pivot')" title="Analizza i consuntivi per cliente, progetto, attività">Analisi</button><button type="button" class="miniBtn" onclick="downloadMonthExcel()" title="Scarica l'Excel del mese">⤓ Excel</button><button type="button" class="miniBtn" onclick="shareMonthExcel()" title="Condividi o invia i consuntivi">↗ Condividi</button></div>${groups.length?`<div class="card"><b>Per cliente</b><div class="list" style="box-shadow:none;margin:10px 0 0">${groups.map(r=>`<div class="row"><div></div><div><div class="title">${esc(clientName(r.client_id))}</div><div class="desc">${esc(projectName(r.project_id)||'Senza progetto')} · ${esc(r.label)}</div></div><div class="value">${fmtEUR(r.amount)}</div></div>`).join('')}</div></div>`:''}<button class="primary" onclick="newEntryChoice()">+ Nuovo consuntivo</button>${rows.length?cercaBox(filtrate.length,rows.length):''}${selBar('timesheet',filtrate.length)}<div class="list">${filtrate.map(r=>timesheetRow(r)).join('')||(rows.length?`<div class="empty">Nessun consuntivo con «${esc(state.cerca)}».<button type="button" class="secondary emptyCta" onclick="cambiaCerca('')">Svuota la ricerca</button></div>`:'')||'<div class="empty">Nessun consuntivo in questo mese.<button type="button" class="secondary emptyCta" onclick="newEntryChoice()">+ Aggiungi il primo consuntivo</button></div>'}</div>`)}
+// Un mese misto e' una sequenza di righe in cui il cliente si ripete a
+// ogni riga senza mai fare somma: per fatturare si ragiona un cliente
+// alla volta. L'elenco si spezza in gruppi, uno per cliente, con sopra
+// quante voci e quante ore ci sono dentro. Dentro il gruppo l'ordine
+// resta quello di prima, dal giorno piu' recente al piu' vecchio.
+function oreDiRiga(r){return r.kind==='daily'?Number(r.hours||0):0}
+function gruppiCliente(righe){
+  const mappa=new Map();
+  righe.forEach(r=>{const k=r.client_id||'';if(!mappa.has(k))mappa.set(k,[]);mappa.get(k).push(r)});
+  return [...mappa.entries()]
+    .map(([client_id,voci])=>({client_id,voci,ore:voci.reduce((n,r)=>n+oreDiRiga(r),0)}))
+    .sort((a,b)=>String(clientName(a.client_id)).localeCompare(String(clientName(b.client_id)),'it',{sensitivity:'base'}));
+}
+function elencoCliente(g){
+  const std=Number(clientById(g.client_id)?.standard_hours||8)||8;
+  const conto=g.voci.length===1?'1 voce':g.voci.length+' voci';
+  const ore=g.ore>0?` <span class="dot">·</span> ${fmtNum(g.ore,1)} h <span class="dot">·</span> ${fmtNum(g.ore/std,2)} gg/u`:'';
+  const nome=esc(clientName(g.client_id));
+  // I pulsanti stanno qui dentro, non in cima alla pagina: dalla
+  // testata del gruppo si vede a colpo d'occhio di chi sono i dati che
+  // si sta per mandare fuori. In cima non si vedeva, ed era proprio
+  // quello il modo di mandare a un cliente i consuntivi di un altro.
+  const azioni=g.client_id?`<span class="cliAzioni">
+      <button type="button" class="miniBtn" title="Scarica l'Excel di ${nome}" onclick="downloadMonthExcel('${g.client_id}')">⤓ Excel</button>
+      <button type="button" class="miniBtn" title="Condividi i consuntivi di ${nome}" onclick="shareMonthExcel('${g.client_id}')">↗ Condividi</button>
+    </span>`:'';
+  return `<div class="cliGruppo"><div class="cliHead"><b>${nome}</b><span class="cliConto">${conto}${ore}</span>${azioni}</div>
+    <div class="list">${g.voci.map(r=>timesheetRow(r)).join('')}</div></div>`;
+}
+function elencoMensile(filtrate,tutte){
+  if(filtrate.length)return gruppiCliente(filtrate).map(elencoCliente).join('');
+  const vuoto=tutte.length
+    ? `<div class="empty">Nessun consuntivo con &laquo;${esc(state.cerca)}&raquo;.<button type="button" class="secondary emptyCta" onclick="cambiaCerca('')">Svuota la ricerca</button></div>`
+    : '<div class="empty">Nessun consuntivo in questo mese.<button type="button" class="secondary emptyCta" onclick="newEntryChoice()">+ Aggiungi il primo consuntivo</button></div>';
+  return `<div class="list">${vuoto}</div>`;
+}
+function timesheet(){const rows=timesheetRows();const t=totals();const groups=groupSummary();const filtrate=filtraRighe(rows);return appShell(`<h1>Timesheet</h1>${monthSelector()}<div class="card"><b>Riepilogo ${monthLabel(state.month)}</b><div class="kpiGrid three" style="margin-top:14px"><div><span>Consuntivate</span><strong>${fmtNum(t.days,2)} gg</strong><small>${fmtNum(t.hours,1)} h</small></div><div><span>Pianificate</span><strong>${fmtNum(t.plannedDays,2)} gg</strong><small>${fmtNum(t.plannedHours,1)} h</small></div><div><span>Totale</span><strong>${fmtNum(t.days+t.plannedDays,2)} gg</strong><small>${fmtNum(t.hours+t.plannedHours,1)} h</small></div></div><div class="metricLine" style="margin-top:12px">${fmtEUR(t.amount)} consuntivato${t.plannedAmount>0?` <span class="dot">·</span> ${fmtEUR(t.plannedAmount)} pianificato <span class="dot">·</span> <b>${fmtEUR(t.amount+t.plannedAmount)}</b> totale`:''}</div><div class="chartWrap"><div class="chartTitle"><span>Andamento mese</span><span>1 → fine mese</span></div>${monthChartSvg()}</div></div><div class="miniActions"><button type="button" class="miniBtn" onclick="go('griglia')" title="Compila tutto il mese in una griglia">Mensile</button><button type="button" class="miniBtn" onclick="go('pivot')" title="Analizza i consuntivi per cliente, progetto, attività">Analisi</button><button type="button" class="miniBtn" onclick="downloadMonthExcel()" title="Scarica l'Excel di tutti i clienti, per archivio">⤓ Excel (tutti)</button></div>${groups.length?`<div class="card"><b>Per cliente</b><div class="list" style="box-shadow:none;margin:10px 0 0">${groups.map(r=>`<div class="row"><div></div><div><div class="title">${esc(clientName(r.client_id))}</div><div class="desc">${esc(projectName(r.project_id)||'Senza progetto')} · ${esc(r.label)}</div></div><div class="value">${fmtEUR(r.amount)}</div></div>`).join('')}</div></div>`:''}<button class="primary" onclick="newEntryChoice()">+ Nuovo consuntivo</button>${rows.length?cercaBox(filtrate.length,rows.length):''}${selBar('timesheet',filtrate.length)}${elencoMensile(filtrate,rows)}`)}
 /* ===== Analisi consuntivi (pivot) ===== */
 const PIVOT_DIMS=[['client','Cliente'],['project','Cliente / Progetto'],['activity','Attività'],['desc','Descrizione'],['type','Tipo voce'],['site','Sede'],['month','Mese']];
 const PIVOT_PRESETS=[['client','project','Cliente › Progetto'],['project','activity','Progetto › Attività'],['activity','desc','Attività › Descrizione'],['client','activity','Cliente › Attività'],['month','client','Mese › Cliente']];
@@ -1210,10 +1298,14 @@ async function deleteSelected(){
   setMsg(done===1?'1 voce eliminata.':done+' voci eliminate.',4000);
   render();
 }
-function timesheetRow(r){if(r.kind==='daily')return `<div ${rowAttrs('daily',r.id)}><div class="date">${selBox('daily',r.id)}${dateIT(r.entry_date)}</div><div><div class="title">${esc(clientName(r.client_id))}${projectName(r.project_id)?' / '+esc(projectName(r.project_id)):''}${isTM(r)?' <span class="tag green">T&amp;M</span>':''}${isPlanned(r)?' <span class="tag blue">Pianificato</span>':''}</div><div class="desc">${activityTag(r.activity_id)} ${r.work_site||r.work_city?'· '+esc([r.work_site,r.work_city].filter(Boolean).join(' - ')):''}</div><div class="desc">${esc(r.description||'')}</div>${r.notes?`<div class="desc">Note: ${esc(r.notes)}</div>`:''}</div><div class="value">${fmtNum(r.hours,1)} h</div></div>`;
-if(r.kind==='monthly')return `<div ${rowAttrs('monthly',r.id)}><div class="date">${selBox('monthly',r.id)}${String(r.month).padStart(2,'0')}/${r.year}</div><div><div class="title">${esc(clientName(r.client_id))}${projectName(r.project_id)?' / '+esc(projectName(r.project_id)):''}</div><div class="desc">Una tantum mensile</div><div class="desc">${esc(r.description||'')}</div></div><div class="value">Mensile</div></div>`;
-if(r.kind==='manual')return `<div ${rowAttrs('manual',r.id)}><div class="date">${selBox('manual',r.id)}${dateIT(r.entry_date)}</div><div><div class="title">${esc(clientName(r.client_id))}${projectName(r.project_id)?' / '+esc(projectName(r.project_id)):''}</div><div class="desc">Forfettario ${activityTag(r.activity_id)} ${r.work_site||r.work_city?'· '+esc([r.work_site,r.work_city].filter(Boolean).join(' - ')):''}</div><div class="desc">${esc(r.description||'')}</div></div><div class="value">Manuale</div></div>`;
-return `<div ${rowAttrs('expense',r.id)}><div class="date">${selBox('expense',r.id)}${dateIT(r.expense_date)}</div><div><div class="title">${esc(clientName(r.client_id))}${projectName(r.project_id)?' / '+esc(projectName(r.project_id)):''}</div><div class="desc">Spesa · ${esc(expenseCategoryName(r.expense_category_id))} ${r.work_site||r.work_city?'· '+esc([r.work_site,r.work_city].filter(Boolean).join(' - ')):''}</div><div class="desc">${esc(r.description||'')}</div></div><div class="value">Spesa</div></div>`}
+// Il cliente ora sta nella testata del gruppo: ripeterlo su ogni riga
+// riempirebbe la colonna del titolo con la stessa parola dieci volte di
+// fila e spingerebbe in coda il progetto, che e' la cosa che cambia.
+function titoloRiga(r){return projectName(r.project_id)||'Senza progetto'}
+function timesheetRow(r){if(r.kind==='daily')return `<div ${rowAttrs('daily',r.id)}><div class="date">${selBox('daily',r.id)}${dateIT(r.entry_date)}</div><div><div class="title">${esc(titoloRiga(r))}${isTM(r)?' <span class="tag green">T&amp;M</span>':''}${isPlanned(r)?' <span class="tag blue">Pianificato</span>':''}</div><div class="desc">${activityTag(r.activity_id)} ${r.work_site||r.work_city?'· '+esc([r.work_site,r.work_city].filter(Boolean).join(' - ')):''}</div><div class="desc">${esc(r.description||'')}</div>${r.notes?`<div class="desc">Note: ${esc(r.notes)}</div>`:''}</div><div class="value">${fmtNum(r.hours,1)} h</div></div>`;
+if(r.kind==='monthly')return `<div ${rowAttrs('monthly',r.id)}><div class="date">${selBox('monthly',r.id)}${String(r.month).padStart(2,'0')}/${r.year}</div><div><div class="title">${esc(titoloRiga(r))}</div><div class="desc">Una tantum mensile</div><div class="desc">${esc(r.description||'')}</div></div><div class="value">Mensile</div></div>`;
+if(r.kind==='manual')return `<div ${rowAttrs('manual',r.id)}><div class="date">${selBox('manual',r.id)}${dateIT(r.entry_date)}</div><div><div class="title">${esc(titoloRiga(r))}</div><div class="desc">Forfettario ${activityTag(r.activity_id)} ${r.work_site||r.work_city?'· '+esc([r.work_site,r.work_city].filter(Boolean).join(' - ')):''}</div><div class="desc">${esc(r.description||'')}</div></div><div class="value">Manuale</div></div>`;
+return `<div ${rowAttrs('expense',r.id)}><div class="date">${selBox('expense',r.id)}${dateIT(r.expense_date)}</div><div><div class="title">${esc(titoloRiga(r))}</div><div class="desc">Spesa · ${esc(expenseCategoryName(r.expense_category_id))} ${r.work_site||r.work_city?'· '+esc([r.work_site,r.work_city].filter(Boolean).join(' - ')):''}</div><div class="desc">${esc(r.description||'')}</div></div><div class="value">Spesa</div></div>`}
 
 function annualSummaryCard(){const y=currentYear();const at=annualTotals(y);return `<div class="card cardLink" onclick="openAnnualMonths()" role="button" title="Dettaglio consuntivato mese per mese"><b>Annuale ${y} <span class="cardLinkArrow">›</span></b><div class="kpiGrid three" style="margin-top:14px"><div><span>Consuntivato</span><strong>${fmtEUR(at.consuntivato)}</strong></div><div><span>Fatturato</span><strong>${fmtEUR(at.fatturato)}</strong></div><div><span>Incassato</span><strong>${fmtEUR(at.incassato)}</strong></div></div><div class="metricLine" style="margin-top:12px">Da incassare <span class="dot">·</span> ${fmtEUR(at.daIncassare)}</div></div>`}
 function billingGroupsByClient(){const lines=groupSummary();const by={};lines.forEach(l=>{if(!by[l.client_id])by[l.client_id]={client_id:l.client_id,lines:[],baseTotal:0,total:0,hours:0,pAmount:0,pHours:0};by[l.client_id].lines.push(l);by[l.client_id].baseTotal+=Number(l.amount||0);by[l.client_id].hours+=Number(l.hours||0);by[l.client_id].pAmount+=Number(l.pAmount||0);by[l.client_id].pHours+=Number(l.pHours||0)});Object.values(by).forEach(g=>{const header=headerForClient(g.client_id)||{};g.calc=billingCalc(g,header);g.total=g.calc.total});return Object.values(by).sort((a,b)=>clientName(a.client_id).localeCompare(clientName(b.client_id)))}
@@ -1428,7 +1520,7 @@ function settings(){const email=esc(session?.user?.email||'');return appShell(`<
 
 function appearance(){return appShell(`<div class="screenTitle">Aspetto / Tema</div><p class="sub">Scegli il template grafico da usare su telefono e PC.</p><div class="card"><div class="themeChoice"><button class="${state.theme==='light'?'active':''}" onclick="saveThemeChoice('light')"><b>Chiaro / Giorno</b><span>sfondo chiaro, card bianche, ideale per uso diurno</span></button><button class="${state.theme==='dark'?'active':''}" onclick="saveThemeChoice('dark')"><b>Scuro / Sera</b><span>sfondo navy, card scure, ideale per smartphone e sera</span></button><button class="${state.theme==='auto'?'active':''}" onclick="saveThemeChoice('auto')"><b>Automatico di sistema</b><span>segue l'impostazione del dispositivo: ora attivo il tema ${systemTheme()==='dark'?'scuro':'chiaro'}</span></button></div></div><button class="secondary" onclick="go('settings')">Indietro</button>`)}
 
-function exportTimesheetViewOptions(){const clients=activeClients();const selected=clients[0]?.id||'';return `<div class="field"><label>Mese</label><input name="month" type="month" value="${state.month}"></div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)"><option value="">Tutti i clienti</option>${clients.map(c=>`<option value="${c.id}"${c.id===selected?' selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Cliente/Progetto</label><select name="project_id"><option value="">Tutti i progetti</option>${projectOptions(selected)}</select></div><div class="field"><label>Includi importi</label><select name="include_amount"><option value="false">No, solo dettaglio operativo</option><option value="true">Sì, includi importi</option></select></div>`}
+function exportTimesheetViewOptions(){const clients=activeClients();const selected=clients[0]?.id||'';return `<div class="field"><label>Mese</label><input name="month" type="month" value="${state.month}"></div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)"><option value="">Tutti i clienti (solo per archivio)</option>${clients.map(c=>`<option value="${c.id}"${c.id===selected?' selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Cliente/Progetto</label><select name="project_id"><option value="">Tutti i progetti</option>${projectOptions(selected)}</select></div><div class="field"><label>Includi importi</label><select name="include_amount"><option value="false">No, solo dettaglio operativo</option><option value="true">Sì, includi importi</option></select></div>`}
 function exportTimesheet(){return appShell(`<div class="screenTitle">Export Timesheet Excel</div><p class="sub">Scarica il dettaglio mensile da inviare al cliente.</p><form class="form" onsubmit="downloadTimesheetExcel(event)">${exportTimesheetViewOptions()}<div class="actions"><button class="primary">Scarica Excel</button><button type="button" class="secondary" onclick="go('settings')">Annulla</button></div></form>`)}
 
 function clients(){return appShell(`<h1>Clienti</h1><form class="form" onsubmit="addClient(event)"><div class="field"><label>Nome cliente</label><input name="name" required></div><div class="field"><label>Codice cliente</label><input name="code" maxlength="5" placeholder="Es. SO" oninput="this.value=normCode(this.value)"><div class="small">Da 2 a 5 lettere o cifre. Entra nel codice di ogni commessa: una volta usato non si cambia piu'.</div></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h">Tariffa giornaliera 8h</option><option value="monthly_flat">Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="0"></div><button class="primary">Aggiungi cliente</button></form>${sortControl('clients')}<div class="list">${sortEntities('clients',data.clients).map(c=>`<div class="row" onclick="${wbsReady()?`openClient('${c.id}')`:`editClient('${c.id}')`}"><div></div><div><div class="title">${esc(c.name)}</div><div class="desc">${c.compensation_type==='daily_rate_8h'?'Tariffa giornaliera 8h · '+fmtEUR(c.daily_rate||0):'Una tantum mensile'} · ${c.active?'Attivo':'Disattivo'}</div></div>${moveBtns('clients',c.id)}</div>`).join('')||emptyForm('Nessun cliente ancora inserito.')}</div>`)}
@@ -1669,7 +1761,7 @@ function engagementFilters(){
   const f=state.engFilter||{};
   const anni=[...new Set((data.engagements||[]).map(e=>e.year))].sort((a,b)=>b-a);
   return `<div class="miniActions" style="grid-template-columns:1fr 1fr">
-    <select class="miniBtn" onchange="setEngFilter('client_id',this.value)"><option value="">Tutti i clienti</option>
+    <select class="miniBtn" onchange="setEngFilter('client_id',this.value)"><option value="">Tutti i clienti (solo per archivio)</option>
       ${(data.clients||[]).map(c=>`<option value="${c.id}" ${f.client_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
     <select class="miniBtn" onchange="setEngFilter('year',this.value)"><option value="">Tutti gli anni</option>
       ${anni.map(y=>`<option value="${y}" ${String(f.year)===String(y)?'selected':''}>${y}</option>`).join('')}</select>
@@ -2811,7 +2903,7 @@ function repFiltri(){
     <div class="field" style="margin-top:12px"><label>Dal</label><input type="date" value="${esc(r.dal)}" onchange="setRep('dal',this.value)"></div>
     <div class="field"><label>Al</label><input type="date" value="${esc(r.al)}" onchange="setRep('al',this.value)"></div>
     <div class="field"><label>Cliente</label><select onchange="setRep('client_id',this.value)">
-      <option value="">Tutti i clienti</option>
+      <option value="">Tutti i clienti (solo per archivio)</option>
       ${(data.clients||[]).map(c=>`<option value="${c.id}" ${r.client_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}
     </select></div></div>`;
 }
