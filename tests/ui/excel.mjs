@@ -63,6 +63,17 @@ const parti=buf=>{
 };
 const OBBLIGATORIE=['[Content_Types].xml','_rels/.rels','xl/workbook.xml','xl/worksheets/sheet1.xml'];
 
+// Si scrive una nota su una registrazione del mese, con dentro
+// caratteri che in XML vanno protetti: cosi' la colonna si verifica con
+// un contenuto vero e non solo per la sua presenza.
+const NOTA='Nota di prova & <controllo> "virgolette"';
+await pg.evaluate(async n=>{
+  const e=window.__stores.timesheet_entries.find(x=>String(x.entry_date).startsWith('2026-07'));
+  if(e)e.notes=n;
+  await window.reload();
+},NOTA);
+await pg.waitForTimeout(600);
+
 console.log('\n=== A. Il consuntivo mensile esce come .xlsx vero ===');
 const m=await scarica('window.downloadMonthExcel()');
 ok(m!==null,'il pulsante genera un file',m?'sì':'nessun file intercettato');
@@ -79,7 +90,15 @@ console.log('\n=== B. Il contenuto si rilegge, date comprese ===');
 const letto=(m&&m.righe)||[];
 ok(!m||!m.errore,'il file si rilegge senza errori',m&&m.errore?m.errore:'nessun errore');
 ok(letto.length>2,'il primo foglio ha righe',letto.length+' righe');
-ok(letto[0]&&letto[0][0]==='Data'&&letto[0][6]==='Ore','con le intestazioni al loro posto',JSON.stringify(letto[0]||[]));
+ok(letto[0]&&letto[0][0]==='Data'&&letto[0][6]==='Note'&&letto[0][7]==='Ore',
+   'con le intestazioni al loro posto, Note compresa',JSON.stringify(letto[0]||[]));
+// Le note servono per incrociarle in una pivot: devono stare in una
+// colonna propria, non annegate nella descrizione.
+const conNote=letto.slice(1).filter(r=>String(r[6]||'').trim()!=='');
+ok(conNote.length>0,'una nota scritta finisce davvero in quella colonna',
+   conNote.length?JSON.stringify(conNote[0][6]):'nessuna riga porta la nota');
+ok(conNote.some(r=>r[6]===NOTA),'per intero, caratteri speciali compresi',
+   conNote.length?JSON.stringify(conNote[0][6]):'—');
 const conData=letto.slice(1).filter(r=>/^\d{4}-\d{2}-\d{2}$/.test(r[0]));
 ok(conData.length>0,'le date tornano come date, non come numeri seriali',
    conData.length?conData[0][0]:'nessuna data riconosciuta: '+JSON.stringify(letto[1]||[]));

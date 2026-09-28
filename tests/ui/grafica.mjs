@@ -39,7 +39,11 @@ async function scan(pg){
       if(el.scrollWidth>el.clientWidth+1)troncate.push(el.textContent.trim());
     });
     app.querySelectorAll('button,a[href],[onclick],input,select').forEach(el=>{
-      const r=el.getBoundingClientRect();
+      // Quando un comando sta dentro un'etichetta, e' l'etichetta che si
+      // tocca: toccarla accende la casella. Misurare il quadratino
+      // direbbe 20px su un bersaglio che di px ne ha 44.
+      const lab=el.closest('label');
+      const r=(lab||el).getBoundingClientRect();
       if(r.width>0&&r.height>0&&r.height<40&&!el.closest('table.griglia')&&!el.closest('.calGrid'))
         piccoli.push((el.className||el.tagName)+' '+Math.round(r.height)+'px');
     });

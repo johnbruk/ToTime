@@ -638,3 +638,12 @@ table.griglia.prospetto td.riga{padding:10px;text-align:left}
   .moveBtns button{width:44px;height:44px}
   .scopeNav .tabs button,.tabs button{min-height:44px}
 }
+
+/* «Fattura anche il pianificato»: una riga sola sotto il selettore del
+   mese. Sobria per scelta — è un interruttore che si tocca una volta
+   ogni tanto, non un comando da mettere in evidenza. L'area cliccabile
+   arriva a 44px anche se il quadratino è più piccolo. */
+.rigaPian{margin:-4px 0 14px}
+.rigaPian label{display:flex;align-items:center;gap:10px;min-height:44px;
+  color:var(--soft);font-size:13.5px;font-weight:600;cursor:pointer}
+.rigaPian input{width:20px;height:20px;accent-color:var(--primary);margin:0;flex:0 0 auto}
