@@ -153,7 +153,8 @@ ok(imp.n>0,'l\'anteprima elenca le righe',imp.n+' righe');
 ok(!imp.esiti.some(e=>/data non riconosciuta/i.test(e)),
    'nessuna riga perde la data: le colonne sono agganciate',
    imp.esiti.filter(e=>/data non riconosciuta/i.test(e)).length+' righe senza data · prima riga: '+JSON.stringify(imp.prima));
-ok(imp.date.every(d=>/^\d{4}-\d{2}-\d{2}$/.test(d)),'e le date arrivano tutte leggibili',
+ok(imp.date.every(d=>/^\d{2}\/\d{2}\/\d{4}$/.test(d)),
+   'e le date arrivano tutte leggibili, in gg/mm/aaaa come nel resto dell\'app',
    JSON.stringify(imp.date.slice(0,3)));
 // Il cliente dev'essere ritrovato: e' un nome che l'app stessa ha
 // scritto. Il progetto no, non sempre: una registrazione puo' non
