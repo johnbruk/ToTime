@@ -65,7 +65,9 @@ const prima=await pg.evaluate(()=>window.__stores.timesheet_entries.length);
 await pg.evaluate(()=>{const f=document.querySelector('form.form');f.wbs_id.value='';f.requestSubmit()});
 await pg.waitForTimeout(500);
 ok(await pg.evaluate(()=>window.__stores.timesheet_entries.length)===prima,'senza WBS non salva',prima+' voci, invariate');
-ok(/WBS/i.test(await pg.evaluate(()=>document.querySelector('.toast')?.textContent||'')),'e lo dice');
+const avviso=await pg.evaluate(()=>document.querySelector('.toast')?.textContent||'');
+ok(/attività della commessa/i.test(avviso),'e dice cosa scegliere',avviso||'nessun messaggio');
+ok(!/\bWBS\b/.test(avviso),'senza tirare in ballo la sigla WBS',avviso||'—');
 
 console.log('\n=== C. Salvando, la voce porta la WBS ===');
 // dopo il messaggio d'errore il modulo si ricostruisce: il progetto
