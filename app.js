@@ -2208,9 +2208,53 @@ function oreDaFoglio(v){
   const n=Number(t);
   return Number.isFinite(n)&&n>0?n:null;
 }
+// Il codice di una voce nuova non si ricava da quante voci ci sono:
+// basta un buco — una voce cancellata, o codici non a decine — e il
+// conteggio punta su un codice gia' occupato, che il database rifiuta
+// con «duplicate key value violates unique constraint». Si guarda
+// quali codici ci sono davvero e si prende il primo libero.
+function codiceWbsLibero(engId,presi){
+  const occupati=new Set(wbsOfEngagement(engId).map(w=>String(w.activity_code||'').trim()));
+  if(presi)presi.forEach(c=>occupati.add(c));
+  const numeri=[...occupati].map(c=>Number(c)).filter(n=>Number.isFinite(n)&&n>0);
+  let n=numeri.length?Math.floor(Math.max(...numeri)/10)*10+10:10;
+  while(occupati.has(String(n))&&n<999990)n+=10;
+  return String(n);
+}
+// Il database parla in inglese e per nomi di vincolo. Qui si dice cosa
+// e' successo in italiano: «duplicate key value violates unique
+// constraint "wbs_items_user_code_key"» non dice a nessuno cosa fare.
+function motivoLeggibile(e){
+  const m=String((e&&(e.message||e.details))||e||'').trim();
+  if(/wbs_items_(engagement_activity_code|user_code)_key/.test(m))
+    return 'il codice dell\'attività nuova era già usato nella commessa';
+  if(/wbs_items_activity_code_format/.test(m))
+    return 'il codice dell\'attività nuova non è valido';
+  if(/duplicate key value/.test(m))return 'questa riga risulta già inserita';
+  if(/violates foreign key/.test(m))
+    return 'un collegamento (cliente, progetto o commessa) non esiste più';
+  if(/row-level security|permission denied|JWT|not authenticated/i.test(m))
+    return 'il database ha rifiutato la scrittura: esci e rientra, poi riprova';
+  if(/Failed to fetch|NetworkError|network/i.test(m))
+    return 'connessione persa durante il caricamento';
+  return m||'errore sconosciuto';
+}
 const perNome=(lista,nome)=>{
   const n=String(nome||'').trim().toLowerCase();
   return n?(lista||[]).find(x=>String(x.name||'').trim().toLowerCase()===n):null;
+};
+// L'Excel che l'app esporta scrive nella colonna Attivita' il nome
+// dell'anagrafica; l'import cercava solo fra i nomi delle voci di
+// commessa. Quando i due nomi non coincidono, il file uscito da qui
+// non rientrava da qui: ogni riga sembrava portare un'attivita' nuova.
+// Si cerca per tutti e due i nomi.
+const perNomeWbs=(lista,nome)=>{
+  const n=String(nome||'').trim().toLowerCase();
+  if(!n)return null;
+  const uguale=t=>String(t||'').trim().toLowerCase()===n;
+  return (lista||[]).find(w=>uguale(w.name))
+      || (lista||[]).find(w=>uguale(activityName(w.activity_id)))
+      || null;
 };
 
 // --- cosa succederebbe, riga per riga -----------------------------
@@ -2243,7 +2287,7 @@ function analizzaImport(righe){
     if(!comm.length){out.esito='errore';out.motivo='il progetto '+prj.name+' non ha commesse';return out}
     // l'attivita' si cerca in tutte le commesse del progetto
     let w=null;
-    for(const e of comm){ w=perNome(wbsOfEngagement(e.id),r.attività); if(w)break; }
+    for(const e of comm){ w=perNomeWbs(wbsOfEngagement(e.id),r.attività); if(w)break; }
     if(w){out.wbs_id=w.id;out.esito=duplicatoImport(out)?'duplicato':'ok';return out}
     if(!String(r.attività||'').trim()){
       // nessuna attivita' indicata: se ce n'e' una sola si usa quella
@@ -2257,7 +2301,17 @@ function analizzaImport(righe){
 }
 function chiaveImport(r){return importKey(['consuntivo',r.iso,r.cliente,r.progetto,r.attività,r.descrizione,r.oreNum]);}
 function duplicatoImport(r){const k=chiaveImport(r);return (data.entries||[]).some(e=>e.import_key===k);}
-function contaImport(a){const c={ok:0,nuova:0,duplicato:0,errore:0};a.forEach(r=>{c[r.esito]=(c[r.esito]||0)+1});return c}
+function contaImport(a){const c={ok:0,nuova:0,duplicato:0,errore:0,caricata:0};
+  a.forEach(r=>{c[r.esito]=(c[r.esito]||0)+1});return c}
+// Due righe che portano la stessa attivita' nuova sono UNA attivita' da
+// creare, non due. Il prospetto contava le righe e annunciava il doppio
+// del lavoro che avrebbe fatto.
+function nuoveAttivita(a){
+  const s=new Set();
+  (a||[]).forEach(r=>{if(r.esito==='nuova')
+    s.add(r.engagement_id+'|'+String(r.attività||'').trim().toLowerCase())});
+  return s.size;
+}
 
 // --- la schermata ---------------------------------------------------
 function importaConsuntivi(){
@@ -2279,12 +2333,18 @@ function importaConsuntivi(){
         <div><span>Già presenti</span><strong>${c.duplicato}</strong><small>si saltano</small></div>
         <div><span>Da sistemare</span><strong>${c.errore}</strong><small>righe</small></div>
       </div>
-      ${c.nuova?`<div class="metricLine" style="margin-top:10px"><span class="tag orange">Attività nuove</span> ${c.nuova} da creare nella commessa</div>`:''}
-      <div class="scrollGriglia" style="margin-top:12px"><table class="griglia prospetto">
+      ${nuoveAttivita(a)?`<div class="metricLine" style="margin-top:10px"><span class="tag orange">Attività nuove</span> ${nuoveAttivita(a)===1?'1 da creare':nuoveAttivita(a)+' da creare'} nella commessa</div>`:''}
+      ${c.caricata?`<div class="metricLine" style="margin-top:10px"><span class="tag green">Già caricate</span> ${c.caricata} ${c.caricata===1?'riga di questo file':'righe di questo file'}</div>`:''}
+      ${state.importEsito&&state.importEsito.falliti.length?`<div class="calc" style="margin-top:12px">
+        <b>Queste righe non sono passate</b>
+        <div class="list" style="box-shadow:none;margin:10px 0 0">${state.importEsito.falliti.map(f=>
+          `<div class="row"><div class="date">riga ${f.n}</div><div><div class="desc">${esc(f.motivo)}</div></div><div></div></div>`).join('')}</div>
+        <div class="small" style="margin-top:10px">Riprovare non duplica niente: le righe già caricate vengono riconosciute e saltate.</div></div>`:''}
+      <div class="scrollGriglia" style="margin-top:12px"><table class="griglia prospetto numeriRiga">
         <thead><tr><th class="riga">Riga</th><th>Data</th><th>Cliente · Progetto</th><th>Attività</th><th>Ore</th><th>Esito</th></tr></thead>
         <tbody>${a.slice(0,80).map(r=>`<tr>
           <td class="riga"><div class="n">${r.n}</div></td>
-          <td>${esc(r.data||'')}</td>
+          <td>${esc(r.iso?fmtDMY(r.iso):(r.data||''))}</td>
           <td>${esc(r.cliente||'')} · ${esc(r.progetto||'')}</td>
           <td>${esc(r.attività||'—')}</td>
           <td class="num">${esc(r.ore||'')}</td>
@@ -2292,18 +2352,20 @@ function importaConsuntivi(){
       </table></div>
       ${a.length>80?`<div class="desc" style="margin-top:8px">Mostrate le prime 80 di ${a.length}.</div>`:''}
       <div class="actions" style="margin-top:14px">
-        ${(c.ok+c.nuova)?`<button type="button" class="primary" data-busy="Caricamento…" onclick="eseguiImport()">Carica ${c.ok+c.nuova} righe</button>`:''}
+        ${(c.ok+c.nuova)?`<button type="button" class="primary" data-busy="Caricamento…" onclick="eseguiImport()">${state.importEsito?(c.ok+c.nuova===1?'Riprova la riga rimasta':'Riprova le '+(c.ok+c.nuova)+' righe rimaste'):'Carica '+(c.ok+c.nuova)+(c.ok+c.nuova===1?' riga':' righe')}</button>`:''}
         <button type="button" class="secondary" onclick="annullaImport()">Scegli un altro file</button></div>
     </div>`:''}
     <button type="button" class="secondary" onclick="go('timesheet')">Torna al timesheet</button>`);
 }
 function esitoImport(r){
+  if(r.fallita)return '<span class="tag red">'+esc(r.motivo||'non passata')+'</span>';
+  if(r.esito==='caricata')return '<span class="tag green">caricata</span>';
   if(r.esito==='ok')return '<span class="tag green">si carica</span>';
   if(r.esito==='nuova')return '<span class="tag orange">attività da creare</span>';
   if(r.esito==='duplicato')return '<span class="tag gray">già presente</span>';
   return '<span class="tag red">'+esc(r.motivo||'errore')+'</span>';
 }
-function annullaImport(){state.importAnalisi=null;state.importErrore='';render()}
+function annullaImport(){state.importAnalisi=null;state.importErrore='';state.importEsito=null;render()}
 async function importaFile(input){
   const f=input.files&&input.files[0];if(!f)return;
   try{
@@ -2320,8 +2382,8 @@ async function importaFile(input){
       righe=leggiTabella(new TextDecoder('utf-8').decode(buf)).righe;
     }
     if(!righe.length)throw new Error('Il foglio non ha righe sotto l\'intestazione.');
-    state.importErrore='';state.importAnalisi=analizzaImport(righe);
-  }catch(e){ state.importAnalisi=null;state.importErrore=String(e&&e.message||e); }
+    state.importErrore='';state.importEsito=null;state.importAnalisi=analizzaImport(righe);
+  }catch(e){ state.importAnalisi=null;state.importEsito=null;state.importErrore=String(e&&e.message||e); }
   render();
 }
 // Scrive solo quello che l'anteprima ha promesso. La chiave di
@@ -2331,21 +2393,33 @@ async function eseguiImport(){
   const a=state.importAnalisi;if(!a)return;
   const daFare=a.filter(r=>r.esito==='ok'||r.esito==='nuova');
   if(!daFare.length)return setMsg('Non c\'è niente da caricare.',4000);
-  state.busy=true;render();
-  let fatte=0,create=0,falliti=[];
+  state.busy=true;state.importEsito=null;render();
+  let fatte=0,create=0;const falliti=[];
+  // Due righe che portano la stessa attivita' nuova la creano una volta
+  // sola. Prima ci provavano tutt'e due: la seconda o falliva, o
+  // lasciava nella commessa due voci con lo stesso nome.
+  const nuove=new Map(), codiciPresi=new Map();
   for(const r of daFare){
     try{
       let wbs=r.wbs_id;
       if(r.esito==='nuova'){
-        const esistenti=wbsOfEngagement(r.engagement_id);
-        const codice=String((esistenti.length+1)*10);
-        const ins=await insertResilient('wbs_items',{engagement_id:r.engagement_id,activity_code:codice,
-          name:r.attività,kind:'activity',billable:true,status:'active',sort_order:Number(codice)});
-        if(ins.error)throw ins.error;
-        await reload();
-        const w=wbsOfEngagement(r.engagement_id).find(x=>String(x.name).trim()===String(r.attività).trim());
-        if(!w)throw new Error('attività creata ma non ritrovata');
-        wbs=w.id;create++;
+        const chiave=r.engagement_id+'|'+String(r.attività||'').trim().toLowerCase();
+        if(nuove.has(chiave))wbs=nuove.get(chiave);
+        else{
+          if(!codiciPresi.has(r.engagement_id))codiciPresi.set(r.engagement_id,new Set());
+          const presi=codiciPresi.get(r.engagement_id);
+          const codice=codiceWbsLibero(r.engagement_id,presi);
+          presi.add(codice);
+          const ins=await insertResilient('wbs_items',{engagement_id:r.engagement_id,activity_code:codice,
+            name:r.attività,kind:'activity',billable:true,status:'active',sort_order:Number(codice)});
+          if(ins.error)throw ins.error;
+          await reload();
+          // si ritrova per codice, non per nome: il codice l'abbiamo
+          // scelto noi, il nome puo' tornare normalizzato dal database
+          const w=wbsOfEngagement(r.engagement_id).find(x=>String(x.activity_code)===codice);
+          if(!w)throw new Error('attività creata ma non ritrovata');
+          wbs=w.id;create++;nuove.set(chiave,wbs);
+        }
       }
       const c=clientById(r.client_id)||{};
       const payload={entry_date:r.iso,client_id:r.client_id,project_id:r.project_id||null,
@@ -2354,14 +2428,32 @@ async function eseguiImport(){
         daily_rate_snapshot:Number(c.daily_rate||0),standard_hours_snapshot:Number(c.standard_hours||8)};
       const {res}=await upsertByKey('timesheet_entries',data.entries,payload,chiaveImport(r),['wbs_id']);
       if(res.error)throw res.error;
-      fatte++;
-    }catch(e){ falliti.push('riga '+r.n+': '+String(e&&e.message||e)); }
+      fatte++;r.esito='caricata';r.motivo='';r.fallita=false;
+    }catch(e){
+      // l'esito resta quello di prima, cosi' la riga si puo' riprovare:
+      // il caricamento va per chiave, quindi riprovare non duplica
+      r.fallita=true;r.motivo=motivoLeggibile(e);
+      falliti.push({n:r.n,motivo:r.motivo});
+    }
   }
-  state.busy=false;state.importAnalisi=null;
+  state.busy=false;
   await reload();
+  // Se qualcosa non e' passato, il prospetto non si butta via: si resta
+  // qui con scritto riga per riga cosa manca, e si puo' riprovare solo
+  // quelle. Prima si finiva sul timesheet con un messaggio solo, e le
+  // righe rimaste non si sapeva piu' quali fossero.
+  if(falliti.length){
+    state.importEsito={fatte,create,falliti};
+    render();
+    setMsg(fatte+' righe caricate'+(create?', '+create+' attività create':'')+
+      ' · '+falliti.length+(falliti.length===1?' riga non è passata':' righe non sono passate')+
+      ': sono qui sotto, in rosso.',10000);
+    return;
+  }
+  state.importAnalisi=null;state.importEsito=null;
   navigateTo('timesheet');
-  setMsg(fatte+' righe caricate'+(create?', '+create+' attività create':'')+
-    (falliti.length?' · '+falliti.length+' non riuscite: '+falliti[0]:'.'),falliti.length?12000:6000);
+  setMsg(fatte+(fatte===1?' riga caricata':' righe caricate')+
+    (create?', '+create+(create===1?' attività creata':' attività create'):'')+'.',6000);
 }
 
 /* ---------- Scheda cliente: la testa della cascata ----------

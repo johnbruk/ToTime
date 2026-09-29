@@ -24,7 +24,17 @@ function makeChain(table){
   let op='select',single=false,pl=null,inF=null,eqCol=null,eqVal=null;
   const rows=()=>(STORES[table]=STORES[table]||[]);
   const resolve=()=>{
-    if(op==='insert'){const arr=Array.isArray(pl)?pl:[pl];arr.forEach(r=>{rows().push({id:'n'+(++seq),...r});if(!window.__ins)window.__ins=[];window.__ins.push({__table:table,...r})});return {data:null,error:null};}
+    if(op==='insert'){const arr=Array.isArray(pl)?pl:[pl];
+      // i vincoli veri del database, almeno quelli che l'app puo'
+      // violare da sola: senza di loro il mock accetta tutto e i test
+      // non vedono mai l'errore che vede la persona
+      for(const r of arr){
+        if(table==='wbs_items'&&window.__vietaWbs)
+          return {data:null,error:{message:'new row violates row-level security policy for table "wbs_items"'}};
+        if(table==='wbs_items'&&rows().some(x=>x.engagement_id===r.engagement_id&&String(x.activity_code)===String(r.activity_code)))
+          return {data:null,error:{message:'duplicate key value violates unique constraint "wbs_items_engagement_activity_code_key"'}};
+      }
+      arr.forEach(r=>{rows().push({id:'n'+(++seq),...r});if(!window.__ins)window.__ins=[];window.__ins.push({__table:table,...r})});return {data:null,error:null};}
     if(op==='update'){const i=rows().findIndex(r=>r.id===eqVal);if(i>=0)rows()[i]={...rows()[i],...pl};return {data:null,error:null};}
     if(op==='delete'){if(inF)STORES[table]=rows().filter(r=>!inF.vals.includes(r[inF.col]));else if(eqCol)STORES[table]=rows().filter(r=>String(r[eqCol])!==String(eqVal));return {data:null,error:null};}
     return {data:single?(rows()[0]||null):rows().slice(),error:null};

@@ -595,6 +595,13 @@ table.griglia.prospetto td.num{text-align:right;padding:10px;font-variant-numeri
 table.griglia.prospetto td.num.spicca{font-weight:var(--w-bold);color:var(--text)}
 table.griglia.prospetto tfoot td{font-weight:var(--w-bold);background:var(--surface2)}
 table.griglia.prospetto td.riga{padding:10px;text-align:left}
+/* Nel prospetto dell'import la prima colonna porta un numero di due
+   cifre, ma ereditava i 230px della griglia mensile, dove ci sta
+   «Cliente · Progetto · Attività»: mezzo schermo di vuoto accanto a un
+   «7». Qui si stringe su quello che deve contenere. */
+table.griglia.numeriRiga th.riga,table.griglia.numeriRiga td.riga{min-width:56px;width:1%;white-space:nowrap;text-align:right}
+table.griglia.numeriRiga td.riga .n{font-variant-numeric:tabular-nums}
+@media(max-width:520px){table.griglia.numeriRiga th.riga,table.griglia.numeriRiga td.riga{min-width:48px;padding:10px 8px}}
 
 /* Lo zoom che non se ne va più.
    Safari su iPhone ingrandisce la pagina da solo quando tocchi un campo
