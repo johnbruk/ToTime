@@ -105,6 +105,16 @@ button,input,select,textarea{font-family:var(--font-body)} button{cursor:pointer
 .cliHead{flex-wrap:wrap;align-items:center;padding:10px 12px}
 .cliHead b{min-width:0;overflow-wrap:anywhere;flex:1 1 auto}
 .cliHead .cliConto{white-space:nowrap;flex:0 0 auto}
+/* La testata e' un pulsante: si tocca per chiudere o aprire il gruppo.
+   Prende tutta la riga tranne i pulsanti dell'export, cosi' il bersaglio
+   e' largo quanto la testata e non quanto la freccia. */
+.cliToggle{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:10px;
+  border:0;background:transparent;color:inherit;font:inherit;text-align:left;
+  padding:4px 0;min-height:44px;box-shadow:none;border-radius:0}
+.cliToggle:hover .cliChev{color:var(--text)}
+.cliToggle:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.cliChev{flex:0 0 auto;color:var(--muted);font-size:12px;line-height:1;width:12px}
+.cliGruppo.chiuso .cliHead{border-bottom:1px solid var(--line)}
 .cliAzioni{display:flex;gap:8px;flex:0 0 auto;margin-left:auto}
 .cliAzioni .miniBtn{min-height:44px}
 @media(max-width:559px){.cliAzioni{width:100%;margin-left:0}

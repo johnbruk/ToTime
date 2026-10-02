@@ -917,11 +917,43 @@ function gruppiCliente(righe){
     .map(([client_id,voci])=>({client_id,voci,ore:voci.reduce((n,r)=>n+oreDiRiga(r),0)}))
     .sort((a,b)=>String(clientName(a.client_id)).localeCompare(String(clientName(b.client_id)),'it',{sensitivity:'base'}));
 }
-function elencoCliente(g){
+// Un cliente con ventidue voci occupa uno schermo e mezzo, e per
+// arrivare al cliente sotto si scorre tutto. Il gruppo si chiude
+// toccandone la testata: dentro resta il conto — voci, ore, giornate —
+// che e' quello che serve quando il dettaglio non serve.
+// La scelta si ricorda per cliente, non per mese: chi tiene chiuso un
+// cliente lo tiene chiuso sempre, e non deve richiuderlo ogni volta che
+// cambia mese.
+let chiusiScelta=null;
+function clientiChiusi(){
+  if(chiusiScelta!==null)return chiusiScelta;
+  try{const v=JSON.parse(settingValue('ts_chiusi')||'[]');return Array.isArray(v)?v:[]}
+  catch(e){return []}
+}
+function clienteChiuso(id){return clientiChiusi().includes(id||'')}
+async function apriChiudiCliente(id){
+  const prima=chiusiScelta;
+  const ora=clientiChiusi();
+  chiusiScelta=ora.includes(id)?ora.filter(x=>x!==id):ora.concat(id);
+  render();
+  try{
+    const res=await saveSetting('ts_chiusi',JSON.stringify(chiusiScelta));
+    if(res&&res.error)throw res.error;
+  }catch(e){
+    chiusiScelta=prima;
+    setMsg('La scelta non si è salvata: '+(e&&e.message||e),5000);
+    render();
+  }
+}
+function elencoCliente(g,cercando){
   const std=Number(clientById(g.client_id)?.standard_hours||8)||8;
   const conto=g.voci.length===1?'1 voce':g.voci.length+' voci';
   const ore=g.ore>0?` <span class="dot">·</span> ${fmtNum(g.ore,1)} h <span class="dot">·</span> ${fmtNum(g.ore/std,2)} gg/u`:'';
   const nome=esc(clientName(g.client_id));
+  // Cercando, i gruppi si aprono tutti: chi cerca vuole vedere quello
+  // che ha trovato, non sapere che da qualche parte, dentro un gruppo
+  // chiuso, ci sono tre righe che corrispondono.
+  const chiuso=!cercando&&clienteChiuso(g.client_id);
   // I pulsanti stanno qui dentro, non in cima alla pagina: dalla
   // testata del gruppo si vede a colpo d'occhio di chi sono i dati che
   // si sta per mandare fuori. In cima non si vedeva, ed era proprio
@@ -930,11 +962,16 @@ function elencoCliente(g){
       <button type="button" class="miniBtn" title="Scarica l'Excel di ${nome}" onclick="downloadMonthExcel('${g.client_id}')">⤓ Excel</button>
       <button type="button" class="miniBtn" title="Condividi i consuntivi di ${nome}" onclick="shareMonthExcel('${g.client_id}')">↗ Condividi</button>
     </span>`:'';
-  return `<div class="cliGruppo"><div class="cliHead"><b>${nome}</b><span class="cliConto">${conto}${ore}</span>${azioni}</div>
-    <div class="list">${g.voci.map(r=>timesheetRow(r)).join('')}</div></div>`;
+  return `<div class="cliGruppo${chiuso?' chiuso':''}"><div class="cliHead">
+      <button type="button" class="cliToggle" aria-expanded="${chiuso?'false':'true'}"
+        title="${chiuso?'Apri':'Chiudi'} ${nome}" onclick="apriChiudiCliente('${g.client_id}')">
+        <span class="cliChev" aria-hidden="true">${chiuso?'▸':'▾'}</span>
+        <b>${nome}</b><span class="cliConto">${conto}${ore}</span></button>${azioni}</div>
+    ${chiuso?'':`<div class="list">${g.voci.map(r=>timesheetRow(r)).join('')}</div>`}</div>`;
 }
 function elencoMensile(filtrate,tutte){
-  if(filtrate.length)return gruppiCliente(filtrate).map(elencoCliente).join('');
+  const cercando=!!normCerca(state.cerca);
+  if(filtrate.length)return gruppiCliente(filtrate).map(g=>elencoCliente(g,cercando)).join('');
   const vuoto=tutte.length
     ? `<div class="empty">Nessun consuntivo con &laquo;${esc(state.cerca)}&raquo;.<button type="button" class="secondary emptyCta" onclick="cambiaCerca('')">Svuota la ricerca</button></div>`
     : '<div class="empty">Nessun consuntivo in questo mese.<button type="button" class="secondary emptyCta" onclick="newEntryChoice()">+ Aggiungi il primo consuntivo</button></div>';
@@ -3230,6 +3267,7 @@ Object.assign(window,{
   dateIT,
   go,
   cambiaFatturaPianificato,
+  apriChiudiCliente,
   cambiaCerca,
   apriGruppo,
   goNav,
