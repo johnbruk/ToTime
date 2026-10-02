@@ -239,6 +239,107 @@ ok(vuoto.gruppi===0,'nessun gruppo quando non c\'è niente',vuoto.gruppi+'');
 ok(/Nessun consuntivo in questo mese/.test(vuoto.testo),
    'e resta l\'invito ad aggiungerne uno',vuoto.testo.slice(0,60));
 
+console.log('\n=== J. I gruppi si chiudono e si riaprono ===');
+// Un cliente con ventidue voci occupa uno schermo e mezzo: per arrivare
+// al cliente sotto si scorre tutto. La testata si tocca e il gruppo si
+// chiude, lasciando il conto.
+await pg2.evaluate(()=>{window.__stores.timesheet_entries.length=0});
+await pg2.evaluate(()=>{const S=window.__stores;
+  for(let i=1;i<=6;i++)S.timesheet_entries.push({id:'k'+i,entry_date:'2026-07-'+String(i+9),
+    client_id:'c1',project_id:'p1',activity_id:'a1',hours:8,daily_rate_snapshot:480,standard_hours_snapshot:8});
+  S.timesheet_entries.push({id:'z1',entry_date:'2026-07-20',client_id:'c2',project_id:null,
+    activity_id:'a2',hours:6,daily_rate_snapshot:400,standard_hours_snapshot:8});
+});
+await pg2.evaluate(()=>window.reload().then(()=>window.go('timesheet')));
+await pg2.waitForTimeout(600);
+
+const stato=()=>pg2.evaluate(()=>[...document.querySelectorAll('#app .cliGruppo')].map(g=>({
+  nome:g.querySelector('.cliHead b')?.textContent.trim(),
+  conto:g.querySelector('.cliConto')?.textContent.trim(),
+  righe:g.querySelectorAll('.row').length,
+  aperto:g.querySelector('.cliToggle')?.getAttribute('aria-expanded'),
+  chev:g.querySelector('.cliChev')?.textContent.trim()
+})));
+const tocca=async nome=>{
+  await pg2.evaluate(n=>{const g=[...document.querySelectorAll('#app .cliGruppo')]
+    .find(x=>x.querySelector('.cliHead b')?.textContent.trim()===n);
+    g.querySelector('.cliToggle').click()},nome);
+  await pg2.waitForTimeout(500);
+};
+
+const aperti=await stato();
+ok(aperti.length===2&&aperti.every(g=>g.aperto==='true'),
+   'si parte con tutti i gruppi aperti',JSON.stringify(aperti.map(g=>g.nome+':'+g.righe)));
+const equansPrima=aperti.find(g=>g.nome==='Equans');
+ok(!!equansPrima&&equansPrima.righe===6,'Equans ha sei righe',equansPrima?.righe+'');
+
+await tocca('Equans');
+const dopoChiusura=await stato();
+const eq=dopoChiusura.find(g=>g.nome==='Equans');
+const ze=dopoChiusura.find(g=>g.nome==='Zeta');
+ok(eq&&eq.righe===0,'toccando la testata le righe spariscono',eq?.righe+' righe');
+ok(ze&&ze.righe===1,'e il gruppo accanto resta aperto',ze?.righe+' righe');
+ok(eq&&eq.aperto==='false','lo stato e\' dichiarato per chi legge con la voce',eq?.aperto);
+ok(eq&&eq.chev==='\u25b8','e la freccia gira',JSON.stringify(eq?.chev));
+// chiuso, il conto resta: e' quello che serve quando il dettaglio no
+ok(eq&&/6 voci/.test(eq.conto)&&/48,0 h/.test(eq.conto),
+   'ma il conto resta leggibile anche da chiuso',eq?.conto);
+
+await tocca('Equans');
+const riaperto=(await stato()).find(g=>g.nome==='Equans');
+ok(riaperto&&riaperto.righe===6&&riaperto.aperto==='true',
+   'toccandola di nuovo torna aperto',riaperto?.righe+' righe');
+
+console.log('\n=== K. La scelta si ricorda ===');
+await tocca('Equans');
+const salvato=await pg2.evaluate(()=>(window.__stores.app_settings||[])
+  .filter(x=>x.setting_key==='ts_chiusi').map(x=>x.setting_value));
+ok(salvato.length>0&&/c1/.test(salvato.join('')),
+   'la scelta finisce nelle impostazioni, non solo a schermo',JSON.stringify(salvato));
+// cambiando mese non si deve richiudere a mano
+await pg2.evaluate(()=>window.changeMonth(-1));
+await pg2.waitForTimeout(300);
+await pg2.evaluate(()=>window.changeMonth(1));
+await pg2.waitForTimeout(400);
+const dopoMese=(await stato()).find(g=>g.nome==='Equans');
+ok(dopoMese&&dopoMese.aperto==='false','e resta chiuso anche cambiando mese',
+   dopoMese?.aperto);
+
+console.log('\n=== L. Cercando si apre tutto ===');
+// chi cerca vuole vedere quello che ha trovato, non sapere che da
+// qualche parte, dentro un gruppo chiuso, ci sono righe che tornano
+await pg2.evaluate(()=>window.cambiaCerca('equans'));
+await pg2.waitForTimeout(400);
+const cercando=await stato();
+ok(cercando.length>0&&cercando.every(g=>g.aperto==='true'&&g.righe>0),
+   'durante la ricerca nessun risultato resta nascosto in un gruppo chiuso',
+   JSON.stringify(cercando.map(g=>g.nome+':'+g.righe)));
+await pg2.evaluate(()=>window.cambiaCerca(''));
+await pg2.waitForTimeout(400);
+const dopoRicerca=(await stato()).find(g=>g.nome==='Equans');
+ok(dopoRicerca&&dopoRicerca.aperto==='false',
+   'e finita la ricerca il gruppo torna com\'era',dopoRicerca?.aperto);
+
+console.log('\n=== M. Il bersaglio e i pulsanti accanto ===');
+const misura=await pg2.evaluate(()=>{
+  const t=document.querySelector('#app .cliToggle');
+  const r=t.getBoundingClientRect();
+  const b=t.closest('.cliHead').querySelector('.cliAzioni .miniBtn');
+  return {h:Math.round(r.height),w:Math.round(r.width),
+          azione:b?Math.round(b.getBoundingClientRect().height):0}});
+ok(misura.h>=44,'la testata si tocca col dito (44px o piu\')',misura.h+'px');
+ok(misura.w>120,'e il bersaglio e\' largo quanto la testata, non quanto la freccia',misura.w+'px');
+ok(misura.azione>=44,'i pulsanti dell\'export restano tappabili',misura.azione+'px');
+// premere Excel non deve chiudere il gruppo sotto
+const primaDiExcel=(await stato()).find(g=>g.nome==='Zeta');
+await pg2.evaluate(()=>{const g=[...document.querySelectorAll('#app .cliGruppo')]
+  .find(x=>x.querySelector('.cliHead b')?.textContent.trim()==='Zeta');
+  g.querySelector('.cliAzioni .miniBtn').click()});
+await pg2.waitForTimeout(600);
+const dopoExcel=(await stato()).find(g=>g.nome==='Zeta');
+ok(dopoExcel&&dopoExcel.aperto===primaDiExcel.aperto,
+   'e non apre ne\' chiude il gruppo',primaDiExcel.aperto+' → '+dopoExcel?.aperto);
+
 console.log('\n=== I. Nessun errore a schermo ===');
 ok(errs.length===0,'nessun errore JavaScript nella prima pagina',errs.join(' | '));
 ok(errs2.length===0,'nessun errore JavaScript nella seconda',errs2.join(' | '));
