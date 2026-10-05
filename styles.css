@@ -109,6 +109,40 @@ button,input,select,textarea{font-family:var(--font-body)} button{cursor:pointer
 @media(max-width:430px){.salvadanaio{flex-direction:column;align-items:flex-start;gap:8px}}
 
 .refHead .scaduta{color:var(--red)}
+/* La testata del giorno e' un pulsante: si apre solo la scadenza che
+   serve. Tutte aperte insieme, cinque scadenze facevano cinquanta
+   righe, e per vedere la terza si scorreva mezzo schermo di roba nota. */
+.refHead.refApri{width:100%;border-radius:0;box-shadow:none;cursor:pointer;
+  min-height:48px;text-align:left;font:inherit;color:inherit}
+.refHead.refApri:hover{background:rgba(124,137,166,.16)}
+.refHead.refApri:focus-visible{outline:2px solid var(--primary);outline-offset:-2px}
+.refQuando{color:var(--muted);font-weight:600;font-size:12.5px;margin-left:8px;white-space:nowrap}
+.tappaChev{color:var(--muted);font-size:12px;margin-left:8px}
+
+/* Lo scaduto non si mescola alle altre: una riga sola, chiusa, in cima */
+.scadutoBlocco{margin-top:14px;border:1px solid rgba(217,83,79,.34)}
+.scadutoBtn{width:100%;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:10px 12px;min-height:48px;border:0;border-radius:0;box-shadow:none;
+  background:rgba(217,83,79,.10);color:inherit;font:inherit;text-align:left}
+.scadutoBtn:hover{background:rgba(217,83,79,.16)}
+.scadutoBtn:focus-visible{outline:2px solid var(--red);outline-offset:-2px}
+.scadutoBtn .tag{margin-top:0}
+.scadutoConto{color:var(--soft);font-weight:600;font-size:13.5px}
+.scadutoTot{margin-left:auto;font-weight:750;font-size:15px;white-space:nowrap}
+.scadutoVoci{padding:12px;margin:0;background:var(--surface)}
+.scadutoGiorno{margin-top:4px;color:var(--text)}
+.scadutoGiorno b{font-size:13.5px}
+.scadutoGiorno span{color:var(--muted);font-size:12.5px;margin-left:6px}
+.scadutoVoci li+.scadutoGiorno{margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+
+/* Il totale del giorno e' il pulsante che apre le voci */
+.tappaBtn{display:flex;align-items:baseline;gap:10px;width:100%;padding:4px 0;
+  min-height:44px;border:0;background:transparent;color:inherit;font:inherit;
+  text-align:left;box-shadow:none;border-radius:0}
+.tappaBtn:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.tappaQuante{color:var(--muted);font-size:12.5px;font-weight:600}
+.tappaBtn .tappaChev{margin-left:auto}
+
 
 .lineaTempo{list-style:none;margin:14px 0 0;padding:0 0 0 22px;position:relative}
 /* il filo che tiene insieme le tappe */
