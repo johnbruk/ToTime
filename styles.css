@@ -141,6 +141,25 @@ button,input,select,textarea{font-family:var(--font-body)} button{cursor:pointer
   text-align:left;box-shadow:none;border-radius:0}
 .tappaBtn:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
 .tappaQuante{color:var(--muted);font-size:12.5px;font-weight:600}
+/* La voce pagata resta a schermo, spenta: sparire del tutto farebbe
+   dubitare di averla segnata, e il conto dell'anno non tornerebbe. */
+.tappaVoci li{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+/* Un verde vero, non l'ardesia della palette.
+   Nel restyle --green e' diventato lo stesso grigio-azzurro di tutto il
+   resto: va bene finche' il colore e' decorazione, non quando deve dire
+   «fatto» accanto a un rosso che dice «in ritardo». Qui serve che si
+   distinguano a colpo d'occhio, quindi il verde e' verde. Tono scelto
+   per passare 4,5:1 su entrambi i temi, come i tag delle attivita'. */
+.tag.verde{background:hsla(150,58%,42%,.18);color:hsl(150,62%,74%)}
+:root[data-theme="light"] .tag.verde{color:hsl(150,70%,24%)}
+.vocePagata{opacity:.62}
+.vocePagata b{text-decoration:line-through;text-decoration-thickness:1px}
+.miniBtn.vocePag{margin-left:auto;min-height:36px;padding:6px 10px;font-size:12.5px;flex:0 0 auto}
+@media (pointer: coarse){.miniBtn.vocePag{min-height:44px}}
+.tappa.pagata:before{border-color:hsl(150,58%,42%);background:hsl(150,58%,42%)}
+.tappa.pagata .tappaTot{text-decoration:line-through;text-decoration-thickness:1px;opacity:.7}
+.tappa.pagata .tappaData b{opacity:.7}
+
 .tappaBtn .tappaChev{margin-left:auto}
 
 
