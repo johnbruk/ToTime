@@ -33,13 +33,18 @@ function makeChain(table){
           return {data:null,error:{message:'new row violates row-level security policy for table "wbs_items"'}};
         if(table==='wbs_items'&&rows().some(x=>x.engagement_id===r.engagement_id&&String(x.activity_code)===String(r.activity_code)))
           return {data:null,error:{message:'duplicate key value violates unique constraint "wbs_items_engagement_activity_code_key"'}};
+        if(table==='app_settings'&&rows().some(x=>x.setting_key===r.setting_key))
+          return {data:null,error:{message:'duplicate key value violates unique constraint "app_settings_user_id_setting_key_key"'}};
       }
-      arr.forEach(r=>{rows().push({id:'n'+(++seq),...r});if(!window.__ins)window.__ins=[];window.__ins.push({__table:table,...r})});return {data:null,error:null};}
+      const scritte=[];
+      arr.forEach(r=>{const riga={id:'n'+(++seq),...r};rows().push(riga);scritte.push(riga);
+        if(!window.__ins)window.__ins=[];window.__ins.push({__table:table,...r})});
+      return {data:single?(scritte[0]||null):scritte,error:null};}
     if(op==='update'){const i=rows().findIndex(r=>r.id===eqVal);if(i>=0)rows()[i]={...rows()[i],...pl};return {data:null,error:null};}
     if(op==='delete'){if(inF)STORES[table]=rows().filter(r=>!inF.vals.includes(r[inF.col]));else if(eqCol)STORES[table]=rows().filter(r=>String(r[eqCol])!==String(eqVal));return {data:null,error:null};}
     return {data:single?(rows()[0]||null):rows().slice(),error:null};
   };
-  const h={select(){op='select';return proxy},order(){return proxy},eq(c,v){eqCol=c;eqVal=v;return proxy},in(c,v){inF={col:c,vals:v};return proxy},gte(){return proxy},lte(){return proxy},ilike(){return proxy},is(){return proxy},limit(){return proxy},insert(v){op='insert';pl=v;return proxy},update(v){op='update';pl=v;return proxy},delete(){op='delete';return proxy},single(){single=true;return proxy},maybeSingle(){single=true;return proxy}};
+  const h={select(){if(op==='select')op='select';return proxy},order(){return proxy},eq(c,v){eqCol=c;eqVal=v;return proxy},in(c,v){inF={col:c,vals:v};return proxy},gte(){return proxy},lte(){return proxy},ilike(){return proxy},is(){return proxy},limit(){return proxy},insert(v){op='insert';pl=v;return proxy},update(v){op='update';pl=v;return proxy},delete(){op='delete';return proxy},single(){single=true;return proxy},maybeSingle(){single=true;return proxy}};
   const proxy=new Proxy({},{get(t,k){if(k==='then'){const p=Promise.resolve(resolve());return p.then.bind(p);}return h[k]||(()=>proxy);}});
   return proxy;
 }

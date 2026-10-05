@@ -444,7 +444,37 @@ function openAnnualInvoices(mode){navigateTo('annualInvoices',{edit:mode})}
 function openMonthTimesheet(year,month){state.month=`${year}-${String(month).padStart(2,'0')}`;navigateTo('timesheet')}
 function openInvoiceDetail(clientId,year,month){state.month=`${year}-${String(month).padStart(2,'0')}`;navigateTo('billingDetail',{edit:clientId})}
 function annualMonths(){const year=currentYear();const md=annualMonthData(year);const tot=annualTotals(year);return appShell(`<h1>Consuntivato ${year}</h1><p class="sub">Dettaglio mese per mese. Tocca un mese per aprire il relativo timesheet.</p><div class="card"><b>Totale anno ${year}</b><div class="kpiGrid" style="margin-top:14px"><div><span>Consuntivato</span><strong>${fmtEUR(tot.consuntivato)}</strong></div><div><span>Fatturato</span><strong>${fmtEUR(tot.fatturato)}</strong></div><div><span>Incassato</span><strong>${fmtEUR(tot.incassato)}</strong></div><div><span>Speso</span><strong>${fmtEUR(tot.spese)}</strong></div></div>${tot.pianificato>0?`<div class="metricLine" style="margin-top:12px"><span class="tag blue">Pianificato</span> ${fmtEUR(tot.pianificato)} · giorni futuri (non nel consuntivato)</div>`:''}</div><div class="list">${md.map(m=>`<div class="row" onclick="openMonthTimesheet(${year},${m.month})"><div class="date">${m.label}</div><div><div class="title">${monthNames[m.month-1]} ${year}</div><div class="desc">Consuntivato ${fmtEUR(m.consuntivato)} · Fatturato ${fmtEUR(m.fatturato)}<br>Incassato ${fmtEUR(m.incassato)} · Speso ${fmtEUR(m.spese)}${m.pianificato>0?' · Pianificato '+fmtEUR(m.pianificato):''}</div></div><div class="value">${fmtEUR(m.consuntivato)}</div></div>`).join('')}</div>`)}
-function annualInvoices(modeArg){const year=currentYear();const mode=modeArg||(state.edit==='collected'?'collected':'issued');let rows=data.billingHeaders.filter(h=>Number(h.year)===Number(year)&&['invoice_issued','collected'].includes(h.status));if(mode==='collected')rows=rows.filter(h=>h.status==='collected');rows=rows.sort((a,b)=>(Number(b.month)-Number(a.month))||clientName(a.client_id).localeCompare(clientName(b.client_id)));const title=mode==='collected'?`Incassi ${year}`:`Fatture emesse ${year}`;const amountOf=h=>mode==='collected'?Number(h.collected_amount||h.invoice_total_amount||h.total_amount||0):Number(h.invoice_total_amount||h.total_amount||0);const total=rows.reduce((s,h)=>s+amountOf(h),0);return appShell(`<h1>${title}</h1><p class="sub">Tocca una voce per aprire il dettaglio della fattura.</p><div class="card"><b>Totale ${mode==='collected'?'incassato':'fatturato'} ${year}</b><div class="amount" style="margin-top:8px">${fmtEUR(total)}</div></div><div class="list">${rows.map(h=>`<div class="row" onclick="openInvoiceDetail('${h.client_id}',${h.year},${h.month})"><div class="date">${String(h.month).padStart(2,'0')}/${h.year}</div><div><div class="title">${esc(clientName(h.client_id))}</div><div class="desc">${h.invoice_number?'Fattura '+esc(h.invoice_number)+' · ':''}${statusLabel(h.status)}${h.invoice_date?' · '+dateIT(h.invoice_date):''}</div></div><div class="value">${fmtEUR(amountOf(h))}</div></div>`).join('')||`<div class="empty">${mode==='collected'?'Nessun incasso registrato':'Nessuna fattura emessa'} nel ${year}.</div>`}</div>`)}
+// Un elenco di fatture si legge per numero. Prima il numero stava in
+// mezzo a una riga di testo — «Fattura Fattura #4/2026 · Fattura emessa
+// · 26/06» — insieme allo stato e alla data, mentre nella colonna di
+// sinistra c'era il mese di competenza: tre date e un numero mescolati,
+// e il prefisso «Fattura» scritto nel codice che si sommava a quello
+// gia' digitato nel numero.
+// Adesso sono colonne: numero, mese di competenza, data della fattura,
+// cliente e stato, importo. Su schermo stretto si impilano, ma il
+// numero resta il primo e resta grande.
+function numeroFattura(h){
+  const n=String(h&&h.invoice_number||'').trim();
+  if(!n)return '';
+  // chi scrive «Fattura 5» nel campo numero non deve leggere
+  // «Fattura Fattura 5»: il prefisso lo toglie l'app, non la persona
+  return n.replace(/^fatt(ura)?\.?\s*/i,'')||n;
+}
+function intestazioneFatture(){
+  return `<div class="fatTestata" aria-hidden="true">
+    <span>Numero</span><span>Mese</span><span>Data</span><span>Cliente</span><span>Importo</span></div>`;
+}
+function rigaFattura(h,importo){
+  const n=numeroFattura(h);
+  return `<div class="row rowFattura" onclick="openInvoiceDetail('${h.client_id}',${h.year},${h.month})">
+    <div class="fatNum">${n?esc(n):'<span class="fatVuoto">senza numero</span>'}</div>
+    <div class="fatMese"><span class="fatEtic">Mese</span>${String(h.month).padStart(2,'0')}/${h.year}</div>
+    <div class="fatData"><span class="fatEtic">Data</span>${h.invoice_date?dateIT(h.invoice_date)+'/'+String(h.invoice_date).slice(0,4):'<span class="fatVuoto">—</span>'}</div>
+    <div class="fatCli"><div class="title">${esc(clientName(h.client_id))}</div>
+      <div class="desc"><span class="tag ${statusClass(h.status)}">${statusLabel(h.status)}</span></div></div>
+    <div class="value">${fmtEUR(importo)}</div></div>`;
+}
+function annualInvoices(modeArg){const year=currentYear();const mode=modeArg||(state.edit==='collected'?'collected':'issued');let rows=data.billingHeaders.filter(h=>Number(h.year)===Number(year)&&['invoice_issued','collected'].includes(h.status));if(mode==='collected')rows=rows.filter(h=>h.status==='collected');rows=rows.sort((a,b)=>(Number(b.month)-Number(a.month))||clientName(a.client_id).localeCompare(clientName(b.client_id)));const title=mode==='collected'?`Incassi ${year}`:`Fatture emesse ${year}`;const amountOf=h=>mode==='collected'?Number(h.collected_amount||h.invoice_total_amount||h.total_amount||0):Number(h.invoice_total_amount||h.total_amount||0);const total=rows.reduce((s,h)=>s+amountOf(h),0);return appShell(`<h1>${title}</h1><p class="sub">Tocca una voce per aprire il dettaglio della fattura.</p><div class="card"><b>Totale ${mode==='collected'?'incassato':'fatturato'} ${year}</b><div class="amount" style="margin-top:8px">${fmtEUR(total)}</div></div>${rows.length?intestazioneFatture():''}<div class="list">${rows.map(h=>rigaFattura(h,amountOf(h))).join('')||`<div class="empty">${mode==='collected'?'Nessun incasso registrato':'Nessuna fattura emessa'} nel ${year}.</div>`}</div>`)}
 function home(){const t=totals();const y=annualTotals(currentYear());return appShell(`<h1 class="srOnly">Dashboard</h1><button class="primary cta" onclick="newEntryChoice()">+ Nuovo consuntivo</button><div class="homeTop">${monthSelector()}</div><div class="card cardLink" onclick="go('timesheet')" role="button" title="Apri il timesheet di ${monthLabel(state.month)}"><b>Consuntivo mese <span class="cardLinkArrow">›</span></b><div class="kpiGrid three" style="margin-top:14px"><div><span>Consuntivate</span><strong>${fmtNum(t.days,2)} gg</strong><small>${fmtNum(t.hours,1)} h</small></div><div><span>Pianificate</span><strong>${fmtNum(t.plannedDays,2)} gg</strong><small>${fmtNum(t.plannedHours,1)} h</small></div><div><span>Totale</span><strong>${fmtNum(t.days+t.plannedDays,2)} gg</strong><small>${fmtNum(t.hours+t.plannedHours,1)} h</small></div></div><div class="metricLine" style="margin-top:12px">${fmtEUR(t.amount)} consuntivato${t.plannedAmount>0?` <span class="dot">·</span> ${fmtEUR(t.plannedAmount)} pianificato <span class="dot">·</span> <b>${fmtEUR(t.amount+t.plannedAmount)}</b> totale`:''}</div></div><div class="dashboardCard heroCard cardLink" onclick="openAnnualMonths()" role="button" title="Dettaglio consuntivato mese per mese"><b>Consuntivato anno ${currentYear()} <span class="cardLinkArrow">›</span></b><div class="kpiGrid" style="${y.pianificato>0?'':'grid-template-columns:1fr;'}margin-top:14px"><div style="${y.pianificato>0?'':'border-right:0'}"><span>Anno in corso</span><strong>${fmtEUR(y.consuntivato)}</strong><small>consuntivato</small></div>${y.pianificato>0?`<div style="border-right:0"><span>Pianificato</span><strong>${fmtEUR(y.pianificato)}</strong><small>giorni futuri</small></div>`:''}</div><div class="chartWrap"><div class="chartTitle"><span>Andamento mese per mese</span><span>consuntivato · pianificato</span></div>${annualChartSvg()}</div></div>${homeFatturatoCard()}${homeIncassiCard()}${dashFull()?homeBalanceCharts()+homeMultiChart():''}<button type="button" class="secondary dashToggle" onclick="toggleDashFull()">${dashFull()?'▴ Nascondi analisi e grafici':'▾ Mostra analisi e grafici'}</button>`)}
 function dashFull(){return settingValue('dash_full')==='1'}
 async function toggleDashFull(){const r=await saveSetting('dash_full',dashFull()?'0':'1');if(r.error)return setMsg(r.error.message,7000);await reload();render()}
@@ -483,7 +513,42 @@ function refreshProjectsForForm(form){
   if(project)project.innerHTML=projectOptions(cli,'');
   refreshHierForForm(form);
 }
-async function saveSetting(key,value){const existing=data.appSettings?.find(s=>s.setting_key===key);const payload={setting_key:key,setting_value:String(value)};return existing?updateResilient('app_settings',payload,existing.id):insertResilient('app_settings',payload)}
+// Salvare un'impostazione due volte di fila non deve rompersi.
+//
+// Qui si decideva fra insert e update guardando SOLO la copia in
+// memoria. Chi salva senza ricaricare — il flag del pianificato, i
+// gruppi chiusi del timesheet — scriveva la riga nel database e
+// lasciava la copia in memoria senza: alla scrittura dopo la riga non
+// si trovava, si tentava un secondo insert, e il database rispondeva
+//
+//   duplicate key value violates unique constraint
+//   "app_settings_user_id_setting_key_key"
+//
+// cioe' la scelta non si salvava mai piu'. Il flag restava inchiodato
+// sul valore scritto la prima volta.
+//
+// Adesso: la copia in memoria si tiene allineata dopo ogni scrittura,
+// e se il doppione arriva lo stesso — la riga c'e' nel database ma non
+// qui, per esempio dopo che l'ha scritta un altro dispositivo — si
+// ricarica e si aggiorna quella, invece di arrendersi.
+async function saveSetting(key,value){
+  const payload={setting_key:key,setting_value:String(value)};
+  data.appSettings=data.appSettings||[];
+  const trova=()=>data.appSettings.find(s=>s.setting_key===key);
+  let riga=trova();
+  let res=riga?await updateResilient('app_settings',payload,riga.id)
+              :await insertReturningResilient('app_settings',payload);
+  if(res.error&&/duplicate key|app_settings_user_id_setting_key/i.test(String(res.error.message||''))){
+    await reload();
+    riga=trova();
+    if(riga)res=await updateResilient('app_settings',payload,riga.id);
+  }
+  if(res.error)return res;
+  if(riga)riga.setting_value=String(value);
+  else if(res.data&&res.data.id)data.appSettings.push(res.data);
+  else await reload();
+  return res;
+}
 function entitiesOf(kind){return kind==='clients'?(data.clients||[]):kind==='projects'?(data.projects||[]):kind==='expenseCategories'?(data.expenseCategories||[]):(data.activities||[])}
 function entityLabel(kind,e){return kind==='projects'?`${clientName(e.client_id)} · ${e.name||''}`:(e.name||'')}
 function sortMode(kind){const v=settingValue('sort_'+kind);return ['asc','desc','manual'].includes(v)?v:'asc'}
@@ -3268,6 +3333,7 @@ Object.assign(window,{
   go,
   cambiaFatturaPianificato,
   apriChiudiCliente,
+  saveSetting,
   cambiaCerca,
   apriGruppo,
   goNav,

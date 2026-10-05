@@ -94,6 +94,30 @@ button,input,select,textarea{font-family:var(--font-body)} button{cursor:pointer
 .moveBtns button{border:1px solid var(--line);background:var(--surface2);color:var(--soft);width:30px;height:24px;line-height:1;font-size:13px;border-radius:0;padding:0;box-shadow:none}
 .moveBtns button:hover{background:var(--surface);color:var(--text)}
 
+/* Elenco fatture: colonne, non una riga di testo.
+   Numero, mese di competenza, data della fattura, cliente, importo.
+   Su schermo stretto le colonne si impilano e ogni dato si porta
+   dietro la sua etichetta, cosi' non si confonde un mese con una
+   data; il numero resta sopra a tutto e resta grande. */
+.fatTestata{display:none}
+.row.rowFattura{grid-template-columns:1fr;gap:4px 14px;align-items:start}
+.fatNum{font-family:var(--font-heading);font-weight:750;font-size:16px;letter-spacing:-.2px;
+  overflow-wrap:anywhere}
+.fatVuoto{color:var(--muted);font-weight:600;font-size:13px;font-family:var(--font-body)}
+.fatEtic{color:var(--muted);font-weight:750;font-size:11.5px;margin-right:6px;
+  text-transform:uppercase;letter-spacing:.03em}
+.fatMese,.fatData{color:var(--soft);font-size:13.5px;font-weight:600;font-variant-numeric:tabular-nums}
+.rowFattura .value{text-align:left;font-size:16px;font-weight:750}
+@media(min-width:720px){
+  .fatTestata{display:grid;grid-template-columns:7.5rem 6rem 7rem 1fr 7.5rem;gap:14px;
+    padding:8px 16px;color:var(--muted);font-size:11.5px;font-weight:750;
+    text-transform:uppercase;letter-spacing:.03em;
+    border:1px solid var(--line);border-bottom:0;background:rgba(124,137,166,.10)}
+  .fatTestata span:last-child{text-align:right}
+  .row.rowFattura{grid-template-columns:7.5rem 6rem 7rem 1fr 7.5rem;gap:14px;align-items:center}
+  .fatEtic{display:none}
+  .rowFattura .value{text-align:right}
+}
 /* Tasse future: gruppi per anno di riferimento */
 .refGroup,.cliGruppo{margin-top:14px}
 .refHead,.cliHead{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:8px 12px;background:rgba(124,137,166,.10);border:1px solid var(--line);border-bottom:0}
