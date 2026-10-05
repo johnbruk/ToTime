@@ -94,6 +94,56 @@ button,input,select,textarea{font-family:var(--font-body)} button{cursor:pointer
 .moveBtns button{border:1px solid var(--line);background:var(--surface2);color:var(--soft);width:30px;height:24px;line-height:1;font-size:13px;border-radius:0;padding:0;box-shadow:none}
 .moveBtns button:hover{background:var(--surface);color:var(--text)}
 
+/* =====================================================================
+   Le scadenze fiscali. Tre modi di guardarle, e una linea del tempo
+   verticale: su un telefono il tempo che scorre in orizzontale non ci
+   sta, e una colonna si scorre col pollice senza pensarci.
+   ===================================================================== */
+.salvadanaio{display:flex;align-items:center;gap:14px;margin-top:14px;padding:14px;
+  border:1px solid var(--line);background:rgba(124,137,166,.10)}
+.salvaCifra{font-family:var(--font-heading);font-size:24px;font-weight:750;letter-spacing:-.4px;
+  line-height:1.05;flex:0 0 auto;white-space:nowrap}
+.salvaCifra span{display:block;font-family:var(--font-body);font-size:11.5px;font-weight:750;
+  color:var(--muted);text-transform:uppercase;letter-spacing:.03em;margin-top:4px}
+.salvaTesto{color:var(--soft);font-size:13.5px;line-height:1.4;min-width:0}
+@media(max-width:430px){.salvadanaio{flex-direction:column;align-items:flex-start;gap:8px}}
+
+.refHead .scaduta{color:var(--red)}
+
+.lineaTempo{list-style:none;margin:14px 0 0;padding:0 0 0 22px;position:relative}
+/* il filo che tiene insieme le tappe */
+.lineaTempo:before{content:"";position:absolute;left:5px;top:6px;bottom:6px;width:2px;
+  background:var(--line)}
+.tappa{position:relative;padding:0 0 18px}
+.tappa:last-child{padding-bottom:0}
+.tappa.adesso{padding-bottom:22px}
+/* il pallino della tappa, sul filo */
+.tappa:before{content:"";position:absolute;left:-22px;top:5px;width:12px;height:12px;
+  border-radius:50%;background:var(--surface);border:2px solid var(--primary);z-index:1}
+.tappa.passata:before{border-color:var(--red);background:var(--red)}
+.tappa.adesso:before{border-color:var(--orange);background:var(--orange);
+  box-shadow:0 0 0 4px rgba(247,166,71,.22)}
+.tappaData{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px}
+.tappaData b{font-family:var(--font-heading);font-size:15px;font-weight:750;letter-spacing:-.1px}
+.tappaData span{color:var(--muted);font-size:12px;font-weight:750}
+.tappa.passata .tappaData b{color:var(--red)}
+.tappaCorpo{margin-top:6px}
+.tappaTot{font-family:var(--font-heading);font-size:19px;font-weight:750;letter-spacing:-.3px}
+.tappaVoci{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:6px}
+.tappaVoci li{color:var(--soft);font-size:13.5px;line-height:1.4}
+.tappaVoci .tag{margin-top:0;margin-right:4px;vertical-align:middle}
+.tappaResta{color:var(--muted);font-size:12px;margin-top:8px}
+.tappaQui{color:var(--orange);font-weight:750;font-size:13.5px}
+@media(min-width:720px){
+  .lineaTempo{padding-left:150px}
+  .lineaTempo:before{left:133px}
+  .tappa:before{left:-23px}
+  /* su schermo largo la data esce a sinistra del filo e le tappe si
+     leggono come una colonna di quando, accanto a una di cosa */
+  .tappaData{position:absolute;left:-150px;top:2px;width:118px;display:block;text-align:right}
+  .tappaData span{display:block;margin-top:2px}
+  .tappaCorpo{margin-top:0}
+}
 /* Elenco fatture: colonne, non una riga di testo.
    Numero, mese di competenza, data della fattura, cliente, importo.
    Su schermo stretto le colonne si impilano e ogni dato si porta

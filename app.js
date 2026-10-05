@@ -1570,11 +1570,157 @@ function taxScheduleItems(year,mode){
   items.sort((a,b)=>a.date.localeCompare(b.date)||a.label.localeCompare(b.label));
   return {items,total:items.reduce((s,i)=>s+i.amount,0),due:d,bolloTot};
 }
+// Le scadenze fiscali si guardano in tre modi diversi, e servono tutti
+// e tre. Per scadenza — cosa devo pagare, e quando — e' la domanda di
+// chi deve pagare, ed e' quella di partenza. Per riferimento — a quale
+// anno appartiene quel versamento — e' la domanda di chi deve capire il
+// conto. La linea del tempo e' le due cose insieme, a colpo d'occhio.
+//
+// Prima c'era solo il raggruppamento per riferimento, e dentro quei
+// gruppi le date si accavallavano: il «Riferimento 2026» conteneva una
+// scadenza del 30/06/2027, e anche il «Riferimento 2027». Scorrendo
+// l'elenco non si leggeva in nessun punto l'ordine in cui le cose vanno
+// pagate.
+const TASSE_VISTE=[['scadenze','Per scadenza'],['riferimento','Per riferimento'],['tempo','Linea del tempo']];
+let vistaTasseScelta=null;
+function vistaTasse(){
+  const v=vistaTasseScelta!==null?vistaTasseScelta:settingValue('tasse_vista');
+  return TASSE_VISTE.some(x=>x[0]===v)?v:'scadenze';
+}
+async function cambiaVistaTasse(v){
+  const prima=vistaTasseScelta;
+  vistaTasseScelta=v;
+  render();
+  try{
+    const res=await saveSetting('tasse_vista',v);
+    if(res&&res.error)throw res.error;
+  }catch(e){
+    vistaTasseScelta=prima;
+    setMsg('La scelta non si è salvata: '+(e&&e.message||e),5000);
+    render();
+  }
+}
+function sceltaVistaTasse(){
+  const v=vistaTasse();
+  return `<div class="tabs" role="tablist" aria-label="Come guardare le scadenze">${TASSE_VISTE.map(([k,l])=>
+    `<button type="button" role="tab" aria-selected="${k===v}" class="${k===v?'active':''}" onclick="cambiaVistaTasse('${k}')">${l}</button>`).join('')}</div>`;
+}
+const TASSE_TINTA={bollo:'gray',inps:'blue',imposta:'orange'};
+// Scaduta vuol dire che quel giorno e' passato: e' la prima cosa da
+// sapere guardando un elenco di cose da pagare, e prima non si vedeva.
+function statoScadenza(iso,oggi){
+  if(String(iso)<oggi)return {cls:'red',testo:'scaduta'};
+  return {cls:'orange',testo:'prevista'};
+}
+function dataEstesa(iso){return dateIT(iso)+'/'+String(iso).slice(0,4)}
+function rigaScadenza(it,oggi,conData){
+  const st=statoScadenza(it.date,oggi);
+  return `<div class="row">
+    ${conData?`<div class="date">${dateIT(it.date)}<br><span class="dateYear">${String(it.date).slice(0,4)}</span></div>`:'<div></div>'}
+    <div><div class="title">${esc(it.label)}</div>
+      <div class="desc"><span class="tag ${st.cls}">${st.testo}</span>
+        <span class="tag ${TASSE_TINTA[it.kind]||'gray'}">rif. ${esc(String(it.ref))}</span>
+        ${conData?'':'scadenza '+dataEstesa(it.date)}</div></div>
+    <div class="value">${fmtEUR(it.amount)}</div></div>`;
+}
+// Per scadenza: un gruppo per giorno, con quanto si versa quel giorno.
+// Chi deve pagare ragiona per bonifico, e in un bonifico ci va il totale
+// del giorno, non la singola voce.
+function tassePerScadenza(items,oggi){
+  const giorni=new Map();
+  items.forEach(it=>{if(!giorni.has(it.date))giorni.set(it.date,[]);giorni.get(it.date).push(it)});
+  return [...giorni.entries()].map(([data,its])=>{
+    const sub=its.reduce((s,i)=>s+i.amount,0);
+    const st=statoScadenza(data,oggi);
+    return `<div class="refGroup"><div class="refHead"><b>${dataEstesa(data)}${st.testo==='scaduta'?' · <span class="scaduta">scaduta</span>':''}</b><span>${fmtEUR(sub)}</span></div>
+      <div class="list" style="box-shadow:none;margin:0">${its.map(it=>rigaScadenza(it,oggi,false)).join('')}</div></div>`;
+  }).join('');
+}
+function tassePerRiferimento(items,oggi){
+  const refs=[...new Set(items.map(i=>Number(i.ref)))].sort((a,b)=>a-b);
+  return refs.map(rf=>{
+    const its=items.filter(i=>Number(i.ref)===rf);
+    const sub=its.reduce((s,i)=>s+i.amount,0);
+    return `<div class="refGroup"><div class="refHead"><b>Riferimento ${rf}</b><span>${fmtEUR(sub)}</span></div>
+      <div class="list" style="box-shadow:none;margin:0">${its.map(it=>rigaScadenza(it,oggi,true)).join('')}</div></div>`;
+  }).join('');
+}
+// La linea del tempo: una colonna di date in ordine, con quanto resta
+// da versare man mano. Verticale, perche' su un telefono il tempo che
+// scorre in orizzontale non ci sta.
+function tasseLineaDelTempo(items,oggi){
+  const giorni=new Map();
+  items.forEach(it=>{if(!giorni.has(it.date))giorni.set(it.date,[]);giorni.get(it.date).push(it)});
+  let restante=items.reduce((s,i)=>s+i.amount,0);
+  let oggiMesso=false;
+  const tappe=[...giorni.entries()].map(([data,its])=>{
+    // «oggi» e' una tappa anche lui: senza, la linea non dice dove sei
+    let segno='';
+    if(!oggiMesso&&String(data)>=oggi){oggiMesso=true;
+      segno=`<li class="tappa adesso"><div class="tappaData"><b>oggi</b><span>${dateIT(oggi)}/${String(oggi).slice(0,4)}</span></div>
+        <div class="tappaCorpo"><div class="tappaQui">da qui in avanti ${fmtEUR(restante)} da versare</div></div></li>`;}
+    const sub=its.reduce((s,i)=>s+i.amount,0);
+    const st=statoScadenza(data,oggi);
+    const quando=giorniA(data,oggi);
+    const riga=`<li class="tappa ${st.testo==='scaduta'?'passata':''}">
+      <div class="tappaData"><b>${dataEstesa(data)}</b><span>${quando}</span></div>
+      <div class="tappaCorpo">
+        <div class="tappaTot">${fmtEUR(sub)}</div>
+        <ul class="tappaVoci">${its.map(it=>`<li><span class="tag ${TASSE_TINTA[it.kind]||'gray'}">rif. ${esc(String(it.ref))}</span> ${esc(it.label)} <b>${fmtEUR(it.amount)}</b></li>`).join('')}</ul>
+        <div class="tappaResta">dopo questo versamento restano ${fmtEUR(Math.max(0,restante-sub))}</div>
+      </div></li>`;
+    restante-=sub;
+    return segno+riga;
+  }).join('');
+  const coda=oggiMesso?'':`<li class="tappa adesso"><div class="tappaData"><b>oggi</b><span>${dateIT(oggi)}/${String(oggi).slice(0,4)}</span></div>
+    <div class="tappaCorpo"><div class="tappaQui">nessuna scadenza davanti</div></div></li>`;
+  return `<ol class="lineaTempo">${tappe}${coda}</ol>`;
+}
+// Quanto mettere da parte ogni mese per arrivarci senza sorprese: e'
+// la domanda vera di chi ha partita IVA, e il conto l'app ce l'ha gia'
+// tutto in mano. Si guarda solo il futuro: lo scaduto va pagato, non
+// accantonato.
+function accantonamento(items,oggi){
+  const futuri=items.filter(i=>String(i.date)>=oggi);
+  if(!futuri.length)return null;
+  const ultima=futuri[futuri.length-1].date;
+  const tot=futuri.reduce((s,i)=>s+i.amount,0);
+  const a=new Date(ultima+'T00:00:00'),b=new Date(oggi+'T00:00:00');
+  const mesi=Math.max(1,Math.round((a-b)/86400000/30.44));
+  return {tot,mesi,mese:tot/mesi,ultima};
+}
+// Quanto manca, detto come lo direbbe una persona
+function giorniA(iso,oggi){
+  const a=new Date(iso+'T00:00:00'),b=new Date(oggi+'T00:00:00');
+  const g=Math.round((a-b)/86400000);
+  if(g===0)return 'oggi';
+  if(g===1)return 'domani';
+  if(g===-1)return 'ieri';
+  if(g<0)return 'passata da '+Math.abs(g)+' giorni';
+  if(g<60)return 'fra '+g+' giorni';
+  const m=Math.round(g/30.44);
+  return 'fra circa '+m+(m===1?' mese':' mesi');
+}
 function taxScheduleCard(year,mode,title,desc){
   const r=taxScheduleItems(year,mode);const d=r.due;
-  const kindClass={bollo:'gray',inps:'blue',imposta:'orange'};
-  const refs=[...new Set(r.items.map(i=>Number(i.ref)))].sort((a,b)=>a-b);
-  return `<div class="card"><b>${title}</b><div class="desc" style="margin-top:2px">${desc}</div><div class="kpiGrid three" style="margin-top:14px"><div><span>Base</span><strong>${fmtEUR(d.base)}</strong></div><div><span>Imponibile</span><strong>${fmtEUR(d.forfait)}</strong></div><div><span>Da versare</span><strong>${fmtEUR(r.total)}</strong></div></div><div class="metricLine" style="margin-top:8px">${d.parts.map(p=>esc(p[0])+' '+fmtEUR(p[1])).join(' <span class="dot">·</span> ')}</div>${r.items.length?refs.map(rf=>{const its=r.items.filter(i=>Number(i.ref)===rf);const sub=its.reduce((s,i)=>s+i.amount,0);return `<div class="refGroup"><div class="refHead"><b>Riferimento ${rf}</b><span>${fmtEUR(sub)}</span></div><div class="list" style="box-shadow:none;margin:0">${its.map(it=>`<div class="row"><div class="date">${dateIT(it.date)}<br><span class="dateYear">${String(it.date).slice(0,4)}</span></div><div><div class="title">${esc(it.label)}</div><div class="desc"><span class="tag ${kindClass[it.kind]||'gray'}">Prevista</span> scadenza ${dateIT(it.date)}/${String(it.date).slice(0,4)}</div></div><div class="value">${fmtEUR(it.amount)}</div></div>`).join('')}</div></div>`}).join(''):'<div class="empty">Nessuna scadenza prevista.</div>'}</div>`;
+  const oggi=todayISO();
+  const vista=vistaTasse();
+  const corpo=!r.items.length?'<div class="empty">Nessuna scadenza prevista.</div>'
+    :vista==='riferimento'?tassePerRiferimento(r.items,oggi)
+    :vista==='tempo'?tasseLineaDelTempo(r.items,oggi)
+    :tassePerScadenza(r.items,oggi);
+  const scadute=r.items.filter(i=>String(i.date)<oggi);
+  const somScadute=scadute.reduce((s,i)=>s+i.amount,0);
+  const prossima=r.items.find(i=>String(i.date)>=oggi);
+  return `<div class="card"><b>${title}</b><div class="desc" style="margin-top:2px">${desc}</div>
+    <div class="kpiGrid three" style="margin-top:14px"><div><span>Base</span><strong>${fmtEUR(d.base)}</strong></div><div><span>Imponibile</span><strong>${fmtEUR(d.forfait)}</strong></div><div><span>Da versare</span><strong>${fmtEUR(r.total)}</strong></div></div>
+    <div class="metricLine" style="margin-top:8px">${d.parts.map(p=>esc(p[0])+' '+fmtEUR(p[1])).join(' <span class="dot">·</span> ')}</div>
+    ${prossima?`<div class="metricLine" style="margin-top:10px"><span class="tag orange">Prossima</span> ${dataEstesa(prossima.date)} <span class="dot">·</span> ${giorniA(prossima.date,oggi)} <span class="dot">·</span> <b>${fmtEUR(r.items.filter(i=>i.date===prossima.date).reduce((s,i)=>s+i.amount,0))}</b></div>`:''}
+    ${scadute.length?`<div class="metricLine" style="margin-top:6px"><span class="tag red">Già scadute</span> ${scadute.length===1?'1 voce':scadute.length+' voci'} <span class="dot">·</span> ${fmtEUR(somScadute)}</div>`:''}
+    ${(()=>{const acc=accantonamento(r.items,oggi);return acc?`<div class="salvadanaio"><div class="salvaCifra">${fmtEUR(acc.mese)}<span>al mese</span></div>
+      <div class="salvaTesto">per arrivare a ${dataEstesa(acc.ultima)} con ${fmtEUR(acc.tot)} da parte.
+      Sono ${acc.mesi===1?'poco più di un mese':acc.mesi+' mesi'} da oggi.</div></div>`:''})()}
+    ${r.items.length?sceltaVistaTasse():''}${corpo}</div>`;
 }
 function tasseFuture(){const year=currentYear();return appShell(`<h1>Tasse future ${year}</h1><p class="sub">Scadenze previste per contributi, imposta sostitutiva e bollo. Regime forfettario, base cassa. Stime indicative da verificare col commercialista.</p>${taxScheduleCard(year,'cassa','Prospetto A · solo incassato reale','Calcolato solo su quanto realmente incassato ad oggi. È il dato prudenziale.')}${taxScheduleCard(year,'previsione','Prospetto B · incassato + previsione',"Include anche da incassare, da fatturare e pianificato: quanto dovrai versare se tutto verrà incassato nell'anno.")}<details class="card moreFields"><summary>Note di calcolo e regole applicate</summary><div class="desc" style="margin-top:6px">· Contributi INPS Gestione Separata: acconto pari all'80% del dovuto, in due rate uguali (30/06 e 30/11).<br>· Imposta sostitutiva: acconto 100% del dovuto (40% + 60%); nessun acconto sotto ${fmtEUR(ACCONTO_MIN_IMPOSTA)}, unica rata a novembre sotto ${fmtEUR(ACCONTO_UNICA_SOGLIA)}.<br>· Imposta di bollo: ${fmtEUR(bolloCalc(year).unit)} per fattura sopra ${fmtEUR(BOLLO_SOGLIA)}, versamento trimestrale.<br>· L'imposta sostitutiva è calcolata al netto dei contributi INPS <b>effettivamente versati</b>.<br>· Base imponibile: compensi, rimborsi spese addebitati in fattura e rivalsa INPS <b>concorrono</b> al reddito; la marca da bollo riaddebitata è esclusa (anticipazione art. 15 DPR 633/72).<br>· Nel prospetto B la parte non ancora fatturata è maggiorata della rivalsa INPS, che sarà anch'essa ricavo imponibile.</div></details><div class="actions"><button type="button" class="secondary" onclick="go('tax')">Torna a Fiscalità</button></div>`)}
 function forecastCalc(year=currentYear()){
@@ -3333,6 +3479,7 @@ Object.assign(window,{
   go,
   cambiaFatturaPianificato,
   apriChiudiCliente,
+  cambiaVistaTasse,
   saveSetting,
   cambiaCerca,
   apriGruppo,
