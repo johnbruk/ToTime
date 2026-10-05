@@ -1627,14 +1627,19 @@ function rigaScadenza(it,oggi,conData){
 // Chi deve pagare ragiona per bonifico, e in un bonifico ci va il totale
 // del giorno, non la singola voce.
 function tassePerScadenza(items,oggi){
-  const giorni=new Map();
-  items.forEach(it=>{if(!giorni.has(it.date))giorni.set(it.date,[]);giorni.get(it.date).push(it)});
-  return [...giorni.entries()].map(([data,its])=>{
+  const scadute=items.filter(i=>String(i.date)<oggi);
+  const futuri=items.filter(i=>String(i.date)>=oggi);
+  const gruppi=perGiorno(futuri).map(([data,its])=>{
     const sub=its.reduce((s,i)=>s+i.amount,0);
-    const st=statoScadenza(data,oggi);
-    return `<div class="refGroup"><div class="refHead"><b>${dataEstesa(data)}${st.testo==='scaduta'?' · <span class="scaduta">scaduta</span>':''}</b><span>${fmtEUR(sub)}</span></div>
-      <div class="list" style="box-shadow:none;margin:0">${its.map(it=>rigaScadenza(it,oggi,false)).join('')}</div></div>`;
+    const chiave='s-'+data;
+    const aperto=tappeAperte().includes(chiave);
+    return `<div class="refGroup"><button type="button" class="refHead refApri" aria-expanded="${aperto}" onclick="apriChiudiTappa('${chiave}')">
+        <b>${dataEstesa(data)} <span class="refQuando">${giorniA(data,oggi)}</span></b>
+        <span>${fmtEUR(sub)} <span class="tappaChev" aria-hidden="true">${aperto?'\u25be':'\u25b8'}</span></span></button>
+      ${aperto?`<div class="list" style="box-shadow:none;margin:0">${its.map(it=>rigaScadenza(it,oggi,false)).join('')}</div>`:''}</div>`;
   }).join('');
+  const vuoto=futuri.length?'':'<div class="empty">Nessuna scadenza davanti.</div>';
+  return bloccoScadute(scadute,oggi,'s-scadute')+gruppi+vuoto;
 }
 function tassePerRiferimento(items,oggi){
   const refs=[...new Set(items.map(i=>Number(i.ref)))].sort((a,b)=>a-b);
@@ -1648,33 +1653,73 @@ function tassePerRiferimento(items,oggi){
 // La linea del tempo: una colonna di date in ordine, con quanto resta
 // da versare man mano. Verticale, perche' su un telefono il tempo che
 // scorre in orizzontale non ci sta.
+// Una scadenza, una riga. Dentro ci stanno le voci — INPS, imposta,
+// bollo, col loro riferimento — e si aprono quando servono. Prima erano
+// tutte aperte insieme: cinque scadenze diventavano cinquanta righe, e
+// per vedere la terza si scorreva mezzo schermo di roba gia' nota.
+// Lo scaduto non si mescola alle altre: sta in una riga sola in cima,
+// chiusa. Quello che si guarda aprendo questa pagina e' cosa viene
+// adesso, non cosa e' passato.
+function tappeAperte(){state.tappe=state.tappe||[];return state.tappe}
+function apriChiudiTappa(chiave){
+  const a=tappeAperte();const i=a.indexOf(chiave);
+  if(i>=0)a.splice(i,1);else a.push(chiave);
+  render();
+}
+function voceScadenza(it){
+  return `<li><span class="tag ${TASSE_TINTA[it.kind]||'gray'}">rif. ${esc(String(it.ref))}</span> ${esc(it.label)} <b>${fmtEUR(it.amount)}</b></li>`;
+}
+function tappaScadenza(data,its,oggi,chiave,restaDopo){
+  const sub=its.reduce((s,i)=>s+i.amount,0);
+  const passata=String(data)<oggi;
+  const aperta=tappeAperte().includes(chiave);
+  const quante=its.length===1?'1 voce':its.length+' voci';
+  return `<li class="tappa ${passata?'passata':''}${aperta?' aperta':''}">
+    <div class="tappaData"><b>${dataEstesa(data)}</b><span>${giorniA(data,oggi)}</span></div>
+    <div class="tappaCorpo">
+      <button type="button" class="tappaBtn" aria-expanded="${aperta}"
+        onclick="apriChiudiTappa('${chiave}')">
+        <span class="tappaTot">${fmtEUR(sub)}</span>
+        <span class="tappaQuante">${quante}</span>
+        <span class="tappaChev" aria-hidden="true">${aperta?'\u25be':'\u25b8'}</span></button>
+      ${aperta?`<ul class="tappaVoci">${its.map(voceScadenza).join('')}</ul>
+        ${restaDopo!==null?`<div class="tappaResta">dopo questo versamento restano ${fmtEUR(restaDopo)}</div>`:''}`:''}
+    </div></li>`;
+}
+function perGiorno(items){
+  const g=new Map();
+  items.forEach(it=>{if(!g.has(it.date))g.set(it.date,[]);g.get(it.date).push(it)});
+  return [...g.entries()];
+}
+// Lo scaduto, tutto insieme, in una riga che si apre
+function bloccoScadute(scadute,oggi,chiave){
+  if(!scadute.length)return '';
+  const tot=scadute.reduce((s,i)=>s+i.amount,0);
+  const aperto=tappeAperte().includes(chiave);
+  return `<div class="scadutoBlocco${aperto?' aperto':''}">
+    <button type="button" class="scadutoBtn" aria-expanded="${aperto}" onclick="apriChiudiTappa('${chiave}')">
+      <span class="tag red">Già scadute</span>
+      <span class="scadutoConto">${scadute.length===1?'1 voce':scadute.length+' voci'}</span>
+      <span class="scadutoTot">${fmtEUR(tot)}</span>
+      <span class="tappaChev" aria-hidden="true">${aperto?'\u25be':'\u25b8'}</span></button>
+    ${aperto?`<ul class="tappaVoci scadutoVoci">${perGiorno(scadute).map(([d,its])=>
+      `<li class="scadutoGiorno"><b>${dataEstesa(d)}</b> <span>${giorniA(d,oggi)}</span></li>`+
+      its.map(voceScadenza).join('')).join('')}</ul>`:''}
+  </div>`;
+}
 function tasseLineaDelTempo(items,oggi){
-  const giorni=new Map();
-  items.forEach(it=>{if(!giorni.has(it.date))giorni.set(it.date,[]);giorni.get(it.date).push(it)});
-  let restante=items.reduce((s,i)=>s+i.amount,0);
-  let oggiMesso=false;
-  const tappe=[...giorni.entries()].map(([data,its])=>{
-    // «oggi» e' una tappa anche lui: senza, la linea non dice dove sei
-    let segno='';
-    if(!oggiMesso&&String(data)>=oggi){oggiMesso=true;
-      segno=`<li class="tappa adesso"><div class="tappaData"><b>oggi</b><span>${dateIT(oggi)}/${String(oggi).slice(0,4)}</span></div>
-        <div class="tappaCorpo"><div class="tappaQui">da qui in avanti ${fmtEUR(restante)} da versare</div></div></li>`;}
+  const scadute=items.filter(i=>String(i.date)<oggi);
+  const futuri=items.filter(i=>String(i.date)>=oggi);
+  let restante=futuri.reduce((s,i)=>s+i.amount,0);
+  const tappe=perGiorno(futuri).map(([data,its])=>{
     const sub=its.reduce((s,i)=>s+i.amount,0);
-    const st=statoScadenza(data,oggi);
-    const quando=giorniA(data,oggi);
-    const riga=`<li class="tappa ${st.testo==='scaduta'?'passata':''}">
-      <div class="tappaData"><b>${dataEstesa(data)}</b><span>${quando}</span></div>
-      <div class="tappaCorpo">
-        <div class="tappaTot">${fmtEUR(sub)}</div>
-        <ul class="tappaVoci">${its.map(it=>`<li><span class="tag ${TASSE_TINTA[it.kind]||'gray'}">rif. ${esc(String(it.ref))}</span> ${esc(it.label)} <b>${fmtEUR(it.amount)}</b></li>`).join('')}</ul>
-        <div class="tappaResta">dopo questo versamento restano ${fmtEUR(Math.max(0,restante-sub))}</div>
-      </div></li>`;
+    const riga=tappaScadenza(data,its,oggi,'t-'+data,Math.max(0,restante-sub));
     restante-=sub;
-    return segno+riga;
+    return riga;
   }).join('');
-  const coda=oggiMesso?'':`<li class="tappa adesso"><div class="tappaData"><b>oggi</b><span>${dateIT(oggi)}/${String(oggi).slice(0,4)}</span></div>
-    <div class="tappaCorpo"><div class="tappaQui">nessuna scadenza davanti</div></div></li>`;
-  return `<ol class="lineaTempo">${tappe}${coda}</ol>`;
+  const vuoto=futuri.length?'':`<li class="tappa adesso"><div class="tappaData"><b>nessuna</b><span>scadenza davanti</span></div>
+    <div class="tappaCorpo"><div class="tappaQui">non c'è niente da versare da qui in avanti</div></div></li>`;
+  return bloccoScadute(scadute,oggi,'t-scadute')+`<ol class="lineaTempo">${tappe}${vuoto}</ol>`;
 }
 // Quanto mettere da parte ogni mese per arrivarci senza sorprese: e'
 // la domanda vera di chi ha partita IVA, e il conto l'app ce l'ha gia'
@@ -1710,13 +1755,12 @@ function taxScheduleCard(year,mode,title,desc){
     :vista==='tempo'?tasseLineaDelTempo(r.items,oggi)
     :tassePerScadenza(r.items,oggi);
   const scadute=r.items.filter(i=>String(i.date)<oggi);
-  const somScadute=scadute.reduce((s,i)=>s+i.amount,0);
   const prossima=r.items.find(i=>String(i.date)>=oggi);
   return `<div class="card"><b>${title}</b><div class="desc" style="margin-top:2px">${desc}</div>
     <div class="kpiGrid three" style="margin-top:14px"><div><span>Base</span><strong>${fmtEUR(d.base)}</strong></div><div><span>Imponibile</span><strong>${fmtEUR(d.forfait)}</strong></div><div><span>Da versare</span><strong>${fmtEUR(r.total)}</strong></div></div>
     <div class="metricLine" style="margin-top:8px">${d.parts.map(p=>esc(p[0])+' '+fmtEUR(p[1])).join(' <span class="dot">·</span> ')}</div>
     ${prossima?`<div class="metricLine" style="margin-top:10px"><span class="tag orange">Prossima</span> ${dataEstesa(prossima.date)} <span class="dot">·</span> ${giorniA(prossima.date,oggi)} <span class="dot">·</span> <b>${fmtEUR(r.items.filter(i=>i.date===prossima.date).reduce((s,i)=>s+i.amount,0))}</b></div>`:''}
-    ${scadute.length?`<div class="metricLine" style="margin-top:6px"><span class="tag red">Già scadute</span> ${scadute.length===1?'1 voce':scadute.length+' voci'} <span class="dot">·</span> ${fmtEUR(somScadute)}</div>`:''}
+
     ${(()=>{const acc=accantonamento(r.items,oggi);return acc?`<div class="salvadanaio"><div class="salvaCifra">${fmtEUR(acc.mese)}<span>al mese</span></div>
       <div class="salvaTesto">per arrivare a ${dataEstesa(acc.ultima)} con ${fmtEUR(acc.tot)} da parte.
       Sono ${acc.mesi===1?'poco più di un mese':acc.mesi+' mesi'} da oggi.</div></div>`:''})()}
@@ -3480,6 +3524,7 @@ Object.assign(window,{
   cambiaFatturaPianificato,
   apriChiudiCliente,
   cambiaVistaTasse,
+  apriChiudiTappa,
   saveSetting,
   cambiaCerca,
   apriGruppo,
