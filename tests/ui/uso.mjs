@@ -132,6 +132,76 @@ for(const v of viste){
      bott>0?bott+' punti dove farlo':'IRRAGGIUNGIBILE da questa vista');
 }
 
+console.log('\n=== Il modo principale: registro il versamento, non spunto la riga ===');
+// Spuntare la riga giusta e' fragile: bisogna trovarla, aprirla, e
+// premere la cosa giusta dentro. Registrare quanto si e' versato no —
+// e' un modulo, e l'app scala le scadenze da sola. E' il modo in cui
+// funzionano i contributi INPS da sempre.
+const pgC=await apri(390);
+const errsC=[];pgC.on('pageerror',e=>errsC.push(e.message));
+await vaiA(pgC,'Tassazione','Tasse future');
+ok(await siLegge(pgC,'Imposta di bollo 2026'),'la pagina dice quanto bollo è dovuto e quanto versato');
+ok(await siLegge(pgC,'Ho versato il bollo'),'e offre di registrarlo',
+   (await siLegge(pgC,'Ho versato il bollo'))?'c\'è':'NON c\'è: il modo nuovo è irraggiungibile');
+
+const dovutoPrima=await pgC.evaluate(()=>document.querySelectorAll('#app .card .kpiGrid strong')[2].textContent.trim());
+ok(await tocca(pgC,'Ho versato il bollo'),'e toccandolo si arriva da qualche parte');
+ok(/Pagamenti fiscali/i.test(await schermata(pgC)),'cioè ai Pagamenti fiscali',await schermata(pgC));
+
+// il modulo arriva gia' compilato: anno, tipo, importo che resta
+const modulo=await pgC.evaluate(()=>{const f=document.querySelector('#app form.form');
+  return f?{anno:f.fiscal_year?.value,tipo:f.payment_type?.value,imp:f.amount?.value,stato:f.status?.value,
+            bottone:f.querySelector('button')?.textContent.trim()}:null});
+ok(modulo&&modulo.tipo==='bollo','col tipo già scelto',modulo&&modulo.tipo);
+ok(modulo&&Number(modulo.imp)>0,'e l\'importo che resta già scritto',modulo&&modulo.imp);
+ok(modulo&&modulo.anno==='2026','sull\'anno giusto',modulo&&modulo.anno);
+ok(modulo&&/Registra/.test(modulo.bottone||''),'e il pulsante dice cosa fa',modulo&&modulo.bottone);
+
+// si salva come si salva qualunque modulo
+await pgC.evaluate(()=>document.querySelector('#app form.form button').click());
+await pgC.waitForTimeout(1400);
+const scritto=await pgC.evaluate(()=>(window.__stores.tax_payments||[])
+  .map(p=>({t:p.payment_type,i:p.amount,s:p.status})));
+ok(scritto.length===1&&scritto[0].s==='paid','il versamento è registrato',JSON.stringify(scritto));
+
+// e tornando alle tasse, le scadenze del bollo risultano coperte
+await vaiA(pgC,'Tassazione','Tasse future');
+const dovutoDopo=await pgC.evaluate(()=>document.querySelectorAll('#app .card .kpiGrid strong')[2].textContent.trim());
+const n=t=>Number(String(t).replace(/[^0-9,]/g,'').replace(',','.'));
+ok(n(dovutoDopo)<n(dovutoPrima),'e «da versare» è sceso senza aver spuntato niente',
+   dovutoPrima+' → '+dovutoDopo);
+ok(await siLegge(pgC,'tutto versato'),'la pagina dice che il bollo è a posto',
+   (await siLegge(pgC,'tutto versato'))?'lo dice':'non lo dice');
+await tocca(pgC,'30/11/2026');
+const verdi=await pgC.evaluate(()=>[...document.querySelectorAll('#app .tag')]
+  .filter(t=>t.textContent.trim().toLowerCase()==='pagata').length);
+ok(verdi>0,'e aprendo una scadenza del bollo risulta pagata',verdi+' targhette');
+ok(errsC.length===0,'senza errori JS',errsC.slice(0,2).join(' | ')||'nessuno');
+await pgC.close();
+
+console.log('\n=== Il bollo si riconosce anche se il tipo non c\'è ===');
+// Se il database non accettasse il tipo «bollo» — un vincolo sui
+// valori ammessi — l'app ripiega su «altro». I conti devono tornare
+// lo stesso: e' la rete di sicurezza, e senza questa prova non si
+// saprebbe se regge.
+const pgD=await apri(390);
+const errsD=[];pgD.on('pageerror',e=>errsD.push(e.message));
+await pgD.evaluate(()=>{window.__stores.tax_payments=[{id:'tp1',fiscal_year:2026,
+  payment_type:'altro',payment_date:'2026-10-01',amount:16,status:'paid',
+  notes:'Imposta di bollo fatture elettroniche 2026'}]});
+await pgD.evaluate(()=>window.reload());
+await pgD.waitForTimeout(600);
+await vaiA(pgD,'Tassazione','Tasse future');
+ok(await siLegge(pgD,'tutto versato'),
+   'un versamento scritto come «altro», con «bollo» nelle note, viene riconosciuto',
+   (await siLegge(pgD,'tutto versato'))?'riconosciuto':'NON riconosciuto: i conti resterebbero sbagliati');
+await tocca(pgD,'30/11/2026');
+const verdiD=await pgD.evaluate(()=>[...document.querySelectorAll('#app .tag')]
+  .filter(t=>t.textContent.trim().toLowerCase()==='pagata').length);
+ok(verdiD>0,'e le scadenze risultano coperte lo stesso',verdiD+' targhette');
+ok(errsD.length===0,'senza errori JS',errsD.slice(0,2).join(' | ')||'nessuno');
+await pgD.close();
+
 console.log('\n=== Un pulsante non deve mai restare zitto ===');
 // «Lo premo e non succede niente» e' il guasto peggiore: chi preme non
 // sa se ha sbagliato mira, se l'app sta pensando, o se c'e' un problema
