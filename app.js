@@ -1500,8 +1500,8 @@ function inpsGsCalc(year=currentYear()){
   return {year,gsRate,prevYear,totalDuePrev,paidPrev,saldoPrevDue,accontoCurrentDue,paidCurrent,accontoCurrentRemaining,rata1,rata2,totalCurrentYearOut,nextYear:year+1,projectedForfaitIncome,nextYearAccontoEstimate};
 }
 function inpsGsCard(){const c=inpsGsCalc(currentYear());return `<div class="card"><b>Contributi INPS Gestione Separata</b><div class="desc">Aliquota ${fmtNum(c.gsRate*100,2)}% sul reddito imponibile forfettario. Metodo storico: l'acconto è pari all'80% del contributo dovuto sull'anno precedente, in due rate uguali (30/06 e 30/11). Valori indicativi, da verificare con INPS o il commercialista.</div><div class="list" style="box-shadow:none;margin-top:12px;margin-bottom:0"><div class="row"><div></div><div><div class="title">Saldo ${c.prevYear} da versare</div><div class="desc">dovuto ${fmtEUR(c.totalDuePrev)} · già versato ${fmtEUR(c.paidPrev)} · scadenza 30/06/${c.year}</div></div><div class="value">${fmtEUR(c.saldoPrevDue)}</div></div><div class="row"><div></div><div><div class="title">Acconto ${c.year} residuo</div><div class="desc">dovuto ${fmtEUR(c.accontoCurrentDue)} · già versato ${fmtEUR(c.paidCurrent)} · 1ª rata 50% ${fmtEUR(c.rata1)} (30/06) · 2ª rata 50% ${fmtEUR(c.rata2)} (30/11)</div></div><div class="value">${fmtEUR(c.accontoCurrentRemaining)}</div></div><div class="row"><div></div><div><div class="title">Totale da versare nel ${c.year}</div><div class="desc">saldo ${c.prevYear} + acconto ${c.year} residuo</div></div><div class="value">${fmtEUR(c.totalCurrentYearOut)}</div></div><div class="row"><div></div><div><div class="title">Anticipo stimato ${c.nextYear}</div><div class="desc">stima su proiezione ${c.year} (scenario base): sarà l'acconto da versare nel ${c.nextYear}, da ricalcolare a consuntivo chiuso</div></div><div class="value">${fmtEUR(c.nextYearAccontoEstimate)}</div></div></div></div>`}
-function taxPaymentTypeLabel(t){return ({inps:'Contributi INPS',imposta_sostitutiva:'Imposta sostitutiva',acconto_imposta:'Acconto imposta',altro:'Altro'})[t]||t||'Pagamento'}
-function taxPaymentTypeOptions(selected=''){return ['inps','imposta_sostitutiva','acconto_imposta','altro'].map(v=>`<option value="${v}" ${v===selected?'selected':''}>${esc(taxPaymentTypeLabel(v))}</option>`).join('')}
+function taxPaymentTypeLabel(t){return ({inps:'Contributi INPS',imposta_sostitutiva:'Imposta sostitutiva',acconto_imposta:'Acconto imposta',bollo:'Imposta di bollo',altro:'Altro'})[t]||t||'Pagamento'}
+function taxPaymentTypeOptions(selected=''){return ['inps','imposta_sostitutiva','acconto_imposta','bollo','altro'].map(v=>`<option value="${v}" ${v===selected?'selected':''}>${esc(taxPaymentTypeLabel(v))}</option>`).join('')}
 function taxPayments(){const year=currentYear();const rows=data.taxPayments.filter(p=>Number(p.fiscal_year)===year).sort((a,b)=>String(b.payment_date||'').localeCompare(String(a.payment_date||'')));const totalPaid=rows.filter(p=>p.status==='paid').reduce((s,p)=>s+Number(p.amount||0),0);return appShell(`<h1>Pagamenti fiscali</h1><p class="sub">Contributi INPS e altri versamenti fiscali per l'anno ${year}. I pagamenti INPS "Pagato" vengono dedotti in Fiscalità dall'imponibile stimato.</p>${inpsGsCard()}<div class="card"><b>Totale pagato ${year}</b><div class="amount" style="margin-top:8px">${fmtEUR(totalPaid)}</div></div><form class="form" onsubmit="addTaxPayment(event)"><div class="field"><label>Anno fiscale</label><input name="fiscal_year" type="number" value="${year}"></div><div class="field"><label>Tipo pagamento</label><select name="payment_type">${taxPaymentTypeOptions('inps')}</select></div><div class="field"><label>Data pagamento</label><input name="payment_date" type="date" value="${new Date().toISOString().slice(0,10)}"></div><div class="field"><label>Importo</label><input name="amount" type="number" step="0.01" value="0"></div><div class="field"><label>Stato</label><select name="status"><option value="paid">Pagato</option><option value="planned">Pianificato</option></select></div><div class="field"><label>Note</label><textarea name="notes"></textarea></div><button class="primary">Aggiungi pagamento</button></form><div class="list">${rows.map(p=>`<div class="row" onclick="editTaxPayment('${p.id}')"><div></div><div><div class="title">${esc(taxPaymentTypeLabel(p.payment_type))}</div><div class="desc">${dateIT(p.payment_date)} · ${p.status==='paid'?'Pagato':'Pianificato'}</div></div><div class="value">${fmtEUR(p.amount||0)}</div></div>`).join('')||emptyForm('Nessun pagamento registrato per questo anno.')}</div><button type="button" class="secondary" onclick="go('tax')">Indietro</button>`)}
 function editTaxPayment(id){navigateTo('taxPaymentEdit',{edit:id})}
 function taxPaymentEdit(){const p=data.taxPayments.find(x=>x.id===state.edit);if(!p)return taxPayments();return appShell(`<h1>Modifica pagamento</h1><form class="form" onsubmit="saveTaxPayment(event)"><div class="field"><label>Anno fiscale</label><input name="fiscal_year" type="number" value="${Number(p.fiscal_year||currentYear())}"></div><div class="field"><label>Tipo pagamento</label><select name="payment_type">${taxPaymentTypeOptions(p.payment_type||'inps')}</select></div><div class="field"><label>Data pagamento</label><input name="payment_date" type="date" value="${esc(p.payment_date||'')}"></div><div class="field"><label>Importo</label><input name="amount" type="number" step="0.01" value="${Number(p.amount||0)}"></div><div class="field"><label>Stato</label><select name="status"><option value="paid" ${p.status==='paid'?'selected':''}>Pagato</option><option value="planned" ${p.status==='planned'?'selected':''}>Pianificato</option></select></div><div class="field"><label>Note</label><textarea name="notes">${esc(p.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteTaxPayment('${p.id}')">Elimina</button><button type="button" class="secondary" onclick="go('taxPayments')">Annulla</button></div></form>`)}
@@ -1581,6 +1581,43 @@ function taxScheduleItems(year,mode){
 // scadenza del 30/06/2027, e anche il «Riferimento 2027». Scorrendo
 // l'elenco non si leggeva in nessun punto l'ordine in cui le cose vanno
 // pagate.
+// Segnare che una scadenza e' stata pagata.
+//
+// Si riusa la tabella dei pagamenti fiscali che c'e' gia' — quella dove
+// finiscono i contributi INPS — invece di aprirne un'altra: cosi' il
+// versamento si ritrova, si corregge e si cancella da «Pagamenti
+// fiscali» come tutti gli altri, e il totale dell'anno torna.
+//
+// Il legame fra il pagamento e la scadenza sta nelle note, in una
+// targhetta leggibile: non serve cambiare il database, e chi apre la
+// riga in «Pagamenti fiscali» capisce lo stesso di cosa si tratta.
+function targhettaScadenza(it){return '[totime:'+it.kind+'|'+it.ref+'|'+it.date+']'}
+function pagamentoDi(it){
+  const t=targhettaScadenza(it);
+  return (data.taxPayments||[]).find(p=>p.status==='paid'&&String(p.notes||'').includes(t))||null;
+}
+function scadenzaPagata(it){return !!pagamentoDi(it)}
+const TIPO_PAGAMENTO={bollo:'bollo',inps:'inps',imposta:'imposta_sostitutiva'};
+async function segnaPagata(kind,ref,date,amount,label){
+  const it={kind,ref,date};
+  if(scadenzaPagata(it))return;
+  const payload={fiscal_year:Number(ref)||currentYear(),
+    payment_type:TIPO_PAGAMENTO[kind]||'altro',
+    payment_date:todayISO(),amount:Number(amount)||0,status:'paid',
+    notes:label+' · scadenza '+dataEstesa(date)+' '+targhettaScadenza(it)};
+  const {error}=await insertResilient('tax_payments',payload);
+  if(error)return setMsg(error.message,7000);
+  await reload();render();
+  setMsg('Segnata pagata. La trovi in Pagamenti fiscali, dove puoi correggerla.',5000);
+}
+async function annullaPagata(kind,ref,date){
+  const p=pagamentoDi({kind,ref,date});
+  if(!p)return;
+  if(!confirm('Togliere il segno di pagato? Il versamento registrato verrà eliminato.'))return;
+  const {error}=await sb.from('tax_payments').delete().eq('id',p.id);
+  if(error)return setMsg(error.message,7000);
+  await reload();render();setMsg('Segno di pagato tolto.',4000);
+}
 const TASSE_VISTE=[['scadenze','Per scadenza'],['riferimento','Per riferimento'],['tempo','Linea del tempo']];
 let vistaTasseScelta=null;
 function vistaTasse(){
@@ -1608,13 +1645,14 @@ function sceltaVistaTasse(){
 const TASSE_TINTA={bollo:'gray',inps:'blue',imposta:'orange'};
 // Scaduta vuol dire che quel giorno e' passato: e' la prima cosa da
 // sapere guardando un elenco di cose da pagare, e prima non si vedeva.
-function statoScadenza(iso,oggi){
+function statoScadenza(iso,oggi,pagata){
+  if(pagata)return {cls:'verde',testo:'pagata'};
   if(String(iso)<oggi)return {cls:'red',testo:'scaduta'};
   return {cls:'orange',testo:'prevista'};
 }
 function dataEstesa(iso){return dateIT(iso)+'/'+String(iso).slice(0,4)}
 function rigaScadenza(it,oggi,conData){
-  const st=statoScadenza(it.date,oggi);
+  const st=statoScadenza(it.date,oggi,scadenzaPagata(it));
   return `<div class="row">
     ${conData?`<div class="date">${dateIT(it.date)}<br><span class="dateYear">${String(it.date).slice(0,4)}</span></div>`:'<div></div>'}
     <div><div class="title">${esc(it.label)}</div>
@@ -1627,7 +1665,7 @@ function rigaScadenza(it,oggi,conData){
 // Chi deve pagare ragiona per bonifico, e in un bonifico ci va il totale
 // del giorno, non la singola voce.
 function tassePerScadenza(items,oggi){
-  const scadute=items.filter(i=>String(i.date)<oggi);
+  const scadute=items.filter(i=>String(i.date)<oggi&&!scadenzaPagata(i));
   const futuri=items.filter(i=>String(i.date)>=oggi);
   const gruppi=perGiorno(futuri).map(([data,its])=>{
     const sub=its.reduce((s,i)=>s+i.amount,0);
@@ -1667,15 +1705,24 @@ function apriChiudiTappa(chiave){
   render();
 }
 function voceScadenza(it){
-  return `<li><span class="tag ${TASSE_TINTA[it.kind]||'gray'}">rif. ${esc(String(it.ref))}</span> ${esc(it.label)} <b>${fmtEUR(it.amount)}</b></li>`;
+  const pagata=scadenzaPagata(it);
+  const arg=`'${it.kind}',${Number(it.ref)},'${it.date}'`;
+  return `<li class="${pagata?'vocePagata':''}">
+    <span class="tag ${TASSE_TINTA[it.kind]||'gray'}">rif. ${esc(String(it.ref))}</span> ${esc(it.label)} <b>${fmtEUR(it.amount)}</b>
+    ${pagata
+      ? `<span class="tag verde">pagata</span> <button type="button" class="miniBtn vocePag" onclick="annullaPagata(${arg})">Non l'ho pagata</button>`
+      : `<button type="button" class="miniBtn vocePag" onclick="segnaPagata(${arg},${Number(it.amount)},'${esc(String(it.label)).replace(/'/g,'&#39;')}')">✓ Segna pagata</button>`}
+  </li>`;
 }
 function tappaScadenza(data,its,oggi,chiave,restaDopo){
   const sub=its.reduce((s,i)=>s+i.amount,0);
-  const passata=String(data)<oggi;
+  const daPagare=its.filter(i=>!scadenzaPagata(i));
+  const tuttePagate=!daPagare.length;
+  const passata=!tuttePagate&&String(data)<oggi;
   const aperta=tappeAperte().includes(chiave);
   const quante=its.length===1?'1 voce':its.length+' voci';
-  return `<li class="tappa ${passata?'passata':''}${aperta?' aperta':''}">
-    <div class="tappaData"><b>${dataEstesa(data)}</b><span>${giorniA(data,oggi)}</span></div>
+  return `<li class="tappa ${passata?'passata':''}${tuttePagate?' pagata':''}${aperta?' aperta':''}">
+    <div class="tappaData"><b>${dataEstesa(data)}</b><span>${tuttePagate?'<span class="tag verde">pagata</span>':giorniA(data,oggi)}</span></div>
     <div class="tappaCorpo">
       <button type="button" class="tappaBtn" aria-expanded="${aperta}"
         onclick="apriChiudiTappa('${chiave}')">
@@ -1708,11 +1755,11 @@ function bloccoScadute(scadute,oggi,chiave){
   </div>`;
 }
 function tasseLineaDelTempo(items,oggi){
-  const scadute=items.filter(i=>String(i.date)<oggi);
+  const scadute=items.filter(i=>String(i.date)<oggi&&!scadenzaPagata(i));
   const futuri=items.filter(i=>String(i.date)>=oggi);
-  let restante=futuri.reduce((s,i)=>s+i.amount,0);
+  let restante=futuri.filter(i=>!scadenzaPagata(i)).reduce((s,i)=>s+i.amount,0);
   const tappe=perGiorno(futuri).map(([data,its])=>{
-    const sub=its.reduce((s,i)=>s+i.amount,0);
+    const sub=its.filter(i=>!scadenzaPagata(i)).reduce((s,i)=>s+i.amount,0);
     const riga=tappaScadenza(data,its,oggi,'t-'+data,Math.max(0,restante-sub));
     restante-=sub;
     return riga;
@@ -1726,7 +1773,7 @@ function tasseLineaDelTempo(items,oggi){
 // tutto in mano. Si guarda solo il futuro: lo scaduto va pagato, non
 // accantonato.
 function accantonamento(items,oggi){
-  const futuri=items.filter(i=>String(i.date)>=oggi);
+  const futuri=items.filter(i=>String(i.date)>=oggi&&!scadenzaPagata(i));
   if(!futuri.length)return null;
   const ultima=futuri[futuri.length-1].date;
   const tot=futuri.reduce((s,i)=>s+i.amount,0);
@@ -1750,16 +1797,23 @@ function taxScheduleCard(year,mode,title,desc){
   const r=taxScheduleItems(year,mode);const d=r.due;
   const oggi=todayISO();
   const vista=vistaTasse();
+  // «Da versare» e' quello che resta davvero da versare: cio' che hai
+  // gia' segnato pagato non e' piu' un debito, e il pagato dell'anno si
+  // dice a parte, se no il totale sembra sbagliato
+  const pagate=r.items.filter(scadenzaPagata);
+  const somPagate=pagate.reduce((s,i)=>s+i.amount,0);
+  const daVersare=r.total-somPagate;
   const corpo=!r.items.length?'<div class="empty">Nessuna scadenza prevista.</div>'
     :vista==='riferimento'?tassePerRiferimento(r.items,oggi)
     :vista==='tempo'?tasseLineaDelTempo(r.items,oggi)
     :tassePerScadenza(r.items,oggi);
-  const scadute=r.items.filter(i=>String(i.date)<oggi);
-  const prossima=r.items.find(i=>String(i.date)>=oggi);
+  const scadute=r.items.filter(i=>String(i.date)<oggi&&!scadenzaPagata(i));
+  const prossima=r.items.find(i=>String(i.date)>=oggi&&!scadenzaPagata(i));
   return `<div class="card"><b>${title}</b><div class="desc" style="margin-top:2px">${desc}</div>
-    <div class="kpiGrid three" style="margin-top:14px"><div><span>Base</span><strong>${fmtEUR(d.base)}</strong></div><div><span>Imponibile</span><strong>${fmtEUR(d.forfait)}</strong></div><div><span>Da versare</span><strong>${fmtEUR(r.total)}</strong></div></div>
+    <div class="kpiGrid three" style="margin-top:14px"><div><span>Base</span><strong>${fmtEUR(d.base)}</strong></div><div><span>Imponibile</span><strong>${fmtEUR(d.forfait)}</strong></div><div><span>Da versare</span><strong>${fmtEUR(daVersare)}</strong></div></div>
     <div class="metricLine" style="margin-top:8px">${d.parts.map(p=>esc(p[0])+' '+fmtEUR(p[1])).join(' <span class="dot">·</span> ')}</div>
-    ${prossima?`<div class="metricLine" style="margin-top:10px"><span class="tag orange">Prossima</span> ${dataEstesa(prossima.date)} <span class="dot">·</span> ${giorniA(prossima.date,oggi)} <span class="dot">·</span> <b>${fmtEUR(r.items.filter(i=>i.date===prossima.date).reduce((s,i)=>s+i.amount,0))}</b></div>`:''}
+    ${prossima?`<div class="metricLine" style="margin-top:10px"><span class="tag orange">Prossima</span> ${dataEstesa(prossima.date)} <span class="dot">·</span> ${giorniA(prossima.date,oggi)} <span class="dot">·</span> <b>${fmtEUR(r.items.filter(i=>i.date===prossima.date&&!scadenzaPagata(i)).reduce((s,i)=>s+i.amount,0))}</b></div>`:''}
+    ${pagate.length?`<div class="metricLine" style="margin-top:6px"><span class="tag verde">Già pagate</span> ${pagate.length===1?'1 voce':pagate.length+' voci'} <span class="dot">·</span> ${fmtEUR(somPagate)}</div>`:''}
 
     ${(()=>{const acc=accantonamento(r.items,oggi);return acc?`<div class="salvadanaio"><div class="salvaCifra">${fmtEUR(acc.mese)}<span>al mese</span></div>
       <div class="salvaTesto">per arrivare a ${dataEstesa(acc.ultima)} con ${fmtEUR(acc.tot)} da parte.
@@ -3524,6 +3578,8 @@ Object.assign(window,{
   cambiaFatturaPianificato,
   apriChiudiCliente,
   cambiaVistaTasse,
+  segnaPagata,
+  annullaPagata,
   apriChiudiTappa,
   saveSetting,
   cambiaCerca,

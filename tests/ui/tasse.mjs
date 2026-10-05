@@ -25,6 +25,7 @@ const ok=(c,l,x='')=>{c?pass++:fail++;console.log((c?'  OK  ':'  KO  ')+l+(x?'  
 // vere, due delle quali gia' passate rispetto a oggi.
 const apri=async w=>{
   const pg=await b.newPage({viewport:{width:w,height:1600},hasTouch:w<900});
+  pg.on('dialog',d=>d.accept());
   await pg.goto(`http://127.0.0.1:${port}/tests/ui/mock.html`,{waitUntil:'networkidle'});
   await pg.waitForTimeout(900);
   await pg.evaluate(()=>{const S=window.__stores;
@@ -187,6 +188,79 @@ ok(sc<=1,'senza scroll orizzontale di pagina',sc+'px');
 const dita=await pm.evaluate(()=>[...document.querySelectorAll('#app .card .tabs button')]
   .map(x=>Math.round(x.getBoundingClientRect().height)));
 ok(dita.length>0&&dita.every(h=>h>=44),'e i tre pulsanti si prendono col pollice',dita.join(' '));
+
+console.log('\n=== H. Segnare pagata una scadenza ===');
+// Il caso vero: i bolli scaduti sono stati pagati davvero, e l'app
+// deve poterlo registrare — se no continua a contarli come debito e a
+// chiedere di accantonare soldi gia' usciti.
+const pg3=await apri(1280);
+const errs3=[];pg3.on('pageerror',e=>errs3.push(e.message));
+await cambia(pg3,'Linea del tempo');
+const prima=await scheda(pg3);
+const daVersarePrima=await pg3.evaluate(()=>document.querySelectorAll('#app .card .kpiGrid strong')[2].textContent.trim());
+await apriTappa(pg3,0);
+const vociPrima=await pg3.evaluate(()=>[...document.querySelectorAll('#app .card .tappaVoci li')]
+  .map(x=>({testo:x.textContent.replace(/\s+/g,' ').trim(),pagata:x.classList.contains('vocePagata')})));
+ok(vociPrima.length>0&&vociPrima.every(v=>!v.pagata),'si parte senza niente di segnato pagato',
+   vociPrima.length+' voci, nessuna pagata');
+ok(await pg3.evaluate(()=>!!document.querySelector('#app .card .tappaVoci .vocePag')),
+   'ogni voce ha il pulsante per segnarla');
+
+await pg3.evaluate(()=>document.querySelector('#app .card .tappaVoci .vocePag').click());
+await pg3.waitForTimeout(1200);
+const vociDopo=await pg3.evaluate(()=>[...document.querySelectorAll('#app .card .tappaVoci li')]
+  .map(x=>({pagata:x.classList.contains('vocePagata'),
+            tag:[...x.querySelectorAll('.tag')].map(t=>t.textContent.trim()).join(' ')})));
+ok(vociDopo.some(v=>v.pagata&&/pagata/.test(v.tag)),'toccandolo la voce diventa pagata',
+   JSON.stringify(vociDopo.map(v=>v.tag)));
+
+// il versamento finisce davvero nella tabella dei pagamenti fiscali
+const reg=await pg3.evaluate(()=>(window.__stores.tax_payments||[])
+  .map(p=>({tipo:p.payment_type,stato:p.status,imp:p.amount,note:p.notes})));
+ok(reg.length===1&&reg[0].tipo==='bollo'&&reg[0].stato==='paid',
+   'e il versamento finisce fra i pagamenti fiscali, col tipo giusto',JSON.stringify(reg[0]));
+ok(reg.length===1&&/scadenza \d{2}\/\d{2}\/\d{4}/.test(reg[0].note||''),
+   'con scritto di che scadenza si tratta',reg[0]&&reg[0].note);
+
+// e smette di pesare sui conti
+const daVersareDopo=await pg3.evaluate(()=>document.querySelectorAll('#app .card .kpiGrid strong')[2].textContent.trim());
+const num=t=>Number(String(t).replace(/[^0-9,]/g,'').replace(',','.'));
+ok(num(daVersareDopo)<num(daVersarePrima),'«da versare» scende di quello che hai pagato',
+   daVersarePrima+' → '+daVersareDopo);
+const dopo=await scheda(pg3);
+ok(num(dopo.salva)<num(prima.salva),'e anche quanto mettere da parte al mese',
+   prima.salva+' → '+dopo.salva);
+const pagateRiga=await pg3.evaluate(()=>[...document.querySelectorAll('#app .card .metricLine')]
+  .map(x=>x.textContent.replace(/\s+/g,' ').trim()).find(t=>/Già pagate/.test(t))||'');
+ok(/Già pagate/.test(pagateRiga),'la scheda dice quanto hai già pagato',pagateRiga||'niente');
+
+console.log('\n=== I. Segnarla due volte non raddoppia, e si può tornare indietro ===');
+await pg3.evaluate(async()=>{
+  await window.segnaPagata('bollo',2026,'2026-11-30',4,'Imposta di bollo fatture elettroniche · III trimestre');
+  await window.segnaPagata('bollo',2026,'2026-11-30',4,'Imposta di bollo fatture elettroniche · III trimestre');
+});
+await pg3.waitForTimeout(900);
+ok((await pg3.evaluate(()=>(window.__stores.tax_payments||[]).length))===1,
+   'segnandola di nuovo non si raddoppia il versamento',
+   String(await pg3.evaluate(()=>(window.__stores.tax_payments||[]).length)));
+// «Non l'ho pagata» lo toglie
+await pg3.evaluate(()=>{const b=[...document.querySelectorAll('#app .card .tappaVoci .vocePag')]
+  .find(x=>/Non l/.test(x.textContent));if(b)b.click()});
+await pg3.waitForTimeout(1200);
+ok((await pg3.evaluate(()=>(window.__stores.tax_payments||[]).length))===0,
+   'e si può tornare indietro: il versamento viene tolto',
+   String(await pg3.evaluate(()=>(window.__stores.tax_payments||[]).length)));
+const tornato=await pg3.evaluate(()=>document.querySelectorAll('#app .card .kpiGrid strong')[2].textContent.trim());
+ok(tornato===daVersarePrima,'e «da versare» torna com\'era',daVersarePrima+' → '+tornato);
+
+console.log('\n=== L. Il tipo «Bollo» c\'è anche a mano ===');
+await pg3.evaluate(()=>window.go('taxPayments'));await pg3.waitForTimeout(500);
+const tipi=await pg3.evaluate(()=>[...document.querySelectorAll('#app form select[name=payment_type] option')]
+  .map(o=>o.textContent.trim()));
+ok(tipi.includes('Imposta di bollo'),'fra i tipi di pagamento fiscale',tipi.join(' | '));
+
+ok(errs3.length===0,'nessun errore JS nella terza pagina',errs3.slice(0,2).join(' | ')||'nessuno');
+await pg3.close();
 
 ok(errs.length===0&&errs2.length===0,'nessun errore JS',
    errs.concat(errs2).slice(0,2).join(' | ')||'nessuno');
