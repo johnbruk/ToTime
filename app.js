@@ -1652,13 +1652,15 @@ function statoScadenza(iso,oggi,pagata){
 }
 function dataEstesa(iso){return dateIT(iso)+'/'+String(iso).slice(0,4)}
 function rigaScadenza(it,oggi,conData){
-  const st=statoScadenza(it.date,oggi,scadenzaPagata(it));
-  return `<div class="row">
+  const pagata=scadenzaPagata(it);
+  const st=statoScadenza(it.date,oggi,pagata);
+  return `<div class="row${pagata?' vocePagata':''}">
     ${conData?`<div class="date">${dateIT(it.date)}<br><span class="dateYear">${String(it.date).slice(0,4)}</span></div>`:'<div></div>'}
     <div><div class="title">${esc(it.label)}</div>
       <div class="desc"><span class="tag ${st.cls}">${st.testo}</span>
         <span class="tag ${TASSE_TINTA[it.kind]||'gray'}">rif. ${esc(String(it.ref))}</span>
-        ${conData?'':'scadenza '+dataEstesa(it.date)}</div></div>
+        ${conData?'':'scadenza '+dataEstesa(it.date)}</div>
+      <div class="rigaAzione">${bottonePagata(it)}</div></div>
     <div class="value">${fmtEUR(it.amount)}</div></div>`;
 }
 // Per scadenza: un gruppo per giorno, con quanto si versa quel giorno.
@@ -1704,14 +1706,23 @@ function apriChiudiTappa(chiave){
   if(i>=0)a.splice(i,1);else a.push(chiave);
   render();
 }
+// Il pulsante per segnare pagata una voce si costruisce QUI, in un
+// posto solo, e tutte le viste chiamano questo. Prima stava dentro la
+// voce della linea del tempo: le altre due viste — fra cui quella che
+// si apre per prima — non l'hanno mai avuto, e dall'app non c'era modo
+// di segnare niente senza passare dalla linea del tempo.
+function bottonePagata(it){
+  const arg=`'${it.kind}',${Number(it.ref)},'${it.date}'`;
+  if(scadenzaPagata(it))
+    return `<button type="button" class="miniBtn vocePag" onclick="annullaPagata(${arg})">Non l'ho pagata</button>`;
+  const etichetta=esc(String(it.label)).replace(/'/g,'&#39;');
+  return `<button type="button" class="miniBtn vocePag" onclick="segnaPagata(${arg},${Number(it.amount)},'${etichetta}')">\u2713 Segna pagata</button>`;
+}
 function voceScadenza(it){
   const pagata=scadenzaPagata(it);
-  const arg=`'${it.kind}',${Number(it.ref)},'${it.date}'`;
   return `<li class="${pagata?'vocePagata':''}">
     <span class="tag ${TASSE_TINTA[it.kind]||'gray'}">rif. ${esc(String(it.ref))}</span> ${esc(it.label)} <b>${fmtEUR(it.amount)}</b>
-    ${pagata
-      ? `<span class="tag verde">pagata</span> <button type="button" class="miniBtn vocePag" onclick="annullaPagata(${arg})">Non l'ho pagata</button>`
-      : `<button type="button" class="miniBtn vocePag" onclick="segnaPagata(${arg},${Number(it.amount)},'${esc(String(it.label)).replace(/'/g,'&#39;')}')">✓ Segna pagata</button>`}
+    ${pagata?'<span class="tag verde">pagata</span> ':''}${bottonePagata(it)}
   </li>`;
 }
 function tappaScadenza(data,its,oggi,chiave,restaDopo){

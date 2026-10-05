@@ -234,6 +234,51 @@ const pagateRiga=await pg3.evaluate(()=>[...document.querySelectorAll('#app .car
   .map(x=>x.textContent.replace(/\s+/g,' ').trim()).find(t=>/Già pagate/.test(t))||'');
 ok(/Già pagate/.test(pagateRiga),'la scheda dice quanto hai già pagato',pagateRiga||'niente');
 
+console.log('\n=== H2. Il pulsante c\'è in TUTTE le viste ===');
+// Il buco vero: il pulsante stava solo dentro la voce della linea del
+// tempo. Le altre due viste — fra cui quella che si apre per prima —
+// non l'hanno mai avuto, e il test non se n'era accorto perche'
+// guardava solo dove il pulsante era stato messo.
+const pg4=await apri(1280);
+const errs4=[];pg4.on('pageerror',e=>errs4.push(e.message));
+// Ogni apertura ridisegna la pagina, quindi i pulsanti vanno cercati
+// di nuovo a ogni giro: cliccarli tutti in un colpo solo lascia i
+// successivi su nodi ormai staccati e non apre niente.
+const apriTutto=async pg=>{
+  for(let giro=0;giro<12;giro++){
+    const fatto=await pg.evaluate(()=>{
+      const b=[...document.querySelectorAll('#app .card .tappaBtn, #app .card .refHead.refApri, #app .card .scadutoBtn')]
+        .find(x=>x.getAttribute('aria-expanded')==='false');
+      if(!b)return false;b.click();return true;});
+    if(!fatto)break;
+    await pg.waitForTimeout(350);
+  }
+};
+const bottoniIn=async etichetta=>{
+  await cambia(pg4,etichetta);
+  await apriTutto(pg4);
+  return pg4.evaluate(()=>[...document.querySelectorAll('#app .card .vocePag')]
+    .filter(b=>!b.closest('.scadutoBlocco')).length);
+};
+for(const vista of ['Per scadenza','Per riferimento','Linea del tempo']){
+  const n=await bottoniIn(vista);
+  ok(n>0,`in «${vista}» si può segnare pagata`,n+' pulsanti');
+}
+// e quello scaduto si segna anche senza cambiare vista
+await cambia(pg4,'Per scadenza');
+await apriTutto(pg4);
+ok(await pg4.evaluate(()=>document.querySelectorAll('#app .card .scadutoVoci .vocePag').length)>0,
+   'e anche le voci già scadute hanno il loro pulsante',
+   String(await pg4.evaluate(()=>document.querySelectorAll('#app .card .scadutoVoci .vocePag').length)));
+// segnarne una dalla vista di partenza funziona davvero
+await pg4.evaluate(()=>document.querySelector('#app .card .scadutoVoci .vocePag').click());
+await pg4.waitForTimeout(1200);
+ok((await pg4.evaluate(()=>(window.__stores.tax_payments||[]).length))===1,
+   'e segnandola da lì il versamento viene registrato',
+   String(await pg4.evaluate(()=>(window.__stores.tax_payments||[]).length)));
+ok(errs4.length===0,'nessun errore JS nella quarta pagina',errs4.slice(0,2).join(' | ')||'nessuno');
+await pg4.close();
+
 console.log('\n=== I. Segnarla due volte non raddoppia, e si può tornare indietro ===');
 await pg3.evaluate(async()=>{
   await window.segnaPagata('bollo',2026,'2026-11-30',4,'Imposta di bollo fatture elettroniche · III trimestre');
