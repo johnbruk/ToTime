@@ -1385,7 +1385,7 @@ function selBar(scope,count){
 }
 async function deleteSelected(){
   const n=state.sel.length;if(!n)return;
-  if(!confirm(n===1?'Eliminare la voce selezionata?\n\nL\'operazione non \u00e8 reversibile.':'Eliminare le '+n+' voci selezionate?\n\nL\'operazione non \u00e8 reversibile.'))return;
+  if(!confirm(n===1?'Eliminare la voce selezionata?\n\nL\'operazione non è reversibile.':'Eliminare le '+n+' voci selezionate?\n\nL\'operazione non è reversibile.'))return;
   const byKind={};
   state.sel.forEach(k=>{const i=k.indexOf(':');const kind=k.slice(0,i),id=k.slice(i+1);(byKind[kind]=byKind[kind]||[]).push(id)});
   let done=0;
@@ -1502,7 +1502,7 @@ function inpsGsCalc(year=currentYear()){
 function inpsGsCard(){const c=inpsGsCalc(currentYear());return `<div class="card"><b>Contributi INPS Gestione Separata</b><div class="desc">Aliquota ${fmtNum(c.gsRate*100,2)}% sul reddito imponibile forfettario. Metodo storico: l'acconto è pari all'80% del contributo dovuto sull'anno precedente, in due rate uguali (30/06 e 30/11). Valori indicativi, da verificare con INPS o il commercialista.</div><div class="list" style="box-shadow:none;margin-top:12px;margin-bottom:0"><div class="row"><div></div><div><div class="title">Saldo ${c.prevYear} da versare</div><div class="desc">dovuto ${fmtEUR(c.totalDuePrev)} · già versato ${fmtEUR(c.paidPrev)} · scadenza 30/06/${c.year}</div></div><div class="value">${fmtEUR(c.saldoPrevDue)}</div></div><div class="row"><div></div><div><div class="title">Acconto ${c.year} residuo</div><div class="desc">dovuto ${fmtEUR(c.accontoCurrentDue)} · già versato ${fmtEUR(c.paidCurrent)} · 1ª rata 50% ${fmtEUR(c.rata1)} (30/06) · 2ª rata 50% ${fmtEUR(c.rata2)} (30/11)</div></div><div class="value">${fmtEUR(c.accontoCurrentRemaining)}</div></div><div class="row"><div></div><div><div class="title">Totale da versare nel ${c.year}</div><div class="desc">saldo ${c.prevYear} + acconto ${c.year} residuo</div></div><div class="value">${fmtEUR(c.totalCurrentYearOut)}</div></div><div class="row"><div></div><div><div class="title">Anticipo stimato ${c.nextYear}</div><div class="desc">stima su proiezione ${c.year} (scenario base): sarà l'acconto da versare nel ${c.nextYear}, da ricalcolare a consuntivo chiuso</div></div><div class="value">${fmtEUR(c.nextYearAccontoEstimate)}</div></div></div></div>`}
 function taxPaymentTypeLabel(t){return ({inps:'Contributi INPS',imposta_sostitutiva:'Imposta sostitutiva',acconto_imposta:'Acconto imposta',bollo:'Imposta di bollo',altro:'Altro'})[t]||t||'Pagamento'}
 function taxPaymentTypeOptions(selected=''){return ['inps','imposta_sostitutiva','acconto_imposta','bollo','altro'].map(v=>`<option value="${v}" ${v===selected?'selected':''}>${esc(taxPaymentTypeLabel(v))}</option>`).join('')}
-function taxPayments(){const year=currentYear();const rows=data.taxPayments.filter(p=>Number(p.fiscal_year)===year).sort((a,b)=>String(b.payment_date||'').localeCompare(String(a.payment_date||'')));const totalPaid=rows.filter(p=>p.status==='paid').reduce((s,p)=>s+Number(p.amount||0),0);return appShell(`<h1>Pagamenti fiscali</h1><p class="sub">Contributi INPS e altri versamenti fiscali per l'anno ${year}. I pagamenti INPS "Pagato" vengono dedotti in Fiscalità dall'imponibile stimato.</p>${inpsGsCard()}<div class="card"><b>Totale pagato ${year}</b><div class="amount" style="margin-top:8px">${fmtEUR(totalPaid)}</div></div><form class="form" onsubmit="addTaxPayment(event)"><div class="field"><label>Anno fiscale</label><input name="fiscal_year" type="number" value="${year}"></div><div class="field"><label>Tipo pagamento</label><select name="payment_type">${taxPaymentTypeOptions('inps')}</select></div><div class="field"><label>Data pagamento</label><input name="payment_date" type="date" value="${new Date().toISOString().slice(0,10)}"></div><div class="field"><label>Importo</label><input name="amount" type="number" step="0.01" value="0"></div><div class="field"><label>Stato</label><select name="status"><option value="paid">Pagato</option><option value="planned">Pianificato</option></select></div><div class="field"><label>Note</label><textarea name="notes"></textarea></div><button class="primary">Aggiungi pagamento</button></form><div class="list">${rows.map(p=>`<div class="row" onclick="editTaxPayment('${p.id}')"><div></div><div><div class="title">${esc(taxPaymentTypeLabel(p.payment_type))}</div><div class="desc">${dateIT(p.payment_date)} · ${p.status==='paid'?'Pagato':'Pianificato'}</div></div><div class="value">${fmtEUR(p.amount||0)}</div></div>`).join('')||emptyForm('Nessun pagamento registrato per questo anno.')}</div><button type="button" class="secondary" onclick="go('tax')">Indietro</button>`)}
+function taxPayments(){const year=currentYear();const pre=state.prefill||{};const rows=data.taxPayments.filter(p=>Number(p.fiscal_year)===year).sort((a,b)=>String(b.payment_date||'').localeCompare(String(a.payment_date||'')));const totalPaid=rows.filter(p=>p.status==='paid').reduce((s,p)=>s+Number(p.amount||0),0);return appShell(`<h1>Pagamenti fiscali</h1><p class="sub">Contributi INPS e altri versamenti fiscali per l'anno ${year}. I pagamenti INPS "Pagato" vengono dedotti in Fiscalità dall'imponibile stimato.</p>${inpsGsCard()}<div class="card"><b>Totale pagato ${year}</b><div class="amount" style="margin-top:8px">${fmtEUR(totalPaid)}</div></div><form class="form" onsubmit="addTaxPayment(event)"${pre.payment_type?' id="moduloPagamento"':''}><div class="field"><label>Anno fiscale</label><input name="fiscal_year" type="number" value="${Number(pre.fiscal_year||year)}"></div><div class="field"><label>Tipo pagamento</label><select name="payment_type">${taxPaymentTypeOptions(pre.payment_type||'inps')}</select></div><div class="field"><label>Data pagamento</label><input name="payment_date" type="date" value="${new Date().toISOString().slice(0,10)}"></div><div class="field"><label>Importo</label><input name="amount" type="number" step="0.01" value="${Number(pre.amount||0)}"></div><div class="field"><label>Stato</label><select name="status"><option value="paid" ${pre.status!=='planned'?'selected':''}>Pagato</option><option value="planned" ${pre.status==='planned'?'selected':''}>Pianificato</option></select></div><div class="field"><label>Note</label><textarea name="notes">${esc(pre.notes||'')}</textarea></div><button class="primary">${pre.payment_type?'Registra il versamento':'Aggiungi pagamento'}</button></form><div class="list">${rows.map(p=>`<div class="row" onclick="editTaxPayment('${p.id}')"><div></div><div><div class="title">${esc(taxPaymentTypeLabel(p.payment_type))}</div><div class="desc">${dateIT(p.payment_date)} · ${p.status==='paid'?'Pagato':'Pianificato'}</div></div><div class="value">${fmtEUR(p.amount||0)}</div></div>`).join('')||emptyForm('Nessun pagamento registrato per questo anno.')}</div><button type="button" class="secondary" onclick="go('tax')">Indietro</button>`)}
 function editTaxPayment(id){navigateTo('taxPaymentEdit',{edit:id})}
 function taxPaymentEdit(){const p=data.taxPayments.find(x=>x.id===state.edit);if(!p)return taxPayments();return appShell(`<h1>Modifica pagamento</h1><form class="form" onsubmit="saveTaxPayment(event)"><div class="field"><label>Anno fiscale</label><input name="fiscal_year" type="number" value="${Number(p.fiscal_year||currentYear())}"></div><div class="field"><label>Tipo pagamento</label><select name="payment_type">${taxPaymentTypeOptions(p.payment_type||'inps')}</select></div><div class="field"><label>Data pagamento</label><input name="payment_date" type="date" value="${esc(p.payment_date||'')}"></div><div class="field"><label>Importo</label><input name="amount" type="number" step="0.01" value="${Number(p.amount||0)}"></div><div class="field"><label>Stato</label><select name="status"><option value="paid" ${p.status==='paid'?'selected':''}>Pagato</option><option value="planned" ${p.status==='planned'?'selected':''}>Pianificato</option></select></div><div class="field"><label>Note</label><textarea name="notes">${esc(p.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteTaxPayment('${p.id}')">Elimina</button><button type="button" class="secondary" onclick="go('taxPayments')">Annulla</button></div></form>`)}
 async function addTaxPayment(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const payload={fiscal_year:Number(f.fiscal_year||currentYear()),payment_type:f.payment_type,payment_date:f.payment_date||null,amount:Number(f.amount||0),status:f.status,notes:f.notes||null};const {error}=await insertResilient('tax_payments',payload);if(error)return setMsg(error.message,7000);await reload();state.view='taxPayments';render()}
@@ -1568,6 +1568,7 @@ function taxScheduleItems(year,mode){
     else{items.push({date:N+'-06-30',label:'Primo acconto imposta sostitutiva (40%)',ref:N,amount:d.imposta*0.4,kind:'imposta'});
       items.push({date:N+'-11-30',label:'Secondo acconto imposta sostitutiva (60%)',ref:N,amount:d.imposta*0.6,kind:'imposta'});}}
   items.sort((a,b)=>a.date.localeCompare(b.date)||a.label.localeCompare(b.label));
+  applicaVersamenti(items,year);
   return {items,total:items.reduce((s,i)=>s+i.amount,0),due:d,bolloTot};
 }
 // Le scadenze fiscali si guardano in tre modi diversi, e servono tutti
@@ -1591,28 +1592,94 @@ function taxScheduleItems(year,mode){
 // Il legame fra il pagamento e la scadenza sta nelle note, in una
 // targhetta leggibile: non serve cambiare il database, e chi apre la
 // riga in «Pagamenti fiscali» capisce lo stesso di cosa si tratta.
+// COME SI SEGNA UN BOLLO PAGATO
+//
+// Non spuntando la riga: registrando il versamento. E' il modo in cui
+// l'app tratta i contributi INPS da sempre — si scrive quanto si e'
+// versato, e il dovuto scende da solo — e funziona perche' non dipende
+// dal trovare la riga giusta e premerci sopra la cosa giusta.
+//
+// Quindi: quanto risulta versato di bollo per un anno copre le sue
+// scadenze in ordine di data, fino a esaurimento. Chi ha pagato 14 euro
+// di bollo vede coperte le scadenze che fanno 14 euro, dalla piu'
+// vecchia. Il versamento si scrive da «Pagamenti fiscali», che c'era
+// gia' e si puo' correggere e cancellare come tutto il resto.
+//
+// La targhetta nelle note resta per il pulsante rapido, ma non e' piu'
+// l'unico modo: se sparisce, o se il versamento lo si e' scritto a
+// mano, i conti tornano lo stesso.
 function targhettaScadenza(it){return '[totime:'+it.kind+'|'+it.ref+'|'+it.date+']'}
 function pagamentoDi(it){
   const t=targhettaScadenza(it);
   return (data.taxPayments||[]).find(p=>p.status==='paid'&&String(p.notes||'').includes(t))||null;
 }
-function scadenzaPagata(it){return !!pagamentoDi(it)}
+// Il bollo si riconosce dal tipo, oppure dalle note: se il database non
+// accetta il tipo «bollo» l'app ripiega su «altro», e la riga va
+// riconosciuta lo stesso.
+function eVersamentoBollo(p){
+  return String(p.payment_type||'')==='bollo'||/bollo/i.test(String(p.notes||''));
+}
+function versatoBollo(year){
+  return (data.taxPayments||[])
+    .filter(p=>p.status==='paid'&&Number(p.fiscal_year)===Number(year)&&eVersamentoBollo(p))
+    .reduce((s,p)=>s+Number(p.amount||0),0);
+}
+// Segna «pagate» le scadenze coperte dai versamenti registrati. Si
+// lavora sulla lista completa, in ordine di data: cosi' chi versa un
+// importo che copre due trimestri li vede coperti tutti e due.
+function applicaVersamenti(items,year){
+  let residuo=versatoBollo(year);
+  items.filter(i=>i.kind==='bollo').sort((a,b)=>String(a.date).localeCompare(String(b.date)))
+    .forEach(i=>{
+      if(residuo>=Number(i.amount||0)-0.005){residuo-=Number(i.amount||0);i.coperta=true}
+    });
+  return items;
+}
+function scadenzaPagata(it){return !!it.coperta||!!pagamentoDi(it)}
 const TIPO_PAGAMENTO={bollo:'bollo',inps:'inps',imposta:'imposta_sostitutiva'};
+// Un pulsante che puo' non fare niente, in silenzio, e' un guasto per
+// chi lo preme: non sa se ha sbagliato mira, se l'app e' lenta, o se
+// c'e' un problema vero. Qui ogni strada dice qualcosa, comprese le due
+// che prima uscivano zitte: la scadenza gia' segnata, e l'errore che
+// arriva come eccezione invece che come oggetto.
+// Dalla pagina delle tasse si arriva a registrare il versamento col
+// modulo gia' compilato: anno, tipo bollo, importo che resta. Resta un
+// modulo normale — si corregge prima di salvare, e poi si ritrova in
+// «Pagamenti fiscali» come tutti gli altri.
+function registraBollo(year,importo){
+  navigateTo('taxPayments',{prefill:{fiscal_year:Number(year),payment_type:'bollo',
+    amount:Number(importo)||0,status:'paid',
+    notes:'Imposta di bollo fatture elettroniche '+year}});
+}
 async function segnaPagata(kind,ref,date,amount,label){
-  const it={kind,ref,date};
-  if(scadenzaPagata(it))return;
-  const payload={fiscal_year:Number(ref)||currentYear(),
-    payment_type:TIPO_PAGAMENTO[kind]||'altro',
-    payment_date:todayISO(),amount:Number(amount)||0,status:'paid',
-    notes:label+' · scadenza '+dataEstesa(date)+' '+targhettaScadenza(it)};
-  const {error}=await insertResilient('tax_payments',payload);
-  if(error)return setMsg(error.message,7000);
-  await reload();render();
-  setMsg('Segnata pagata. La trovi in Pagamenti fiscali, dove puoi correggerla.',5000);
+  try{
+    const it={kind,ref,date};
+    if(scadenzaPagata(it))return setMsg('Questa scadenza risulta già segnata pagata.',4000);
+    setMsg('Registro il pagamento…',2500);
+    const payload={fiscal_year:Number(ref)||currentYear(),
+      payment_type:TIPO_PAGAMENTO[kind]||'altro',
+      payment_date:todayISO(),amount:Number(amount)||0,status:'paid',
+      notes:label+' · scadenza '+dataEstesa(date)+' '+targhettaScadenza(it)};
+    let res=await insertResilient('tax_payments',payload);
+    // Il tipo «bollo» e' nuovo: se il database non lo accetta, per un
+    // vincolo sui valori ammessi, si riprova con «altro», che c'e' da
+    // sempre. La targhetta nelle note tiene il legame con la scadenza,
+    // quindi non si perde niente.
+    if(res.error&&/payment_type|check constraint|violates check/i.test(String(res.error.message||''))){
+      res=await insertResilient('tax_payments',{...payload,payment_type:'altro'});
+    }
+    if(res.error)return setMsg('Non si è potuta registrare: '+motivoLeggibile(res.error),9000);
+    await reload();render();
+    if(!scadenzaPagata(it))
+      return setMsg('Il pagamento è stato scritto ma la scadenza non risulta segnata. Guarda in Pagamenti fiscali.',9000);
+    setMsg('Segnata pagata. La trovi in Pagamenti fiscali, dove puoi correggerla.',5000);
+  }catch(e){
+    setMsg('Non si è potuta registrare: '+motivoLeggibile(e),9000);
+  }
 }
 async function annullaPagata(kind,ref,date){
   const p=pagamentoDi({kind,ref,date});
-  if(!p)return;
+  if(!p)return setMsg('Per questa scadenza non risulta nessun pagamento registrato.',4000);
   if(!confirm('Togliere il segno di pagato? Il versamento registrato verrà eliminato.'))return;
   const {error}=await sb.from('tax_payments').delete().eq('id',p.id);
   if(error)return setMsg(error.message,7000);
@@ -1825,6 +1892,15 @@ function taxScheduleCard(year,mode,title,desc){
     <div class="metricLine" style="margin-top:8px">${d.parts.map(p=>esc(p[0])+' '+fmtEUR(p[1])).join(' <span class="dot">·</span> ')}</div>
     ${prossima?`<div class="metricLine" style="margin-top:10px"><span class="tag orange">Prossima</span> ${dataEstesa(prossima.date)} <span class="dot">·</span> ${giorniA(prossima.date,oggi)} <span class="dot">·</span> <b>${fmtEUR(r.items.filter(i=>i.date===prossima.date&&!scadenzaPagata(i)).reduce((s,i)=>s+i.amount,0))}</b></div>`:''}
     ${pagate.length?`<div class="metricLine" style="margin-top:6px"><span class="tag verde">Già pagate</span> ${pagate.length===1?'1 voce':pagate.length+' voci'} <span class="dot">·</span> ${fmtEUR(somPagate)}</div>`:''}
+    ${(()=>{const b=r.items.filter(i=>i.kind==='bollo');if(!b.length)return '';
+      const versato=versatoBollo(year);const dovuto=b.reduce((s,i)=>s+i.amount,0);
+      const resta=Math.max(0,dovuto-versato);
+      return `<div class="calc" style="margin-top:12px">
+        <b>Imposta di bollo ${year}</b>
+        <div class="metricLine" style="margin-top:8px">Dovuta ${fmtEUR(dovuto)} <span class="dot">·</span> versata ${fmtEUR(versato)}${resta>0?` <span class="dot">·</span> <b>resta ${fmtEUR(resta)}</b>`:' <span class="tag verde">tutto versato</span>'}</div>
+        <div class="small" style="margin-top:8px">Il bollo si paga sul portale <b>Fatture e Corrispettivi</b> dell'Agenzia delle Entrate, che lo calcola da sé. Quando l'hai versato, registralo qui: le scadenze si scalano da sole, dalla più vecchia.</div>
+        <button type="button" class="secondary" style="margin-top:12px" onclick="registraBollo(${year},${resta>0?resta.toFixed(2):dovuto.toFixed(2)})">Ho versato il bollo</button>
+        <button type="button" class="secondary" style="margin-top:8px" onclick="go('taxPayments')">Vedi tutti i versamenti</button></div>`;})()}
 
     ${(()=>{const acc=accantonamento(r.items,oggi);return acc?`<div class="salvadanaio"><div class="salvaCifra">${fmtEUR(acc.mese)}<span>al mese</span></div>
       <div class="salvaTesto">per arrivare a ${dataEstesa(acc.ultima)} con ${fmtEUR(acc.tot)} da parte.
@@ -3589,6 +3665,7 @@ Object.assign(window,{
   cambiaFatturaPianificato,
   apriChiudiCliente,
   cambiaVistaTasse,
+  registraBollo,
   segnaPagata,
   annullaPagata,
   apriChiudiTappa,
