@@ -153,6 +153,9 @@ button,input,select,textarea{font-family:var(--font-body)} button{cursor:pointer
 .tag.verde{background:hsla(150,58%,42%,.18);color:hsl(150,62%,74%)}
 :root[data-theme="light"] .tag.verde{color:hsl(150,70%,24%)}
 .vocePagata{opacity:.62}
+.rigaAzione{margin-top:8px}
+.rigaAzione .miniBtn{margin-left:0}
+.row.vocePagata .value{text-decoration:line-through;text-decoration-thickness:1px}
 .vocePagata b{text-decoration:line-through;text-decoration-thickness:1px}
 .miniBtn.vocePag{margin-left:auto;min-height:36px;padding:6px 10px;font-size:12.5px;flex:0 0 auto}
 @media (pointer: coarse){.miniBtn.vocePag{min-height:44px}}
