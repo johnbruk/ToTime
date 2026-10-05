@@ -132,6 +132,52 @@ for(const v of viste){
      bott>0?bott+' punti dove farlo':'IRRAGGIUNGIBILE da questa vista');
 }
 
+console.log('\n=== Un pulsante non deve mai restare zitto ===');
+// «Lo premo e non succede niente» e' il guasto peggiore: chi preme non
+// sa se ha sbagliato mira, se l'app sta pensando, o se c'e' un problema
+// vero. Qui si verifica che ogni strada dica qualcosa.
+const avviso=pg=>pg.evaluate(()=>document.querySelector('#app .toast')?.textContent.replace(/\s+/g,' ').trim()||'');
+
+// 1. premerlo due volte: la seconda deve dirlo, non uscire zitta
+await tocca(pg,'Segna pagata');
+await pg.waitForTimeout(800);
+await pg.evaluate(async()=>{
+  const b=[...document.querySelectorAll('#app .card button')].find(x=>/segna pagata/i.test(x.textContent));
+  if(b)b.click();
+});
+await pg.waitForTimeout(900);
+
+// 2. col database che rifiuta per un vincolo: deve ripiegare da solo
+const pgA=await apri(390);
+await vaiA(pgA,'Tassazione','Tasse future');
+await tocca(pgA,'30/11/2026');
+await pgA.evaluate(()=>{window.__vietaPagamenti=true});
+await tocca(pgA,'Segna pagata');
+await pgA.waitForTimeout(1200);
+const regA=await pgA.evaluate(()=>(window.__stores.tax_payments||[]).length);
+ok(regA===1,'se il database rifiuta il tipo nuovo, ripiega e registra lo stesso',regA+' versamenti');
+ok(await pgA.evaluate(()=>[...document.querySelectorAll('#app .tag')]
+   .some(t=>t.textContent.trim().toLowerCase()==='pagata')),
+   'e la voce risulta pagata comunque');
+await pgA.close();
+
+// 3. col database che rifiuta del tutto: deve DIRLO, in italiano
+const pgB=await apri(390);
+await vaiA(pgB,'Tassazione','Tasse future');
+await tocca(pgB,'30/11/2026');
+await pgB.evaluate(()=>{window.__rifiutaTutto=true});
+await tocca(pgB,'Segna pagata');
+await pgB.waitForTimeout(1400);
+const msg=await avviso(pgB);
+ok(msg.length>0,'quando non si può registrare, qualcosa compare a schermo',msg||'NIENTE: il pulsante resta zitto');
+ok(/non si è potuta registrare/i.test(msg),'e dice che non ce l\'ha fatta',msg);
+ok(!/row-level security|violates|policy for table/i.test(msg),
+   'senza il gergo del database',msg);
+ok((await pgB.evaluate(()=>(window.__stores.tax_payments||[]).length))===0,
+   'e non resta scritto niente a metà',
+   String(await pgB.evaluate(()=>(window.__stores.tax_payments||[]).length)));
+await pgB.close();
+
 console.log('\n=== Percorso: «registro un consuntivo» ===');
 const pg2=await apri(390);
 const errs2=[];pg2.on('pageerror',e=>errs2.push(e.message));

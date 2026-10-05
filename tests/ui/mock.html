@@ -29,6 +29,10 @@ function makeChain(table){
       // violare da sola: senza di loro il mock accetta tutto e i test
       // non vedono mai l'errore che vede la persona
       for(const r of arr){
+        if(table==='tax_payments'&&window.__vietaPagamenti&&r.payment_type==='bollo')
+          return {data:null,error:{message:'new row for relation "tax_payments" violates check constraint "tax_payments_payment_type_check"'}};
+        if(table==='tax_payments'&&window.__rifiutaTutto)
+          return {data:null,error:{message:'new row violates row-level security policy for table "tax_payments"'}};
         if(table==='wbs_items'&&window.__vietaWbs)
           return {data:null,error:{message:'new row violates row-level security policy for table "wbs_items"'}};
         if(table==='wbs_items'&&rows().some(x=>x.engagement_id===r.engagement_id&&String(x.activity_code)===String(r.activity_code)))

@@ -1385,7 +1385,7 @@ function selBar(scope,count){
 }
 async function deleteSelected(){
   const n=state.sel.length;if(!n)return;
-  if(!confirm(n===1?'Eliminare la voce selezionata?\n\nL\'operazione non \u00e8 reversibile.':'Eliminare le '+n+' voci selezionate?\n\nL\'operazione non \u00e8 reversibile.'))return;
+  if(!confirm(n===1?'Eliminare la voce selezionata?\n\nL\'operazione non è reversibile.':'Eliminare le '+n+' voci selezionate?\n\nL\'operazione non è reversibile.'))return;
   const byKind={};
   state.sel.forEach(k=>{const i=k.indexOf(':');const kind=k.slice(0,i),id=k.slice(i+1);(byKind[kind]=byKind[kind]||[]).push(id)});
   let done=0;
@@ -1598,21 +1598,40 @@ function pagamentoDi(it){
 }
 function scadenzaPagata(it){return !!pagamentoDi(it)}
 const TIPO_PAGAMENTO={bollo:'bollo',inps:'inps',imposta:'imposta_sostitutiva'};
+// Un pulsante che puo' non fare niente, in silenzio, e' un guasto per
+// chi lo preme: non sa se ha sbagliato mira, se l'app e' lenta, o se
+// c'e' un problema vero. Qui ogni strada dice qualcosa, comprese le due
+// che prima uscivano zitte: la scadenza gia' segnata, e l'errore che
+// arriva come eccezione invece che come oggetto.
 async function segnaPagata(kind,ref,date,amount,label){
-  const it={kind,ref,date};
-  if(scadenzaPagata(it))return;
-  const payload={fiscal_year:Number(ref)||currentYear(),
-    payment_type:TIPO_PAGAMENTO[kind]||'altro',
-    payment_date:todayISO(),amount:Number(amount)||0,status:'paid',
-    notes:label+' · scadenza '+dataEstesa(date)+' '+targhettaScadenza(it)};
-  const {error}=await insertResilient('tax_payments',payload);
-  if(error)return setMsg(error.message,7000);
-  await reload();render();
-  setMsg('Segnata pagata. La trovi in Pagamenti fiscali, dove puoi correggerla.',5000);
+  try{
+    const it={kind,ref,date};
+    if(scadenzaPagata(it))return setMsg('Questa scadenza risulta già segnata pagata.',4000);
+    setMsg('Registro il pagamento…',2500);
+    const payload={fiscal_year:Number(ref)||currentYear(),
+      payment_type:TIPO_PAGAMENTO[kind]||'altro',
+      payment_date:todayISO(),amount:Number(amount)||0,status:'paid',
+      notes:label+' · scadenza '+dataEstesa(date)+' '+targhettaScadenza(it)};
+    let res=await insertResilient('tax_payments',payload);
+    // Il tipo «bollo» e' nuovo: se il database non lo accetta, per un
+    // vincolo sui valori ammessi, si riprova con «altro», che c'e' da
+    // sempre. La targhetta nelle note tiene il legame con la scadenza,
+    // quindi non si perde niente.
+    if(res.error&&/payment_type|check constraint|violates check/i.test(String(res.error.message||''))){
+      res=await insertResilient('tax_payments',{...payload,payment_type:'altro'});
+    }
+    if(res.error)return setMsg('Non si è potuta registrare: '+motivoLeggibile(res.error),9000);
+    await reload();render();
+    if(!scadenzaPagata(it))
+      return setMsg('Il pagamento è stato scritto ma la scadenza non risulta segnata. Guarda in Pagamenti fiscali.',9000);
+    setMsg('Segnata pagata. La trovi in Pagamenti fiscali, dove puoi correggerla.',5000);
+  }catch(e){
+    setMsg('Non si è potuta registrare: '+motivoLeggibile(e),9000);
+  }
 }
 async function annullaPagata(kind,ref,date){
   const p=pagamentoDi({kind,ref,date});
-  if(!p)return;
+  if(!p)return setMsg('Per questa scadenza non risulta nessun pagamento registrato.',4000);
   if(!confirm('Togliere il segno di pagato? Il versamento registrato verrà eliminato.'))return;
   const {error}=await sb.from('tax_payments').delete().eq('id',p.id);
   if(error)return setMsg(error.message,7000);
