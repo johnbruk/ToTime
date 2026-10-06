@@ -219,6 +219,48 @@ console.log('\n=== E SE IL DATABASE NON DICE QUALE COLONNA ===');
   await pg.close();
 }
 
+console.log('\n=== SE IL DATABASE SCARTA UN DATO, L\u2019APP LO DICE ===');
+{
+  // Il ripiego sulle colonne mancanti serviva a non bloccare i
+  // salvataggi. Ma scartava i campi IN SILENZIO: scrivevi come avevi
+  // pagato, la spesa si salvava, e quel dato non c'era. Chi usa l'app
+  // non aveva modo di accorgersene.
+  const pg=await apri();
+  await pg.evaluate(()=>{window.__colonneMancanti=['payment_method','receipt_kept'];});
+  await alModulo(pg);
+  await scrivi(pg,'expense_category_id','cena');
+  await scrivi(pg,'amount','42');
+  await scrivi(pg,'payment_method','carta');
+  await pg.evaluate(()=>document.querySelector('#app form.form').requestSubmit());
+  await pg.waitForTimeout(1100);
+  const msg=await pg.evaluate(()=>document.querySelector('.toast')?.textContent.trim()||'');
+  ok(msg.length>0,'dopo il salvataggio compare un messaggio',msg||'NIENTE: scarta in silenzio');
+  ok(/non \u00e8 stato scritto|non ha ancora dove/i.test(msg),
+     'che dice che un dato NON \u00e8 stato scritto',msg);
+  ok(/pagat/i.test(msg),'nominando quale',msg);
+  ok(/tracciabilita\.sql/i.test(msg),'e quale migrazione lo sistema',msg);
+  ok(!/column|schema cache|PGRST/i.test(msg),'senza il gergo del database',msg);
+  // La spesa c'\u00e8 comunque: l'avviso informa, non annulla
+  const e=await pg.evaluate(()=>(window.__stores.travel_expenses||[]).slice(-1)[0]||null);
+  ok(e&&Math.abs(Number(e.amount)-42)<0.005,'e la spesa \u00e8 salvata lo stesso',String(e&&e.amount));
+  await pg.close();
+}
+
+console.log('\n=== SE IL DATABASE HA TUTTO, NESSUN AVVISO ===');
+{
+  const pg=await apri();
+  await alModulo(pg);
+  await scrivi(pg,'expense_category_id','cena');
+  await scrivi(pg,'amount','42');
+  await scrivi(pg,'payment_method','carta');
+  await pg.evaluate(()=>document.querySelector('#app form.form').requestSubmit());
+  await pg.waitForTimeout(1000);
+  const msg=await pg.evaluate(()=>document.querySelector('.toast')?.textContent.trim()||'');
+  ok(!/non \u00e8 stato scritto|non ha ancora dove/i.test(msg),
+     'salvando su un database completo non si avvisa di niente',msg||'nessun messaggio');
+  await pg.close();
+}
+
 await b.close(); srv.close();
 console.log(`\n=== tracciabilità: OK ${pass} · KO ${fail} ===`);
 process.exit(fail?1:0);

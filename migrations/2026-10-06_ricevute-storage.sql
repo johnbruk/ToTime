@@ -76,7 +76,28 @@ select 'bucket ricevute',
                              else 'esiste, privato' end
                    from storage.buckets where id='ricevute'),'MANCA')
 union all
-select 'policy sul bucket',
+-- Contare le policy per NOME non prova niente: una che si chiama
+-- ricevute_select_own ma ha un predicato vecchio o permissivo conta lo
+-- stesso, e il DO block la salta proprio perche' il nome c'e' gia'.
+-- Qui si guarda cosa FANNO: quattro, e tutte e quattro devono filtrare
+-- sulla prima cartella del percorso contro auth.uid().
+select 'policy «ricevute_*» corrette',
        (select count(*)::text from pg_policies
          where schemaname='storage' and tablename='objects'
-           and policyname like 'ricevute_%') || ' su 4';
+           and policyname like 'ricevute_%'
+           and coalesce(qual,'')||coalesce(with_check,'') like '%foldername%'
+           and coalesce(qual,'')||coalesce(with_check,'') like '%uid%'
+           and coalesce(qual,'')||coalesce(with_check,'') like '%ricevute%')
+       || ' su 4'
+union all
+-- E soprattutto: c'e' qualche ALTRA policy che puo' leggere in questo
+-- bucket? Una permissiva su storage.objects che non filtri per utente
+-- aprirebbe le ricevute a chiunque, e un bucket privato non lo impedisce:
+-- privato significa «niente URL pubblici», non «niente RLS altrui».
+select 'altre policy che toccano le ricevute',
+       coalesce((select string_agg(policyname,', ')
+                   from pg_policies
+                  where schemaname='storage' and tablename='objects'
+                    and policyname not like 'ricevute_%'
+                    and coalesce(qual,'')||coalesce(with_check,'') like '%ricevute%'),
+                'nessuna — bene');

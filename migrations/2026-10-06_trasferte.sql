@@ -96,5 +96,11 @@ select 'trip_id',
                            and column_name='trip_id')
             then 'esiste' else 'MANCA' end
 union all
-select 'spese toccate', count(*)::text
-  from public.travel_expenses where trip_id is not null;
+-- Quante spese la MIGRAZIONE ha modificato: sempre zero, perche' non
+-- scrive mai su trip_id. Contare le spese che oggi hanno una trasferta
+-- darebbe un numero positivo dopo che le hai raggruppate a mano, e un
+-- rilancio legittimo sembrerebbe un guasto.
+select 'spese modificate dalla migrazione', '0 — non scrive mai su trip_id'
+union all
+select 'spese gia'' in una trasferta (solo per informazione)',
+       (select count(*)::text from public.travel_expenses where trip_id is not null);

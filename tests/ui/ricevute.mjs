@@ -52,7 +52,11 @@ const allaSpesa=async pg=>{
   await pg.waitForTimeout(500);
 };
 // Una foto finta, ma un file vero: il percorso e il tipo contano.
-const FOTO=path.join('/tmp/claude-0','ricevuta-finta.png');
+// La cartella e' quella temporanea del sistema, creata se manca: un
+// percorso fisso faceva morire tutta la batteria su un'altra macchina.
+const os=await import('node:os');
+const DIR=fs.mkdtempSync(path.join(os.tmpdir(),'totime-ricevute-'));
+const FOTO=path.join(DIR,'ricevuta-finta.png');
 fs.writeFileSync(FOTO,Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c6300010000050001','hex'));
 
 console.log('\n=== IL MODULO CHIEDE LA RICEVUTA ===');
@@ -160,6 +164,118 @@ console.log('\n=== SENZA STORAGE, NIENTE DANNI ===');
   await pg.close();
 }
 
+console.log('\n=== CARICARE NON DEVE PORTARE VIA QUELLO CHE HAI SCRITTO ===');
+{
+  // Il guasto: caricare la ricevuta faceva reload()+render(), che
+  // ridisegna il modulo dal database. Se avevi corretto l'importo e non
+  // avevi ancora salvato, quelle modifiche sparivano \u2014 e fetchAll()
+  // azzera anche state.dirty, quindi nemmeno l'avviso di uscita.
+  const pg=await apri();
+  await allaSpesa(pg);
+  await pg.evaluate(()=>{
+    const a=document.querySelector('#app [name=amount]');
+    a.value='99'; a.dispatchEvent(new Event('input',{bubbles:true}));
+    const d=document.querySelector('#app [name=description]');
+    d.value='Cena coi fornitori'; d.dispatchEvent(new Event('input',{bubbles:true}));
+  });
+  await pg.waitForTimeout(250);
+  await pg.setInputFiles('#app input[type=file][name=receipt_file]',FOTO);
+  await pg.waitForTimeout(1200);
+  const dopo=await pg.evaluate(()=>({
+    importo:document.querySelector('#app [name=amount]')?.value,
+    desc:document.querySelector('#app [name=description]')?.value
+  }));
+  ok(dopo.importo==='99','l\u2019importo corretto e non ancora salvato \u00e8 ancora l\u00ec',String(dopo.importo));
+  ok(dopo.desc==='Cena coi fornitori','e cos\u00ec la descrizione',String(dopo.desc));
+  // ...e la ricevuta risulta comunque allegata
+  ok((await testo(pg)).toLowerCase().includes('ricevuta allegata'),
+     'e la ricevuta risulta allegata senza ridisegnare il modulo');
+  ok((await pg.evaluate(()=>document.querySelector('#app [name=receipt_kept]')?.checked))===true,
+     'con la spunta messa da s\u00e9');
+  await pg.close();
+}
+
+console.log('\n=== TOGLIENDO IL FILE CADE ANCHE LA SPUNTA ===');
+{
+  // Caricare metteva receipt_kept a true; togliere azzerava solo il
+  // percorso. La spesa restava a dire di avere una ricevuta che non
+  // c'era piu', e l'elenco smetteva di segnalarla.
+  const pg=await apri();
+  await allaSpesa(pg);
+  await pg.setInputFiles('#app input[type=file][name=receipt_file]',FOTO);
+  await pg.waitForTimeout(1200);
+  await pg.evaluate(()=>{
+    const b=[...document.querySelectorAll('#app button')].find(x=>/togli la ricevuta/i.test(x.textContent));
+    if(b)b.click();
+  });
+  await pg.waitForTimeout(1100);
+  const e=await pg.evaluate(()=>window.__stores.travel_expenses.find(x=>x.id==='sp1'));
+  ok(!e.receipt_path,'il percorso \u00e8 sparito',String(e.receipt_path));
+  ok(e.receipt_kept===false,'E ANCHE LA SPUNTA: senza il file non si ha pi\u00f9 la ricevuta',String(e.receipt_kept));
+  ok((await testo(pg)).toLowerCase().includes('carta'),'la spesa \u00e8 ancora l\u00ec, col suo metodo di pagamento');
+  // e torna a essere segnalata nell'elenco
+  await pg.evaluate(()=>window.go('expenses'));
+  await pg.waitForTimeout(400);
+  await pg.evaluate(()=>{for(let i=0;i<48;i++){
+    if((document.querySelector('.month strong')?.textContent||'').startsWith('Ottobre 2026'))break;
+    window.changeMonth(-1)}});
+  await pg.waitForTimeout(450);
+  const segnalate=await pg.evaluate(()=>document.querySelectorAll('#app .tagManca').length);
+  ok(segnalate===1,'e l\u2019elenco torna a segnalarla come «senza ricevuta»',String(segnalate));
+  await pg.close();
+}
+
+console.log('\n=== ELIMINARE LA SPESA PORTA VIA ANCHE IL FILE ===');
+{
+  // Un documento fiscale irraggiungibile nel bucket non \u00e8
+  // «cancellato»: resta l\u00ec per sempre, e chi elimina la spesa si
+  // aspetta che se ne vada tutto.
+  const pg=await apri();
+  await allaSpesa(pg);
+  await pg.setInputFiles('#app input[type=file][name=receipt_file]',FOTO);
+  await pg.waitForTimeout(1200);
+  ok((await pg.evaluate(()=>(window.__storage||[]).length))===1,'il file c\u2019\u00e8');
+  await pg.evaluate(()=>{
+    const b=[...document.querySelectorAll('#app button')].find(x=>/^elimina$/i.test(x.textContent.trim()));
+    if(b)b.click();
+  });
+  await pg.waitForTimeout(1200);
+  ok((await pg.evaluate(()=>(window.__stores.travel_expenses||[]).length))===0,
+     'la spesa \u00e8 eliminata',String(await pg.evaluate(()=>(window.__stores.travel_expenses||[]).length)));
+  ok((await pg.evaluate(()=>(window.__storage||[]).length))===0,
+     'E IL FILE CON LEI: niente documenti orfani nel deposito',
+     String(await pg.evaluate(()=>(window.__storage||[]).length)));
+  await pg.close();
+}
+
+console.log('\n=== IL PULSANTE APRE LA FINESTRA SUBITO ===');
+{
+  // Aspettare il collegamento firmato e aprire DOPO fa scambiare la
+  // finestra per un popup non richiesto: su telefono lento il pulsante
+  // sembra non fare niente. Si apre dentro il gesto, e si naviga poi.
+  const pg=await apri();
+  await allaSpesa(pg);
+  await pg.setInputFiles('#app input[type=file][name=receipt_file]',FOTO);
+  await pg.waitForTimeout(1200);
+  const ordine=await pg.evaluate(()=>{
+    window.__ordine=[];
+    const vero=window.open;
+    window.open=(u)=>{window.__ordine.push('open:'+(u||'vuota'));return {closed:false,location:{set href(v){window.__ordine.push('vai')}},close(){}}};
+    const sb=window.__sbStorageSpy;
+    return true;
+  });
+  await pg.evaluate(()=>{
+    const b=[...document.querySelectorAll('#app button')].find(x=>/guarda la ricevuta/i.test(x.textContent));
+    if(b)b.click();
+  });
+  await pg.waitForTimeout(900);
+  const ord=await pg.evaluate(()=>window.__ordine||[]);
+  ok(ord[0]==='open:vuota','la finestra si apre vuota per prima, dentro il gesto',ord.join(' \u2192 '));
+  ok(ord.includes('vai'),'e ci si naviga dopo, quando il collegamento arriva',ord.join(' \u2192 '));
+  await pg.close();
+}
+
 await b.close(); srv.close();
+try{fs.rmSync(DIR,{recursive:true,force:true})}catch(e){}
 console.log(`\n=== ricevute: OK ${pass} · KO ${fail} ===`);
 process.exit(fail?1:0);

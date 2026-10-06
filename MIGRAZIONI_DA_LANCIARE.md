@@ -5,8 +5,20 @@ rilanciare e **nessuna tocca un importo esistente**: ognuna finisce con
 un blocco di verifica che stampa cosa è stato fatto.
 
 Finché una migrazione non è stata lanciata, la parte dell'app che la
-usa **ricade sul comportamento di prima e lo dice**. Non si rompe
-niente, e l'app non resta zitta.
+usa **ricade sul comportamento di prima**. Non si rompe niente.
+
+Su quanto l'app lo dica, va distinto, perché la prima stesura di questo
+documento prometteva più di quanto il codice facesse:
+
+- **Quando salvi e il database non ha dove mettere un dato** (il metodo
+  di pagamento, la trasferta, il percorso chilometrico), la riga si
+  salva lo stesso e **l'app ti dice cosa non è stato scritto e quale
+  migrazione lo sistema**. Prima lo scartava in silenzio: scrivevi come
+  avevi pagato, la spesa si salvava, e quel dato non c'era.
+- **Quando manca una tabella intera** (`trips`, `vehicles`), l'app non
+  mostra avvisi: semplicemente non offre quella parte — la pagina Spese
+  resta sull'elenco per giorno di sempre, e la pagina Veicoli dice che
+  serve la migrazione. È una mancanza che si vede, non un dato perso.
 
 ---
 
@@ -21,7 +33,11 @@ Senza di lei: la pagina Spese mostra solo l'elenco per giorno di sempre,
 e non offre la vista per trasferta.
 
 La verifica deve dire: `trips esiste` · `trip_id esiste` ·
-`spese toccate 0`.
+`spese modificate dalla migrazione 0`.
+
+L'ultima riga dice anche quante spese stanno già in una trasferta: è
+solo informativa, e dopo che le avrai raggruppate sarà un numero
+positivo. Non è un guasto.
 
 ---
 
@@ -33,6 +49,11 @@ spese, e `is_mileage` alle voci di spesa.
 Riconosce da sé come chilometriche le voci che hanno «km» come unità o
 «chilometric» nel nome — quindi la tua «Rimborso KM» dovrebbe risultare
 già marcata. Si corregge dalla voce di spesa, se sbaglia.
+
+Il riconoscimento automatico gira **solo la prima volta**, cioè solo se
+la colonna non c'era: rilanciando la migrazione dopo una tua correzione,
+quella correzione resta. La migrazione stampa un avviso che dice quale
+dei due casi è stato.
 
 Senza di lei: la chilometrica si registra come sempre, km e tariffa a
 mano, e la pagina Veicoli lo dice invece di mostrarsi vuota.
@@ -85,6 +106,18 @@ Due cose da fare a mano, una volta sola:
 
 E una da decidere: in Configurazione fiscale, il blocco «Rimborsi spese
 e reddito» è su «Li conto come compensi», che è il comportamento di
-sempre. L'altra opzione applica la regola 2025 — ma sul forfettario la
-norma non è pacifica, quindi quella scelta va fatta con il
-commercialista, non con me.
+sempre. L'altra opzione applica la regola 2025.
+
+Due avvertenze su quella seconda opzione, perché è una **stima**, non
+una dichiarazione:
+
+- Sul **regime forfettario** la norma non è pacifica: non richiama
+  espressamente la legge 190/2014 e manca un chiarimento. La scelta va
+  fatta con il commercialista, non con me.
+- Il calcolo toglie dalla base solo i rimborsi **analitici, con
+  ricevuta, e di un mese già incassato**; i chilometrici restano
+  compenso perché forfettari. L'obbligo sul mezzo di pagamento cade per
+  le spese sostenute **all'estero**, e l'app lo applica usando il paese
+  della trasferta: perché valga su una spesa fuori Italia, quella spesa
+  deve stare in una trasferta con il paese compilato (es. `CH` per
+  Ginevra).
