@@ -413,8 +413,44 @@ ok(due.length===2,'e spezzando nascono due righe',JSON.stringify(due));
 ok(due.some(r=>r.a===35&&r.t==='invoice')&&due.some(r=>r.a===25&&r.t==='own'),
    '35 in fattura e 25 a mio carico',JSON.stringify(due));
 
-ok(errs.length===0&&errs2.length===0&&errs3.length===0&&errs4.length===0&&errs5.length===0&&errs6.length===0,'nessun errore JS lungo i percorsi',
-   errs.concat(errs2,errs3,errs4,errs5,errs6).slice(0,2).join(' | ')||'nessuno');
-await pg.close();await pg2.close();await pg3.close();await pg4.close();await pg5.close();await pg6.close();await b.close();srv.close();
+console.log('\n=== Percorso: «pago in contanti e l\'app mi avverte» ===');
+// Dalla Dashboard: una cena da riaddebitare pagata in contanti deve
+// farsi notare, perché è quella che fa perdere il beneficio fiscale.
+const pg7=await apri(390);
+const errs7=[];pg7.on('pageerror',e=>errs7.push(e.message));
+await pg7.evaluate(()=>{const S=window.__stores;
+  S.clients[1].expense_policy=[];
+  S.expense_categories=[{id:'cena',name:'Cena',active:true,reimbursable:true,calculation_type:'manual_amount'}];
+  S.travel_expenses=[];S.trips=[];S.vehicles=[];
+  return window.reload();
+});
+await pg7.waitForTimeout(700);
+await tocca(pg7,'☰',{dove:'body'});
+await tocca(pg7,'Spese',{dove:'body'});
+await tocca(pg7,'Nuova spesa',{dove:'body'});
+await pg7.waitForTimeout(300);
+ok(await siLegge(pg7,'Come l’hai pagata'),'il modulo chiede come si è pagato');
+await pg7.evaluate(()=>{
+  const sel=document.querySelector('#app [name=expense_category_id]');
+  sel.value='cena'; sel.dispatchEvent(new Event('change',{bubbles:true}));
+  const a=document.querySelector('#app [name=amount]');
+  a.value='45'; a.dispatchEvent(new Event('input',{bubbles:true}));
+  const m=document.querySelector('#app [name=payment_method]');
+  m.value='contanti'; m.dispatchEvent(new Event('change',{bubbles:true}));
+});
+await pg7.waitForTimeout(400);
+ok(await siLegge(pg7,'non tracciabile'),'e pagando in contanti lo dice: non tracciabile');
+ok(await siLegge(pg7,'concorrere al reddito'),'spiegando cosa comporta');
+ok(await siLegge(pg7,'estero'),'e ricorda l\'eccezione delle spese estere');
+await pg7.evaluate(()=>document.querySelector('#app form.form').requestSubmit());
+await pg7.waitForTimeout(900);
+await tocca(pg7,'☰',{dove:'body'});
+await tocca(pg7,'Spese',{dove:'body'});
+await pg7.waitForTimeout(400);
+ok(await siLegge(pg7,'non tracciabile'),'e nell\'elenco la spesa resta segnalata, non si perde');
+
+ok(errs.length===0&&errs2.length===0&&errs3.length===0&&errs4.length===0&&errs5.length===0&&errs6.length===0&&errs7.length===0,'nessun errore JS lungo i percorsi',
+   errs.concat(errs2,errs3,errs4,errs5,errs6,errs7).slice(0,2).join(' | ')||'nessuno');
+await pg.close();await pg2.close();await pg3.close();await pg4.close();await pg5.close();await pg6.close();await pg7.close();await b.close();srv.close();
 console.log(`\nRISULTATO: ${pass} OK / ${fail} KO`);
 if(fail)process.exitCode=1;

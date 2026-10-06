@@ -881,3 +881,10 @@ table.griglia.numeriRiga td.riga .n{font-variant-numeric:tabular-nums}
 .avvisoPolicy .desc{margin-top:5px}
 .avvisoPolicy .manoLbl{margin-top:10px;color:var(--soft)}
 .policyVoce{margin-top:12px}
+
+/* v1.29.4 — la nota sulla tracciabilità: dice come sta la spesa senza
+   bloccare niente. Il distintivo a sinistra, il perché a destra. */
+.notaTraccia{display:flex;gap:11px;align-items:flex-start;border:1px solid var(--line);background:rgba(124,137,166,.07);padding:12px;margin-top:4px}
+.notaTraccia .tag{margin-top:0;flex:0 0 auto}
+.notaTraccia .desc{margin-top:1px}
+.tag.tagManca{margin-left:5px}

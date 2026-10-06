@@ -37,6 +37,12 @@ function makeChain(table){
       for(const c of (window.__colonneMancanti||[]))
         if(r&&Object.prototype.hasOwnProperty.call(r,c))
           return {data:null,error:{code:'PGRST204',message:"Could not find the '"+c+"' column of '"+table+"' in the schema cache"}};
+      // Lo stesso guasto, ma con un messaggio che NON nomina la colonna.
+      // Succede, e in quel caso l'app non puo' dedurre cosa togliere: se
+      // la colonna non e' nell'elenco dropKeys, la scrittura muore.
+      for(const c of (window.__colonneMancantiVaghe||[]))
+        if(r&&Object.prototype.hasOwnProperty.call(r,c))
+          return {data:null,error:{code:'PGRST204',message:'Could not find the column in the schema cache'}};
       return null;
     };
     if(op==='insert'){const arr=Array.isArray(pl)?pl:[pl];
@@ -78,6 +84,6 @@ function makeChain(table){
   const proxy=new Proxy({},{get(t,k){if(k==='then'){const p=Promise.resolve(resolve());return p.then.bind(p);}return h[k]||(()=>proxy);}});
   return proxy;
 }
-window.__stores=STORES;window.__ins=[];window.__tabelleMancanti=[];window.__colonneMancanti=[];
+window.__stores=STORES;window.__ins=[];window.__tabelleMancanti=[];window.__colonneMancanti=[];window.__colonneMancantiVaghe=[];
 window.supabase={createClient(){return {from(t){return makeChain(t);},auth:{async getSession(){return {data:{session:{user:{id:'u1'}}}};},onAuthStateChange(){return {data:{subscription:{unsubscribe(){}}}};}}};}};
 </script><script type="module" src="app.js"></script></body></html>
