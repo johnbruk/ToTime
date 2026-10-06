@@ -1405,21 +1405,34 @@ function clienteSpesaCambiato(form){
 // conto non la puo' ricostruire, quindi l'importo resta scrivibile a
 // mano. Bloccarlo in sola lettura significherebbe non poterlo piu'
 // correggere, su una riga che il calcolo non sa rifare.
+// Un importo che il conto non sa rifare. Non basta che manchino i km:
+// una spesa importata da CSV puo' avere importo e quantita' ma NON la
+// tariffa, e allora il conto farebbe quantita' x 0 = niente,
+// cancellando la cifra storica. Mancando uno qualsiasi dei due
+// ingredienti, l'importo resta a mano.
 function importoNonRicostruibile(v){
-  return !!(v&&Number(v.amount||0)>0&&!(Number(v.quantity||0)>0));
+  if(!(Number(v&&v.amount||0)>0))return false;
+  return !(Number(v.quantity||0)>0)||!(Number(v.unit_rate||0)>0);
 }
 function campiCosa(v={}){
   const cat=expenseCategoryById(v.expense_category_id);
   const km=eVoceChilometrica(cat);
-  const aQ=aQuantitaTariffa(cat)&&!importoNonRicostruibile(v);
+  // DUE cose distinte, che prima erano una sola:
+  //  - aQ   : la voce lavora a quantita' x tariffa → quali campi si vedono
+  //  - aMano: l'importo lo scrive la persona → sola lettura e calcolo
+  // Tenerle insieme nascondeva i campi del conto proprio sulle righe
+  // vecchie, dove servono per completarle: senza tariffa a schermo, una
+  // riga importata non si poteva piu' rendere ricalcolabile.
+  const aQ=aQuantitaTariffa(cat);
+  const aMano=!aQ||importoNonRicostruibile(v);
   const unita=(cat&&cat.unit_label)||'unit\u00e0';
   const tratta=km?kmTrattaDi(v):0;
   return bloccoCampi('Cosa','La voce di spesa e quanto',
     `<div class="field"><label>Voce di spesa</label><select name="expense_category_id" onchange="voceSpesaCambiata(this.form)">${expenseOptions(v.expense_category_id||'')}</select></div>`
     +campiPercorso(v,km)
-    +`<div class="field" id="qtaField"${aQ&&!km?'':' hidden'}><label>Quantit\u00e0 <span id="qtaUnita">(${esc(unita)})</span></label><input name="quantity" type="number" step="0.01" value="${Number(v.quantity||(aQ?1:0))}" oninput="aggiornaCalcoloEAvviso(this.form)"></div>`
+    +`<div class="field" id="qtaField"${aQ&&!km?'':' hidden'}><label>Quantit\u00e0 <span id="qtaUnita">(${esc(unita)})</span></label><input name="quantity" type="number" step="0.01" value="${Number(v.quantity||(aQ&&!aMano?1:0))||''}" oninput="aggiornaCalcoloEAvviso(this.form)"></div>`
     +`<div class="field" id="rateField"${aQ?'':' hidden'}><label id="rateLbl">${km?'Tariffa \u20ac/km':'Tariffa unitaria'}</label><input name="unit_rate" type="number" step="0.0001" value="${Number(v.unit_rate||0)}" oninput="aggiornaCalcoloEAvviso(this.form)">${km?'<div class="small">La proponi tu: le tabelle ACI stanno su costikm.aci.it e cambiano a gennaio. Il veicolo la suggerisce, qui si corregge.</div>':''}</div>`
-    +`<div class="field"><label>Importo totale</label><input name="amount" type="number" step="0.01" value="${Number(v.amount||0)}"${aQ?' readonly':''} oninput="aggiornaAvvisoPolicy(this.form)"><label class="manoLbl"><input type="checkbox" name="amount_a_mano" onchange="totaleAMano(this.form)"${aQ?'':' checked'}> Lo scrivo a mano</label><div class="small" id="calcNota">${aQ?NOTA_CALCOLO:NOTA_MANO}</div></div>`
+    +`<div class="field"><label>Importo totale</label><input name="amount" type="number" step="0.01" value="${Number(v.amount||0)}"${aMano?'':' readonly'} oninput="aggiornaAvvisoPolicy(this.form)"><label class="manoLbl"><input type="checkbox" name="amount_a_mano" onchange="totaleAMano(this.form)"${aMano?' checked':''}> Lo scrivo a mano</label><div class="small" id="calcNota">${aMano?NOTA_MANO:NOTA_CALCOLO}</div></div>`
     +`<div class="field"><label>Descrizione</label><textarea name="description" placeholder="Es. Volo Milano\u2013Catania andata">${esc(v.description||'')}</textarea></div>`);
 }
 // I km a tratta: quello che una persona ha in testa. Il totale \u2014 che
@@ -1494,7 +1507,7 @@ function voceSpesaCambiata(form){
   const n=document.getElementById('calcNota');
   if(n)n.textContent=aQ?NOTA_CALCOLO:NOTA_MANO;
   if(km&&form.vehicle_id&&form.vehicle_id.value)veicoloCambiato(form);
-  else updateExpenseCalc(form,true);
+  else updateExpenseCalc(form,true,true);
   aggiornaAvvisoPolicy(form);
   aggiornaTracciabilita(form);
 }
@@ -1531,7 +1544,7 @@ function expenseEdit(){
 // e' stato corretto a mano. Prima lo riscriveva sempre, quindi una
 // correzione a mano veniva cancellata al tocco successivo su quantita'
 // o tariffa — senza dire niente.
-function updateExpenseCalc(form,proposeType){
+function updateExpenseCalc(form,proposeType,proposeRate){
   const cat=expenseCategoryById(form.expense_category_id?.value);
   if(!cat)return;
   if(proposeType&&form.reimbursement_type){
@@ -1542,7 +1555,7 @@ function updateExpenseCalc(form,proposeType){
   // riproporla sempre significa che svuotarla e' impossibile — la si
   // cancella e ricompare, e non si riesce a dire «qui la tariffa non
   // c'e'».
-  if(proposeType&&aQuantitaTariffa(cat)&&form.unit_rate){
+  if(proposeRate&&aQuantitaTariffa(cat)&&form.unit_rate){
     if((!form.unit_rate.value||Number(form.unit_rate.value)===0)&&cat.default_unit_rate)
       form.unit_rate.value=Number(cat.default_unit_rate);
   }
@@ -1586,8 +1599,8 @@ function updateExpenseCalc(form,proposeType){
 // updateExpenseCalc esce presto in molti rami (voce non scelta, totale
 // a mano, voce non a quantita'): l'avviso va aggiornato comunque, da
 // fuori, altrimenti resta appeso a un importo vecchio.
-function aggiornaCalcoloEAvviso(form,proposeType){
-  updateExpenseCalc(form,proposeType);
+function aggiornaCalcoloEAvviso(form,proposeType,proposeRate){
+  updateExpenseCalc(form,proposeType,proposeRate);
   aggiornaAvvisoPolicy(form);
   aggiornaTracciabilita(form);
 }
