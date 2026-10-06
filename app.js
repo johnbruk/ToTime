@@ -5270,6 +5270,35 @@ Object.assign(window,{
   exportData,
   render
 });
+// Un guasto non deve mai essere muto.
+//
+// render() ha una rete di sicurezza che mostra l'errore quando una
+// pagina non si disegna. Ma un gestore che va in errore PRIMA di
+// arrivare a render() — toccare una voce di menu, premere un pulsante
+// — non lascia niente a schermo: nessun messaggio, nessun cambio di
+// pagina, e chi sta usando l'app vede solo che non risponde. E' la
+// firma del guasto segnalato dal telefono: il menu aperto, i tocchi
+// che non fanno nulla, e nessuno che dica cosa sta succedendo.
+//
+// Il messaggio non ridisegna la pagina: un modulo mezzo compilato non
+// si perde proprio mentre si cerca di capire cosa non va.
+let ultimoGuaio='';
+function segnalaGuaio(dettaglio){
+  const d=String(dettaglio||'').slice(0,200);
+  if(!d||d===ultimoGuaio)return;   // lo stesso errore a ripetizione si dice una volta
+  ultimoGuaio=d;
+  setTimeout(()=>{if(ultimoGuaio===d)ultimoGuaio=''},8000);
+  try{
+    const app=document.getElementById('app');
+    if(!app||!app.querySelector('.app'))return;   // senza shell non si tocca niente
+    setMsgLeggero('Qualcosa non ha funzionato: '+d,9000);
+  }catch(e){}
+}
+window.addEventListener('error',e=>{segnalaGuaio(e&&(e.message||e.error&&e.error.message))});
+window.addEventListener('unhandledrejection',e=>{
+  const r=e&&e.reason;
+  segnalaGuaio(r&&(r.message||r)||'operazione non riuscita');
+});
 document.addEventListener('input',e=>{if(e.target.closest?.('.form'))state.dirty=true});
 document.addEventListener('change',e=>{if(e.target.closest?.('.form')&&e.target.type!=='file')state.dirty=true});
 if('serviceWorker' in navigator){navigator.serviceWorker.register('./sw.js').catch(()=>{})}

@@ -33,6 +33,7 @@ let pass=0,fail=0;
 const ok=(c,l,x='')=>{c?pass++:fail++;console.log((c?'  OK  ':'  KO  ')+l+(x?'  → '+x:''))};
 
 const menuAperto=pg=>pg.evaluate(()=>!!document.querySelector('.topMenu'));
+const testoApp=pg=>pg.evaluate(()=>document.getElementById('app').innerText.replace(/\s+/g,' '));
 const valore=(pg,n)=>pg.evaluate(x=>{const el=document.querySelector(`#app [name="${x}"]`);return el?el.value:null},n);
 // si tocca il pulsante vero, come un dito: non si chiama la funzione
 const toccaMenu=async pg=>{
@@ -254,6 +255,35 @@ console.log('\n=== NIENTE SI BLOCCA NEMMENO SE IL BROWSER NON SA FARE AVVISI ===
   await pg.waitForTimeout(600);
   ok((await pg.evaluate(()=>document.documentElement.getAttribute('data-view')))==='home',
      'e si naviga fino in fondo');
+  await pg.close();
+}
+
+console.log('\n=== UN GUASTO NON È MAI MUTO ===');
+{
+  // La firma del guasto segnalato dal telefono: il menu aperto, i
+  // tocchi che non fanno niente, e nessuno che dica cosa succede. Un
+  // gestore che va in errore prima di arrivare a render() non lasciava
+  // niente a schermo. Ora si legge — e senza ridisegnare la pagina,
+  // altrimenti il modulo si perderebbe proprio mentre si cerca di
+  // capire cosa non va.
+  const {pg}=await apri();
+  await alModuloScritto(pg,'45');
+  await pg.evaluate(()=>{
+    // un gestore qualunque che esplode, come ne basta uno solo
+    const e=new ErrorEvent('error',{message:'mi si è rotto un ingranaggio'});
+    window.dispatchEvent(e);
+  });
+  await pg.waitForTimeout(400);
+  const t=await testoApp(pg);
+  ok(/Qualcosa non ha funzionato/.test(t),'un errore scappato finisce a schermo',t.slice(0,80));
+  ok(/ingranaggio/.test(t),'col dettaglio, che è quello che serve per riferirlo');
+  ok((await valore(pg,'amount'))==='45',
+     'e il modulo non si perde proprio mentre si cerca di capire',String(await valore(pg,'amount')));
+  // anche una promessa rifiutata, che e' il caso piu' comune
+  await pg.evaluate(()=>{window.dispatchEvent(new PromiseRejectionEvent('unhandledrejection',
+    {promise:Promise.reject(new Error('x')).catch(()=>{}),reason:new Error('la rete non ha risposto')}))});
+  await pg.waitForTimeout(400);
+  ok(/rete non ha risposto/.test(await testoApp(pg)),'e vale anche per una promessa rifiutata');
   await pg.close();
 }
 
