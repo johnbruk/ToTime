@@ -486,8 +486,29 @@ ok(/428,00/.test(volo8),'e il suo importo: è questo che la rende analitica',vol
 ok(await siLegge(pg8,'piè di lista'),'e il piè di lista non è sparito: ha una sezione sua');
 ok(await siLegge(pg8,'38,00'),'col suo importo da farsi rimborsare');
 
-ok(errs.length===0&&errs2.length===0&&errs3.length===0&&errs4.length===0&&errs5.length===0&&errs6.length===0&&errs7.length===0&&errs8.length===0,'nessun errore JS lungo i percorsi',
-   errs.concat(errs2,errs3,errs4,errs5,errs6,errs7,errs8).slice(0,2).join(' | ')||'nessuno');
-await pg.close();await pg2.close();await pg3.close();await pg4.close();await pg5.close();await pg6.close();await pg7.close();await pg8.close();await b.close();srv.close();
+console.log('\n=== Percorso: «decido io cosa fare dei rimborsi» ===');
+// Dalla Dashboard a una scelta fiscale che l'app NON deve prendere per
+// me. Il punto non è che funzioni: è che il default non muova niente.
+const pg9=await apri(390);
+const errs9=[];pg9.on('pageerror',e=>errs9.push(e.message));
+await tocca(pg9,'☰',{dove:'body'});
+await tocca(pg9,'Tassazione',{dove:'body'});
+ok(await tocca(pg9,'Configurazione fiscale',{dove:'body'}),'dal menu si arriva alla Configurazione fiscale');
+await pg9.waitForTimeout(400);
+ok(await siLegge(pg9,'Rimborsi spese e reddito'),'e c\'è il blocco sui rimborsi');
+ok(await siLegge(pg9,'Li conto come compensi'),'con le due strade a schermo');
+ok(await siLegge(pg9,'regola 2025'),'e l\'altra');
+ok(await siLegge(pg9,'commercialista'),'e l\'app dice che la scelta è mia, da fare col commercialista');
+// Quale è attiva: deve essere la prudente, che è quella di sempre
+const attiva=await pg9.evaluate(()=>{
+  const b=[...document.querySelectorAll('#app .themeChoice button.active')]
+    .map(x=>x.querySelector('b')?.textContent.trim());
+  return b.join(' | ');
+});
+ok(/compensi/i.test(attiva),'ed è attiva quella prudente, non quella nuova',attiva);
+
+ok(errs.length===0&&errs2.length===0&&errs3.length===0&&errs4.length===0&&errs5.length===0&&errs6.length===0&&errs7.length===0&&errs8.length===0&&errs9.length===0,'nessun errore JS lungo i percorsi',
+   errs.concat(errs2,errs3,errs4,errs5,errs6,errs7,errs8,errs9).slice(0,2).join(' | ')||'nessuno');
+await pg.close();await pg2.close();await pg3.close();await pg4.close();await pg5.close();await pg6.close();await pg7.close();await pg8.close();await pg9.close();await b.close();srv.close();
 console.log(`\nRISULTATO: ${pass} OK / ${fail} KO`);
 if(fail)process.exitCode=1;
