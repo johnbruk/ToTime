@@ -449,8 +449,45 @@ await tocca(pg7,'Spese',{dove:'body'});
 await pg7.waitForTimeout(400);
 ok(await siLegge(pg7,'non tracciabile'),'e nell\'elenco la spesa resta segnalata, non si perde');
 
-ok(errs.length===0&&errs2.length===0&&errs3.length===0&&errs4.length===0&&errs5.length===0&&errs6.length===0&&errs7.length===0,'nessun errore JS lungo i percorsi',
-   errs.concat(errs2,errs3,errs4,errs5,errs6,errs7).slice(0,2).join(' | ')||'nessuno');
-await pg.close();await pg2.close();await pg3.close();await pg4.close();await pg5.close();await pg6.close();await pg7.close();await b.close();srv.close();
+console.log('\n=== Percorso: «porto le spese in fattura» ===');
+// Dalla Dashboard alla descrizione da copiare su Fiscozen: deve essere
+// ANALITICA, con data e importo, perché è quello che la legge chiede.
+// E il piè di lista non deve sparire: sono soldi anticipati.
+const pg8=await apri(390);
+const errs8=[];pg8.on('pageerror',e=>errs8.push(e.message));
+await pg8.evaluate(()=>{const S=window.__stores;
+  S.expense_categories=[
+    {id:'volo',name:'Volo',active:true,reimbursable:true,calculation_type:'manual_amount'},
+    {id:'taxi',name:'Taxi',active:true,reimbursable:true,calculation_type:'manual_amount'}];
+  S.travel_expenses=[
+    {id:'f1',expense_date:'2026-07-14',client_id:'c1',project_id:'p1',expense_category_id:'volo',
+     work_city:'Catania',amount:428,reimbursement_type:'invoice',payment_method:'carta',receipt_kept:true},
+    {id:'f2',expense_date:'2026-07-15',client_id:'c1',project_id:'p1',expense_category_id:'taxi',
+     work_city:'Catania',amount:38,reimbursement_type:'expense_report',payment_method:'contanti',receipt_kept:true}];
+  S.trips=[];S.vehicles=[];
+  return window.reload();
+});
+await pg8.waitForTimeout(700);
+await tocca(pg8,'☰',{dove:'body'});
+ok(await tocca(pg8,'Fatturazione',{dove:'body'}),'dal menu si arriva alla Fatturazione');
+await pg8.waitForTimeout(300);
+for(let i=0;i<36;i++){
+  if(/Luglio 2026/.test(await pg8.evaluate(()=>document.querySelector('#app .month strong')?.textContent||'')))break;
+  await pg8.evaluate(()=>{const b=[...document.querySelectorAll('#app .month button')][0];if(b)b.click()});
+  await pg8.waitForTimeout(120);
+}
+await pg8.waitForTimeout(400);
+ok(await tocca(pg8,'Equans'),'e si apre il dettaglio del cliente');
+await pg8.waitForTimeout(400);
+const box8=await pg8.evaluate(()=>[...document.querySelectorAll('#app .copybox')].map(x=>x.textContent.replace(/\s+/g,' ').trim()));
+const volo8=box8.find(x=>/volo/i.test(x))||'';
+ok(/14\/07\/2026/.test(volo8),'la descrizione da copiare porta la data della spesa',volo8);
+ok(/428,00/.test(volo8),'e il suo importo: è questo che la rende analitica',volo8);
+ok(await siLegge(pg8,'piè di lista'),'e il piè di lista non è sparito: ha una sezione sua');
+ok(await siLegge(pg8,'38,00'),'col suo importo da farsi rimborsare');
+
+ok(errs.length===0&&errs2.length===0&&errs3.length===0&&errs4.length===0&&errs5.length===0&&errs6.length===0&&errs7.length===0&&errs8.length===0,'nessun errore JS lungo i percorsi',
+   errs.concat(errs2,errs3,errs4,errs5,errs6,errs7,errs8).slice(0,2).join(' | ')||'nessuno');
+await pg.close();await pg2.close();await pg3.close();await pg4.close();await pg5.close();await pg6.close();await pg7.close();await pg8.close();await b.close();srv.close();
 console.log(`\nRISULTATO: ${pass} OK / ${fail} KO`);
 if(fail)process.exitCode=1;
