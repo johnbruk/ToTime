@@ -369,8 +369,52 @@ ok(await pg5.evaluate(()=>!!document.querySelector('#app [name=amount]')?.readOn
    'e il totale non si può scrivere a mano per sbaglio: una fonte di verità sola');
 ok(await siLegge(pg5,'Lo scrivo a mano'),'ma la via per correggerlo è a schermo, non nascosta');
 
-ok(errs.length===0&&errs2.length===0&&errs3.length===0&&errs4.length===0&&errs5.length===0,'nessun errore JS lungo i percorsi',
-   errs.concat(errs2,errs3,errs4,errs5).slice(0,2).join(' | ')||'nessuno');
-await pg.close();await pg2.close();await pg3.close();await pg4.close();await pg5.close();await b.close();srv.close();
+console.log('\n=== Percorso: «sforo il limite del cliente e spezzo la spesa» ===');
+// Dalla Dashboard, senza sapere dove sta niente: si registra una cena
+// sopra il tetto del cliente e si deve VEDERE l'avviso, con la via
+// d'uscita a schermo.
+const pg6=await apri(390);
+const errs6=[];pg6.on('pageerror',e=>errs6.push(e.message));
+await pg6.evaluate(()=>{const S=window.__stores;
+  S.clients[1].expense_policy=[{category_id:'cena',category:'Cena',type:'invoice',cap:35}];
+  S.expense_categories=[{id:'cena',name:'Cena',active:true,reimbursable:true,calculation_type:'manual_amount'}];
+  S.travel_expenses=[];S.trips=[];S.vehicles=[];
+  return window.reload();
+});
+await pg6.waitForTimeout(700);
+await tocca(pg6,'☰',{dove:'body'});
+await tocca(pg6,'Spese',{dove:'body'});
+await tocca(pg6,'Nuova spesa',{dove:'body'});
+await pg6.waitForTimeout(300);
+await pg6.evaluate(()=>{
+  const c=document.querySelector('#app [name=client_id]');
+  const eq=[...c.options].find(o=>/Equans/.test(o.textContent));
+  if(eq){c.value=eq.value;c.dispatchEvent(new Event('change',{bubbles:true}))}
+  const sel=document.querySelector('#app [name=expense_category_id]');
+  sel.value='cena'; sel.dispatchEvent(new Event('change',{bubbles:true}));
+});
+await pg6.waitForTimeout(350);
+await pg6.evaluate(()=>{
+  const a=document.querySelector('#app [name=amount]');
+  a.value='60'; a.dispatchEvent(new Event('input',{bubbles:true}));
+});
+await pg6.waitForTimeout(350);
+ok(await siLegge(pg6,'Oltre il limite'),'l\'app avvisa da sola che si è sforato il tetto del cliente');
+ok(await siLegge(pg6,'Spezza in due righe'),'e la via d\'uscita è a schermo, non da indovinare');
+ok(await siLegge(pg6,'25,00'),'dicendo quanto si è sforato');
+await pg6.evaluate(()=>{
+  const c=document.querySelector('#app [name=spezza]');
+  c.checked=true; c.dispatchEvent(new Event('change',{bubbles:true}));
+  document.querySelector('#app form.form').requestSubmit();
+});
+await pg6.waitForTimeout(900);
+const due=await pg6.evaluate(()=>(window.__stores.travel_expenses||[]).map(r=>({a:Number(r.amount),t:r.reimbursement_type})));
+ok(due.length===2,'e spezzando nascono due righe',JSON.stringify(due));
+ok(due.some(r=>r.a===35&&r.t==='invoice')&&due.some(r=>r.a===25&&r.t==='own'),
+   '35 in fattura e 25 a mio carico',JSON.stringify(due));
+
+ok(errs.length===0&&errs2.length===0&&errs3.length===0&&errs4.length===0&&errs5.length===0&&errs6.length===0,'nessun errore JS lungo i percorsi',
+   errs.concat(errs2,errs3,errs4,errs5,errs6).slice(0,2).join(' | ')||'nessuno');
+await pg.close();await pg2.close();await pg3.close();await pg4.close();await pg5.close();await pg6.close();await b.close();srv.close();
 console.log(`\nRISULTATO: ${pass} OK / ${fail} KO`);
 if(fail)process.exitCode=1;

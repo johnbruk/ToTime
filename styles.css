@@ -873,3 +873,11 @@ table.griglia.numeriRiga td.riga .n{font-variant-numeric:tabular-nums}
 .propHead .secondary{width:auto;white-space:nowrap;padding:10px 14px;min-height:44px;font-size:14px}
 .propRighe{margin:0;box-shadow:none;border-radius:0}
 @media(max-width:559px){.propHead{grid-template-columns:1fr}.propHead .secondary{width:100%}}
+
+/* v1.29.3 — l'avviso della policy: si deve notare mentre si scrive,
+   senza spaventare. Non impedisce niente. */
+.avvisoPolicy{border:1px solid rgba(247,166,71,.42);background:rgba(247,166,71,.10);padding:13px;margin-top:4px}
+.avvisoPolicy b{color:var(--orange);font-size:14px}
+.avvisoPolicy .desc{margin-top:5px}
+.avvisoPolicy .manoLbl{margin-top:10px;color:var(--soft)}
+.policyVoce{margin-top:12px}
