@@ -972,6 +972,62 @@ function trasfertaCambiata(form){
 }
 function reimbTypeOptions(selected){return REIMB_TYPES.map(([v,l])=>`<option value="${v}" ${v===selected?'selected':''}>${l}</option>`).join('')}
 function parsePolicy(c){try{const p=c&&c.expense_policy;if(!p)return [];return Array.isArray(p)?p:JSON.parse(p)}catch(e){return []}}
+// \u2500\u2500\u2500 Come si \u00e8 pagato, e se la ricevuta c'\u00e8 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// Non si poteva dire se una spesa era stata pagata con carta, bonifico
+// o contanti, e non c'era nemmeno una spunta per la ricevuta. E' il
+// dato che decide il trattamento fiscale del riaddebito: dal 2025
+// (D.Lgs. 192/2024, art. 54 TUIR, tracciabilita' dalla L. 207/2024) i
+// rimborsi analitici di vitto, alloggio, viaggio e trasporto pagati
+// con strumenti tracciabili non concorrono al reddito; in contanti si'.
+//
+// Due eccezioni che l'app deve dire, perche' nessuno se le ricorda:
+// il rimborso chilometrico e' forfettario e resta compenso comunque, e
+// le spese sostenute all'estero sono fuori dall'obbligo.
+const METODI_PAGAMENTO=[['carta','Carta'],['bonifico','Bonifico'],['contanti','Contanti'],['cliente','Pagata dal cliente'],['altro','Altro']];
+function metodoLabel(m){const h=METODI_PAGAMENTO.find(x=>x[0]===m);return h?h[1]:''}
+function metodoTracciabile(m){return ['carta','bonifico','cliente'].includes(String(m||''))}
+function metodoOptions(selected=''){
+  return `<option value="">\u2014 non indicato \u2014</option>`+
+    METODI_PAGAMENTO.map(([v,l])=>`<option value="${v}"${v===selected?' selected':''}>${l}</option>`).join('');
+}
+// Una spesa a riaddebitare che non regge: in contanti, o senza ricevuta.
+function spesaDaSistemare(e){
+  if(!e||expIsOwn(e))return false;
+  if(e.payment_method===undefined&&e.receipt_kept===undefined)return false;
+  if(spesaChilometrica(e))return false;
+  if(e.payment_method&&!metodoTracciabile(e.payment_method))return true;
+  return e.receipt_kept===false&&!!e.payment_method;
+}
+function notaTracciabilita(clientId,categoryId,tipo,metodo,ricevuta){
+  if(!tipo||tipo==='own')return '';
+  const cat=expenseCategoryById(categoryId);
+  if(eVoceChilometrica(cat))
+    return `<div class="notaTraccia"><span class="tag gray">forfettario</span><div class="desc">Il rimborso chilometrico \u00e8 forfettario: resta un <b>compenso imponibile</b> anche se lo paghi con carta. Qui la tracciabilit\u00e0 non cambia il trattamento.</div></div>`;
+  const pezzi=[];
+  let cls='verde',dist='tracciabile';
+  if(metodo&&!metodoTracciabile(metodo)){
+    cls='orange';dist='non tracciabile';
+    pezzi.push('Pagata in contanti: il riaddebito torna a concorrere al reddito. Le spese sostenute <b>all\u2019estero</b> sono per\u00f2 fuori dall\u2019obbligo di tracciabilit\u00e0.');
+  }else if(metodo){
+    pezzi.push('Pagata con '+esc(metodoLabel(metodo).toLowerCase())+': il riaddebito <b>analitico</b> regge il requisito della tracciabilit\u00e0.');
+  }else{
+    cls='gray';dist='da indicare';
+    pezzi.push('Scrivi come l\u2019hai pagata: \u00e8 il dato che decide se il riaddebito resta fuori dal reddito.');
+  }
+  if(metodo&&!ricevuta)
+    pezzi.push('<b>Manca la ricevuta.</b> Senza giustificativo l\u2019addebito analitico non si regge.');
+  return `<div class="notaTraccia"><span class="tag ${cls}">${dist}</span><div class="desc">${pezzi.join(' ')}</div></div>`;
+}
+function aggiornaTracciabilita(form){
+  const box=document.getElementById('tracciaBox');
+  if(!box||!form)return;
+  box.innerHTML=notaTracciabilita(
+    form.client_id?form.client_id.value:'',
+    form.expense_category_id?form.expense_category_id.value:'',
+    form.reimbursement_type?form.reimbursement_type.value:'own',
+    form.payment_method?form.payment_method.value:'',
+    !!(form.receipt_kept&&form.receipt_kept.checked));
+}
 function policyRiga(clientId,categoryId){
   const c=clientById(clientId);
   if(!c)return null;
@@ -1125,8 +1181,10 @@ function kmCambiati(form){
 }
 function campiComeLaTratto(v={},nuova=false){
   return bloccoCampi('Come la tratto','Chi la paga, alla fine',
-    `<div class="field"><label>Tipo rimborso</label><select name="reimbursement_type">${reimbTypeOptions(nuova?'own':expType(v))}</select></div>`
+    `<div class="field"><label>Tipo rimborso</label><select name="reimbursement_type" onchange="aggiornaTracciabilita(this.form)">${reimbTypeOptions(nuova?'own':expType(v))}</select></div>`
     +`<div id="policyBox">${avvisoPolicy(v.client_id||activeClients()[0]?.id||'',v.expense_category_id||'',Number(v.amount||0),Number(v.quantity||0))}</div>`
+    +`<div class="field"><label>Come l\u2019hai pagata</label><select name="payment_method" onchange="aggiornaTracciabilita(this.form)">${metodoOptions(v.payment_method||'')}</select><label class="manoLbl"><input type="checkbox" name="receipt_kept" onchange="aggiornaTracciabilita(this.form)"${v.receipt_kept?' checked':''}> La ricevuta ce l\u2019ho e la conservo</label></div>`
+    +`<div id="tracciaBox">${notaTracciabilita(v.client_id||activeClients()[0]?.id||'',v.expense_category_id||'',nuova?'own':expType(v),v.payment_method||'',!!v.receipt_kept)}</div>`
     +`<div class="field"><label>Note</label><textarea name="notes">${esc(v.notes||'')}</textarea></div>`);
 }
 const NOTA_CALCOLO='Lo calcola l\u2019app: quantit\u00e0 \u00d7 tariffa.';
@@ -1154,6 +1212,7 @@ function voceSpesaCambiata(form){
   if(km&&form.vehicle_id&&form.vehicle_id.value)veicoloCambiato(form);
   else updateExpenseCalc(form,true);
   aggiornaAvvisoPolicy(form);
+  aggiornaTracciabilita(form);
 }
 function totaleAMano(form){
   const aMano=!!(form.amount_a_mano&&form.amount_a_mano.checked);
@@ -1211,11 +1270,12 @@ function updateExpenseCalc(form,proposeType){
 function aggiornaCalcoloEAvviso(form,proposeType){
   updateExpenseCalc(form,proposeType);
   aggiornaAvvisoPolicy(form);
+  aggiornaTracciabilita(form);
 }
 // Salvare puo' scrivere DUE righe: fino al limite col tipo della
 // policy, l'eccedenza a mio carico. Lo si fa solo se chi inserisce lo
 // ha spuntato: l'avviso informa, non decide.
-const DROP_SPESA=['reimbursement_type','trip_id','wbs_id','vehicle_id','from_place','to_place','round_trip'];
+const DROP_SPESA=['reimbursement_type','trip_id','wbs_id','vehicle_id','from_place','to_place','round_trip','payment_method','receipt_kept'];
 function payloadSpesa(f){
   const rt=f.reimbursement_type||'own';
   const lin=f.wbs_id?wbsLineage(f.wbs_id):null;
@@ -1227,7 +1287,9 @@ function payloadSpesa(f){
     amount:Number(f.amount||0),reimbursement_type:rt,reimbursable:rt!=='own',
     notes:f.notes||null,trip_id:f.trip_id||null,vehicle_id:f.vehicle_id||null,
     from_place:norm(f.from_place)||null,to_place:norm(f.to_place)||null,
-    round_trip:f.round_trip==='on'||f.round_trip===true};
+    round_trip:f.round_trip==='on'||f.round_trip===true,
+    payment_method:f.payment_method||null,
+    receipt_kept:f.receipt_kept==='on'||f.receipt_kept===true};
 }
 async function saveExpense(ev){
   ev.preventDefault();
@@ -1266,7 +1328,7 @@ async function saveExpenseEdit(ev){
   if(error)return setMsg('Non si sono potute salvare le modifiche: '+motivoLeggibile(error),9000);
   await reload();state.view='expenses';state.edit=null;render();
 }
-async function duplicateExpense(idv){const e=data.travelExpenses.find(x=>x.id===idv);if(!e)return;const copy={expense_date:new Date().toISOString().slice(0,10),client_id:e.client_id,project_id:e.project_id,wbs_id:e.wbs_id||null,trip_id:e.trip_id||null,vehicle_id:e.vehicle_id||null,from_place:e.from_place||null,to_place:e.to_place||null,round_trip:!!e.round_trip,expense_category_id:e.expense_category_id,work_site:e.work_site,work_city:e.work_city,description:e.description,quantity:e.quantity,unit_rate:e.unit_rate,amount:e.amount,reimbursement_type:expType(e),reimbursable:expType(e)!=='own',notes:e.notes};const {error}=await insertResilient('travel_expenses',copy,['reimbursement_type','wbs_id','trip_id','vehicle_id','from_place','to_place','round_trip']);if(error)return setMsg(error.message,7000);await reload();state.view='expenses';render()}
+async function duplicateExpense(idv){const e=data.travelExpenses.find(x=>x.id===idv);if(!e)return;const copy={expense_date:new Date().toISOString().slice(0,10),client_id:e.client_id,project_id:e.project_id,wbs_id:e.wbs_id||null,trip_id:e.trip_id||null,vehicle_id:e.vehicle_id||null,payment_method:e.payment_method||null,receipt_kept:!!e.receipt_kept,from_place:e.from_place||null,to_place:e.to_place||null,round_trip:!!e.round_trip,expense_category_id:e.expense_category_id,work_site:e.work_site,work_city:e.work_city,description:e.description,quantity:e.quantity,unit_rate:e.unit_rate,amount:e.amount,reimbursement_type:expType(e),reimbursable:expType(e)!=='own',notes:e.notes};const {error}=await insertResilient('travel_expenses',copy,DROP_SPESA);if(error)return setMsg(error.message,7000);await reload();state.view='expenses';render()}
 async function deleteExpense(idv){if(!confirm('Eliminare questa spesa di trasferta?'))return;const {error}=await sb.from('travel_expenses').delete().eq('id',idv);if(error)return setMsg(error.message,7000);await reload();state.view='timesheet';render()}
 
 function focusForm(){const f=document.querySelector('.app form.form');if(!f)return;const el=f.querySelector('input,select,textarea');if(!el)return;el.scrollIntoView({block:'center',behavior:'smooth'});setTimeout(()=>el.focus({preventScroll:true}),260)}
@@ -2388,8 +2450,13 @@ function dettaglioSpesa(e){
   if(e.project_id)pezzi.push(esc(projectName(e.project_id)));
   return pezzi.join(' · ');
 }
+function tagDaSistemare(e){
+  if(!spesaDaSistemare(e))return '';
+  const perche=e.payment_method&&!metodoTracciabile(e.payment_method)?'non tracciabile':'senza ricevuta';
+  return ` <span class="tag orange tagManca" title="Da sistemare: ${perche}">${perche}</span>`;
+}
 function rigaSpesa(e){
-  return `<div class="row" onclick="editEntry('${e.id}','expense')"><div></div><div><div class="title">${esc(expenseCategoryName(e.expense_category_id))} ${expenseTypeTag(e)}</div><div class="desc">${dettaglioSpesa(e)}</div></div><div class="value">${fmtEUR(e.amount||0)}</div></div>`;
+  return `<div class="row" onclick="editEntry('${e.id}','expense')"><div></div><div><div class="title">${esc(expenseCategoryName(e.expense_category_id))} ${expenseTypeTag(e)}${tagDaSistemare(e)}</div><div class="desc">${dettaglioSpesa(e)}</div></div><div class="value">${fmtEUR(e.amount||0)}</div></div>`;
 }
 
 function schedaTrasferta(t){
@@ -2477,7 +2544,7 @@ function expenses(){
     const sub=list.reduce((s,e)=>s+Number(e.amount||0),0);
     const cli=list[0]?clientName(list[0].client_id):'';
     const city=list.map(e=>e.work_city).find(Boolean)||'';
-    return `<div class="card" style="padding:0;overflow:hidden"><div class="dayHead"><div><b>${dateIT(d)}</b> · ${esc(cli)}${city?' · '+esc(city):''}</div><div>${fmtEUR(sub)}</div></div><div class="list" style="box-shadow:none;border:0;margin:0">${list.map(e=>`<div class="row" onclick="editEntry('${e.id}','expense')"><div></div><div><div class="title">${esc(expenseCategoryName(e.expense_category_id))} ${expenseTypeTag(e)}</div><div class="desc">${[percorsoDi(e),esc(e.description||''),e.project_id?esc(projectName(e.project_id)):'',e.trip_id?esc(tripTitolo(tripById(e.trip_id)||{})):''].filter(Boolean).join(' · ')}</div></div><div class="value">${fmtEUR(e.amount||0)}</div></div>`).join('')}</div></div>`;
+    return `<div class="card" style="padding:0;overflow:hidden"><div class="dayHead"><div><b>${dateIT(d)}</b> · ${esc(cli)}${city?' · '+esc(city):''}</div><div>${fmtEUR(sub)}</div></div><div class="list" style="box-shadow:none;border:0;margin:0">${list.map(e=>`<div class="row" onclick="editEntry('${e.id}','expense')"><div></div><div><div class="title">${esc(expenseCategoryName(e.expense_category_id))} ${expenseTypeTag(e)}${tagDaSistemare(e)}</div><div class="desc">${[percorsoDi(e),esc(e.description||''),e.project_id?esc(projectName(e.project_id)):'',e.trip_id?esc(tripTitolo(tripById(e.trip_id)||{})):''].filter(Boolean).join(' · ')}</div></div><div class="value">${fmtEUR(e.amount||0)}</div></div>`).join('')}</div></div>`;
   }).join('')||emptyState('Nessuna spesa in questo mese.','+ Aggiungi una spesa',"go('expenseForm')");
   return appShell(testata+(trasferteReady()?sceltaVistaSpese():'')+azioni+elenco);
 }
@@ -4534,6 +4601,7 @@ Object.assign(window,{
   veicoloCambiato,
   aggiornaCalcoloEAvviso,
   aggiornaAvvisoPolicy,
+  aggiornaTracciabilita,
   kmCambiati,
   addVehicle,
   editVehicle,

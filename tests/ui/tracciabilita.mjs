@@ -197,6 +197,28 @@ console.log('\n=== SENZA LE COLONNE, NIENTE DANNI ===');
   await pg.close();
 }
 
+console.log('\n=== E SE IL DATABASE NON DICE QUALE COLONNA ===');
+{
+  // Il ripiego dell'app legge il nome della colonna dal messaggio
+  // d'errore. Ma non tutti i messaggi lo contengono: in quel caso
+  // l'unica rete e' l'elenco dropKeys passato alla scrittura. Senza
+  // questo caso, quella rete non si prova mai — e togliendola dal
+  // codice tutti i test restavano verdi.
+  const pg=await apri();
+  await pg.evaluate(()=>{window.__colonneMancantiVaghe=['payment_method','receipt_kept'];});
+  await alModulo(pg);
+  await scrivi(pg,'expense_category_id','cena');
+  await scrivi(pg,'amount','55');
+  await scrivi(pg,'payment_method','carta');
+  await pg.evaluate(()=>document.querySelector('#app form.form').requestSubmit());
+  await pg.waitForTimeout(900);
+  const e=await pg.evaluate(()=>(window.__stores.travel_expenses||[]).slice(-1)[0]||null);
+  ok(!!e,'la spesa si salva anche con un errore che non nomina la colonna');
+  ok(e&&Math.abs(Number(e.amount)-55)<0.005,'col suo importo',String(e&&e.amount));
+  ok(e&&e.payment_method===undefined,'e senza le due colonne',String(e&&e.payment_method));
+  await pg.close();
+}
+
 await b.close(); srv.close();
 console.log(`\n=== tracciabilità: OK ${pass} · KO ${fail} ===`);
 process.exit(fail?1:0);
