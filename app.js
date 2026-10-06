@@ -221,6 +221,16 @@ function eVoceChilometrica(cat){
   if(cat.is_mileage===false)return false;
   return /^(km|chilometri|kilometri)$/i.test(String(cat.unit_label||''));
 }
+// Una voce chilometrica e' km x tariffa per definizione: il «tipo
+// calcolo» della voce non puo' contraddirla. Se e' rimasta su «Importo
+// manuale» \u2014 ed e' il caso delle voci che esistevano prima che
+// is_mileage esistesse \u2014 il campo della tariffa spariva e l'importo
+// non si calcolava mai: scrivevi i km e restavi a zero, senza nemmeno
+// un posto dove mettere la tariffa.
+function aQuantitaTariffa(cat){
+  if(!cat)return false;
+  return cat.calculation_type==='quantity_rate'||eVoceChilometrica(cat);
+}
 function spesaChilometrica(e){return eVoceChilometrica(expenseCategoryById(e&&e.expense_category_id))}
 // «Catania → Modica e ritorno · 210 km × 0,45 €/km · Panda»
 function percorsoDi(e){
@@ -1393,8 +1403,8 @@ function clienteSpesaCambiato(form){
 }
 function campiCosa(v={}){
   const cat=expenseCategoryById(v.expense_category_id);
-  const aQ=!!cat&&cat.calculation_type==='quantity_rate';
   const km=eVoceChilometrica(cat);
+  const aQ=aQuantitaTariffa(cat);
   const unita=(cat&&cat.unit_label)||'unit\u00e0';
   const tratta=km?kmTrattaDi(v):0;
   return bloccoCampi('Cosa','La voce di spesa e quanto',
@@ -1462,8 +1472,8 @@ const NOTA_MANO='Scrivi tu l\u2019importo.';
 // pensare che servisse.
 function voceSpesaCambiata(form){
   const cat=expenseCategoryById(form.expense_category_id&&form.expense_category_id.value);
-  const aQ=!!cat&&cat.calculation_type==='quantity_rate';
   const km=eVoceChilometrica(cat);
+  const aQ=aQuantitaTariffa(cat);
   const mostra=(id,cond)=>{const el=document.getElementById(id);if(el)el.hidden=!cond};
   mostra('kmField',km);
   mostra('qtaField',aQ&&!km);
@@ -1521,15 +1531,35 @@ function updateExpenseCalc(form,proposeType){
     const proposed=clientPolicyType(form.client_id?.value,cat.id)||(cat.reimbursable===false?'own':'invoice');
     if(proposed)form.reimbursement_type.value=proposed;
   }
-  if(cat.calculation_type==='quantity_rate'&&form.unit_rate){
+  if(aQuantitaTariffa(cat)&&form.unit_rate){
     if((!form.unit_rate.value||Number(form.unit_rate.value)===0)&&cat.default_unit_rate)
       form.unit_rate.value=Number(cat.default_unit_rate);
   }
   if(form.amount_a_mano&&form.amount_a_mano.checked)return;
-  if(cat.calculation_type!=='quantity_rate')return;
+  if(!aQuantitaTariffa(cat))return;
   if(!form.unit_rate||!form.quantity||!form.amount)return;
-  if(Number(form.unit_rate.value||0)>0)
-    form.amount.value=(Number(form.quantity.value||0)*Number(form.unit_rate.value||0)).toFixed(2);
+  const tariffa=Number(form.unit_rate.value||0);
+  const quanti=Number(form.quantity.value||0);
+  if(tariffa>0)form.amount.value=(quanti*tariffa).toFixed(2);
+  // Il conto si deve LEGGERE, non solo avvenire: un numero in una
+  // casella grigia non dice da dove viene, e se e' sbagliato non si
+  // capisce dove. E la tariffa a zero lascerebbe uno zero muto.
+  const n=document.getElementById('calcNota');
+  if(!n)return;
+  if(tariffa<=0&&quanti>0){
+    n.textContent=eVoceChilometrica(cat)
+      ? 'Manca la tariffa \u20ac/km: scrivila qui sopra, o scegli un veicolo che ce l\u2019ha.'
+      : 'Manca la tariffa: scrivila qui sopra.';
+    return;
+  }
+  if(tariffa>0&&quanti>0){
+    const unita=eVoceChilometrica(cat)?'km':((cat.unit_label||'').trim()||'');
+    n.textContent=fmtNum(quanti,quanti%1?2:0)+(unita?' '+unita:'')+
+      ' \u00d7 '+fmtNum(tariffa,tariffa%1&&(tariffa*100)%1?4:2)+' \u20ac'+(eVoceChilometrica(cat)?'/km':'')+
+      ' = '+fmtEUR(quanti*tariffa);
+    return;
+  }
+  n.textContent=NOTA_CALCOLO;
 }
 // updateExpenseCalc esce presto in molti rami (voce non scelta, totale
 // a mano, voce non a quantita'): l'avviso va aggiornato comunque, da
