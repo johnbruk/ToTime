@@ -888,3 +888,17 @@ table.griglia.numeriRiga td.riga .n{font-variant-numeric:tabular-nums}
 .notaTraccia .tag{margin-top:0;flex:0 0 auto}
 .notaTraccia .desc{margin-top:1px}
 .tag.tagManca{margin-left:5px}
+
+/* v1.31.0 — la ricevuta allegata. Il bersaglio è grande perché si tocca
+   col pollice in piedi davanti alla cassa. */
+.ricevutaCarica{display:flex;align-items:center;gap:12px;border:1px dashed rgba(124,137,166,.46);background:rgba(124,137,166,.06);padding:15px;cursor:pointer;min-height:64px}
+.ricevutaCarica span{display:block}
+.ricevutaCarica b{display:block;font-size:14.5px}
+.ricevutaCarica small{display:block;color:var(--muted);font-size:12.5px;margin-top:4px}
+.ricevutaCarica input{display:none}
+.ricevutaCarica:before{content:"\1F4F7";font-size:24px;flex:0 0 auto}
+.ricevutaBox{border:1px solid var(--line);background:rgba(124,137,166,.07);padding:14px}
+.ricevutaBox b{font-size:14.5px}
+.ricevutaBtn{display:grid;gap:10px;margin-top:12px}
+@media(min-width:560px){.ricevutaBtn{grid-template-columns:1fr 1fr}}
+.ricevutaNota{color:var(--muted);border-left:2px solid var(--line);padding-left:11px}

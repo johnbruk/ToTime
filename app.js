@@ -1044,6 +1044,105 @@ function parsePolicy(c){try{const p=c&&c.expense_policy;if(!p)return [];return A
 // Due eccezioni che l'app deve dire, perche' nessuno se le ricorda:
 // il rimborso chilometrico e' forfettario e resta compenso comunque, e
 // le spese sostenute all'estero sono fuori dall'obbligo.
+// \u2500\u2500\u2500 La foto della ricevuta \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// Questo e' il solo pezzo di tutta la serie che aggiunge un SERVIZIO
+// nuovo: Supabase Storage, che l'app non usava da nessuna parte. Per
+// questo e' l'ultimo passo e sta da solo.
+//
+// Il percorso del file e' <user_id>/<expense_id>/<nome>: la prima
+// cartella e' l'id dell'utente, ed e' su quella che le policy del
+// bucket decidono. Senza quella convenzione, uno leggerebbe le
+// ricevute di un altro — quindi non e' un dettaglio di forma.
+const BUCKET_RICEVUTE='ricevute';
+function nomeFileRicevuta(nome){
+  const pulito=String(nome||'ricevuta').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[^A-Za-z0-9._-]+/g,'_').replace(/^_+|_+$/g,'').slice(-60);
+  return pulito||'ricevuta';
+}
+function percorsoRicevuta(expenseId,nome){
+  const uid=session&&session.user&&session.user.id;
+  if(!uid)return null;
+  return uid+'/'+expenseId+'/'+Date.now()+'-'+nomeFileRicevuta(nome);
+}
+// Supabase Storage puo' non esserci: il bucket si crea con la
+// migrazione. In quel caso l'app lo deve DIRE, non restare zitta, e la
+// spesa non deve restare con un percorso che non esiste.
+function motivoStorage(err){
+  const m=String(err&&err.message||err||'');
+  if(/bucket not found|not found/i.test(m))
+    return 'il deposito delle ricevute non c\u2019\u00e8 ancora: lancia la migrazione 2026-10-06_ricevute-storage.sql.';
+  if(/row-level security|policy|unauthorized|403/i.test(m))
+    return 'il deposito delle ricevute non ti autorizza a scrivere: controlla le policy del bucket.';
+  if(/payload too large|exceeded|size/i.test(m))
+    return 'il file \u00e8 troppo grande: il limite \u00e8 10 MB.';
+  if(/mime|content type/i.test(m))
+    return 'il tipo di file non \u00e8 ammesso: foto (jpg, png, webp, heic) o PDF.';
+  return motivoLeggibile(err);
+}
+async function caricaRicevuta(ev){
+  const file=ev.target.files&&ev.target.files[0];
+  if(!file)return;
+  const id=state.edit;
+  const e=(data.travelExpenses||[]).find(x=>x.id===id);
+  if(!e)return setMsg('Spesa non trovata: riapri la schermata.',6000);
+  const path=percorsoRicevuta(id,file.name);
+  if(!path)return setMsg('Non si sa chi sei: esci e rientra.',7000);
+  setMsg('Carico la ricevuta\u2026',4000);
+  try{
+    const up=await sb.storage.from(BUCKET_RICEVUTE).upload(path,file,{upsert:false});
+    if(up&&up.error)throw up.error;
+    const res=await updateResilient('travel_expenses',{receipt_path:path,receipt_kept:true},id,['receipt_path','receipt_kept']);
+    if(res.error){
+      // Il file c'e' ma la riga no: si rimuove il file, altrimenti
+      // resta un orfano nel bucket che nessuno ritrovera' piu'.
+      try{await sb.storage.from(BUCKET_RICEVUTE).remove([path])}catch(x){}
+      return setMsg('La ricevuta \u00e8 stata caricata ma non si \u00e8 potuta collegare alla spesa: '+motivoLeggibile(res.error),9000);
+    }
+    await reload();render();
+    setMsg('Ricevuta allegata.',4000);
+  }catch(err){
+    setMsg('Non si \u00e8 potuta caricare la ricevuta: '+motivoStorage(err),10000);
+  }
+}
+async function apriRicevuta(){
+  const e=(data.travelExpenses||[]).find(x=>x.id===state.edit);
+  if(!e||!e.receipt_path)return;
+  try{
+    const r=await sb.storage.from(BUCKET_RICEVUTE).createSignedUrl(e.receipt_path,120);
+    if(r&&r.error)throw r.error;
+    const url=r&&r.data&&(r.data.signedUrl||r.data.signedURL);
+    if(!url)throw new Error('nessun collegamento');
+    window.open(url,'_blank','noopener');
+  }catch(err){
+    setMsg('Non si \u00e8 potuta aprire la ricevuta: '+motivoStorage(err),9000);
+  }
+}
+async function togliRicevuta(){
+  const id=state.edit;
+  const e=(data.travelExpenses||[]).find(x=>x.id===id);
+  if(!e||!e.receipt_path)return;
+  if(!confirm('Togliere la ricevuta allegata? Il file viene cancellato.'))return;
+  try{
+    const r=await sb.storage.from(BUCKET_RICEVUTE).remove([e.receipt_path]);
+    if(r&&r.error)throw r.error;
+  }catch(err){
+    return setMsg('Non si \u00e8 potuto cancellare il file: '+motivoStorage(err),9000);
+  }
+  const res=await updateResilient('travel_expenses',{receipt_path:null},id,['receipt_path']);
+  if(res.error)return setMsg('Il file \u00e8 stato cancellato ma la spesa lo nomina ancora: '+motivoLeggibile(res.error),9000);
+  await reload();render();
+  setMsg('Ricevuta rimossa.',4000);
+}
+// Il campo: su una spesa nuova non si puo' allegare niente, perche' il
+// percorso ha bisogno dell'id della spesa. Lo si dice, invece di
+// mostrare un campo che non funziona.
+function campoRicevuta(v={},nuova=false){
+  if(nuova)
+    return `<div class="small ricevutaNota">La foto della ricevuta si allega dopo aver salvato: il file va in una cartella intestata a questa spesa.</div>`;
+  if(v.receipt_path)
+    return `<div class="ricevutaBox"><div><b>Ricevuta allegata</b><div class="desc">${esc(String(v.receipt_path).split('/').pop()||'')}</div></div><div class="ricevutaBtn"><button type="button" class="secondary" onclick="apriRicevuta()">Guarda la ricevuta</button><button type="button" class="secondary danger" onclick="togliRicevuta()">Togli la ricevuta</button></div></div>`;
+  return `<label class="ricevutaCarica"><span><b>Allega la foto della ricevuta</b><small>Foto o PDF, fino a 10 MB. Resta privata: la vedi solo tu.</small></span><input type="file" name="receipt_file" accept="image/*,application/pdf" capture="environment" onchange="caricaRicevuta(event)"></label>`;
+}
 const METODI_PAGAMENTO=[['carta','Carta'],['bonifico','Bonifico'],['contanti','Contanti'],['cliente','Pagata dal cliente'],['altro','Altro']];
 function metodoLabel(m){const h=METODI_PAGAMENTO.find(x=>x[0]===m);return h?h[1]:''}
 function metodoTracciabile(m){return ['carta','bonifico','cliente'].includes(String(m||''))}
@@ -1057,6 +1156,7 @@ function spesaDaSistemare(e){
   if(e.payment_method===undefined&&e.receipt_kept===undefined)return false;
   if(spesaChilometrica(e))return false;
   if(e.payment_method&&!metodoTracciabile(e.payment_method))return true;
+  if(e.receipt_path)return false;
   return e.receipt_kept===false&&!!e.payment_method;
 }
 function notaTracciabilita(clientId,categoryId,tipo,metodo,ricevuta){
@@ -1246,6 +1346,7 @@ function campiComeLaTratto(v={},nuova=false){
     +`<div id="policyBox">${avvisoPolicy(v.client_id||activeClients()[0]?.id||'',v.expense_category_id||'',Number(v.amount||0),Number(v.quantity||0))}</div>`
     +`<div class="field"><label>Come l\u2019hai pagata</label><select name="payment_method" onchange="aggiornaTracciabilita(this.form)">${metodoOptions(v.payment_method||'')}</select><label class="manoLbl"><input type="checkbox" name="receipt_kept" onchange="aggiornaTracciabilita(this.form)"${v.receipt_kept?' checked':''}> La ricevuta ce l\u2019ho e la conservo</label></div>`
     +`<div id="tracciaBox">${notaTracciabilita(v.client_id||activeClients()[0]?.id||'',v.expense_category_id||'',nuova?'own':expType(v),v.payment_method||'',!!v.receipt_kept)}</div>`
+    +campoRicevuta(v,nuova)
     +`<div class="field"><label>Note</label><textarea name="notes">${esc(v.notes||'')}</textarea></div>`);
 }
 const NOTA_CALCOLO='Lo calcola l\u2019app: quantit\u00e0 \u00d7 tariffa.';
@@ -1389,7 +1490,7 @@ async function saveExpenseEdit(ev){
   if(error)return setMsg('Non si sono potute salvare le modifiche: '+motivoLeggibile(error),9000);
   await reload();state.view='expenses';state.edit=null;render();
 }
-async function duplicateExpense(idv){const e=data.travelExpenses.find(x=>x.id===idv);if(!e)return;const copy={expense_date:new Date().toISOString().slice(0,10),client_id:e.client_id,project_id:e.project_id,wbs_id:e.wbs_id||null,trip_id:e.trip_id||null,vehicle_id:e.vehicle_id||null,payment_method:e.payment_method||null,receipt_kept:!!e.receipt_kept,from_place:e.from_place||null,to_place:e.to_place||null,round_trip:!!e.round_trip,expense_category_id:e.expense_category_id,work_site:e.work_site,work_city:e.work_city,description:e.description,quantity:e.quantity,unit_rate:e.unit_rate,amount:e.amount,reimbursement_type:expType(e),reimbursable:expType(e)!=='own',notes:e.notes};const {error}=await insertResilient('travel_expenses',copy,DROP_SPESA);if(error)return setMsg(error.message,7000);await reload();state.view='expenses';render()}
+async function duplicateExpense(idv){const e=data.travelExpenses.find(x=>x.id===idv);if(!e)return;const copy={expense_date:new Date().toISOString().slice(0,10),client_id:e.client_id,project_id:e.project_id,wbs_id:e.wbs_id||null,trip_id:e.trip_id||null,vehicle_id:e.vehicle_id||null,payment_method:e.payment_method||null,receipt_kept:!!e.receipt_kept,receipt_path:null,from_place:e.from_place||null,to_place:e.to_place||null,round_trip:!!e.round_trip,expense_category_id:e.expense_category_id,work_site:e.work_site,work_city:e.work_city,description:e.description,quantity:e.quantity,unit_rate:e.unit_rate,amount:e.amount,reimbursement_type:expType(e),reimbursable:expType(e)!=='own',notes:e.notes};const {error}=await insertResilient('travel_expenses',copy,DROP_SPESA);if(error)return setMsg(error.message,7000);await reload();state.view='expenses';render()}
 async function deleteExpense(idv){if(!confirm('Eliminare questa spesa di trasferta?'))return;const {error}=await sb.from('travel_expenses').delete().eq('id',idv);if(error)return setMsg(error.message,7000);await reload();state.view='timesheet';render()}
 
 function focusForm(){const f=document.querySelector('.app form.form');if(!f)return;const el=f.querySelector('input,select,textarea');if(!el)return;el.scrollIntoView({block:'center',behavior:'smooth'});setTimeout(()=>el.focus({preventScroll:true}),260)}
@@ -4707,6 +4808,9 @@ Object.assign(window,{
   aggiornaCalcoloEAvviso,
   aggiornaAvvisoPolicy,
   aggiornaTracciabilita,
+  caricaRicevuta,
+  apriRicevuta,
+  togliRicevuta,
   kmCambiati,
   addVehicle,
   editVehicle,

@@ -507,8 +507,49 @@ const attiva=await pg9.evaluate(()=>{
 });
 ok(/compensi/i.test(attiva),'ed è attiva quella prudente, non quella nuova',attiva);
 
-ok(errs.length===0&&errs2.length===0&&errs3.length===0&&errs4.length===0&&errs5.length===0&&errs6.length===0&&errs7.length===0&&errs8.length===0&&errs9.length===0,'nessun errore JS lungo i percorsi',
-   errs.concat(errs2,errs3,errs4,errs5,errs6,errs7,errs8,errs9).slice(0,2).join(' | ')||'nessuno');
-await pg.close();await pg2.close();await pg3.close();await pg4.close();await pg5.close();await pg6.close();await pg7.close();await pg8.close();await pg9.close();await b.close();srv.close();
+console.log('\n=== Percorso: «fotografo la ricevuta» ===');
+// Dalla Dashboard: si registra una spesa, si riapre, e si allega la
+// foto della ricevuta. È l'unico pezzo che usa un servizio nuovo, e il
+// percorso deve reggere dal primo tocco.
+const pgRic=await apri(390);
+const errsRic=[];pgRic.on('pageerror',e=>errsRic.push(e.message));
+await pgRic.evaluate(()=>{const S=window.__stores;
+  S.expense_categories=[{id:'cena',name:'Cena',active:true,reimbursable:true,calculation_type:'manual_amount'}];
+  S.travel_expenses=[{id:'spA',expense_date:'2026-07-14',client_id:'c1',project_id:'p1',
+    expense_category_id:'cena',amount:48,reimbursement_type:'invoice',
+    payment_method:'carta',receipt_kept:false,work_city:'Milano'}];
+  S.trips=[];S.vehicles=[];
+  return window.reload();
+});
+await pgRic.waitForTimeout(700);
+await tocca(pgRic,'☰',{dove:'body'});
+await tocca(pgRic,'Spese',{dove:'body'});
+await pgRic.waitForTimeout(300);
+for(let i=0;i<36;i++){
+  if(/Luglio 2026/.test(await pgRic.evaluate(()=>document.querySelector('#app .month strong')?.textContent||'')))break;
+  await pgRic.evaluate(()=>{const b=[...document.querySelectorAll('#app .month button')][0];if(b)b.click()});
+  await pgRic.waitForTimeout(120);
+}
+await pgRic.waitForTimeout(400);
+ok(await siLegge(pgRic,'senza ricevuta'),'l\'app fa notare che a quella spesa manca la ricevuta');
+ok(await tocca(pgRic,'Cena'),'e si apre la spesa toccandola');
+await pgRic.waitForTimeout(400);
+ok(await siLegge(pgRic,'Allega la foto della ricevuta'),'dentro c\'è il modo di allegarla');
+await pgRic.setInputFiles('#app input[type=file][name=receipt_file]',
+  new URL('.',import.meta.url).pathname+'../../tests/ui/mock.html');
+await pgRic.waitForTimeout(1300);
+const allegata=await pgRic.evaluate(()=>(window.__storage||[]).length);
+ok(allegata===1,'il file si carica',String(allegata));
+ok(String((await pgRic.evaluate(()=>(window.__storage||[])[0]?.path))||'').startsWith('u1/'),
+   'nella cartella dell\'utente, che è quella su cui le policy decidono',
+   String(await pgRic.evaluate(()=>(window.__storage||[])[0]?.path)));
+await tocca(pgRic,'☰',{dove:'body'});
+await tocca(pgRic,'Spese',{dove:'body'});
+await pgRic.waitForTimeout(400);
+ok(!(await siLegge(pgRic,'senza ricevuta')),'e la segnalazione sparisce dall\'elenco');
+
+ok(errs.length===0&&errs2.length===0&&errs3.length===0&&errs4.length===0&&errs5.length===0&&errs6.length===0&&errs7.length===0&&errs8.length===0&&errs9.length===0&&errsRic.length===0,'nessun errore JS lungo i percorsi',
+   errs.concat(errs2,errs3,errs4,errs5,errs6,errs7,errs8,errs9,errsRic).slice(0,2).join(' | ')||'nessuno');
+await pg.close();await pg2.close();await pg3.close();await pg4.close();await pg5.close();await pg6.close();await pg7.close();await pg8.close();await pg9.close();await pgRic.close();await b.close();srv.close();
 console.log(`\nRISULTATO: ${pass} OK / ${fail} KO`);
 if(fail)process.exitCode=1;

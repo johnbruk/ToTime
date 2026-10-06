@@ -311,3 +311,81 @@ Te la mando da lanciare nel SQL Editor come le altre.
 
 Come sempre: batteria completa prima, percorso in `tests/ui/uso.mjs` che parte
 dalla Dashboard per ogni cosa nuova, e **il rilascio lo autorizzi tu**.
+
+---
+
+# Stato dei lavori — aggiornato il 6 ottobre 2026
+
+Tutti gli strati proposti qui sopra sono stati costruiti, testati e
+rilasciati, uno alla volta. Ogni riga è stata verificata sul sito vivo
+scaricando i file e confrontandoli byte per byte con quelli testati.
+
+| Versione | Cosa | Migrazione |
+|---|---|---|
+| v1.29.0 | **Strato 1** — la trasferta come oggetto, due viste, raggruppamento con un tocco | `2026-10-06_trasferte.sql` |
+| v1.29.1 | **Strato 2** — modulo in tre blocchi, e il campo Commessa che mancava | — |
+| v1.29.2 | **Strato 3** — chilometrica: veicolo, percorso, km | `2026-10-06_veicoli-e-chilometrica.sql` |
+| v1.29.3 | **Strato 4** — limiti di policy, avviso mentre inserisci, spezza in due righe | — |
+| v1.29.4 | **Strato 5a** — metodo di pagamento e tracciabilità | `2026-10-06_tracciabilita.sql` |
+| v1.30.0 | **Le spese in fattura** — il piè di lista non sparisce, descrizioni analitiche | — |
+| v1.30.1 | **Strato 6** — la scelta su rimborsi e reddito, default invariato | — |
+| v1.30.2 | **Strato 7** — sezione «Trasferte e spese» nel menu | — |
+| v1.31.0 | **Strato 5b** — le foto delle ricevute su Supabase Storage | `2026-10-06_ricevute-storage.sql` |
+
+## Le quattro migrazioni da lanciare
+
+Nel SQL Editor di Supabase, **in quest'ordine**. Sono tutte sicure da
+rilanciare e nessuna tocca un importo esistente.
+
+1. `migrations/2026-10-06_trasferte.sql`
+2. `migrations/2026-10-06_veicoli-e-chilometrica.sql`
+3. `migrations/2026-10-06_tracciabilita.sql`
+4. `migrations/2026-10-06_ricevute-storage.sql` — questa aggiunge
+   Supabase Storage, che prima non era usato: se preferisci rimandare le
+   foto delle ricevute, salta solo questa. Il resto funziona comunque, e
+   la spunta «la ricevuta ce l'ho» resta.
+
+Finché una migrazione non è stata lanciata, la parte corrispondente
+ricade sul comportamento di prima e lo dice: non si rompe niente, e
+l'app non resta zitta.
+
+## I bug veri trovati dai test, non dal codice
+
+Vale la pena elencarli, perché sono il motivo per cui i test si
+scrivono prima e si sabotano dopo.
+
+1. **Il totale corretto a mano veniva sovrascritto in silenzio.**
+   `updateExpenseCalc` lo riscriveva a ogni tocco su quantità o
+   tariffa.
+2. **Il campo «Importo totale» non aveva nessun gestore**, quindi
+   l'avviso sui limiti di policy non si attivava mai sulle voci a
+   importo secco — cioè quasi tutte.
+3. **Una spesa senza trasferta e senza città era invisibile** nella
+   vista che si apre per prima: il blocco delle spese da raggruppare
+   elencava i gruppi ma non le righe.
+4. **`dropKeys` non era coperto da nessun test**: togliendolo tutto
+   restava verde, perché il ripiego legge il nome della colonna dal
+   messaggio d'errore. Ma non tutti i messaggi lo contengono.
+5. **Il piè di lista non arrivava in fattura affatto** — trovato
+   leggendo `groupSummary()`, non dai test: soldi anticipati e
+   dimenticati.
+6. **Un test verde per il motivo sbagliato**: quello sul caricamento
+   della ricevuta leggeva il toast ancora fermo su «Carico la
+   ricevuta…», quindi passava anche con l'app muta sul guasto.
+
+## Cosa resta aperto
+
+- **La policy del cliente da PDF.** L'app è vanilla JS + Supabase,
+  senza server e senza modelli: non può capire un PDF da sola. Ora che
+  Supabase Storage c'è (Strato 5b), il PDF si *può* allegare al cliente,
+  e si può aggiungere un campo «incolla qui il testo della policy» con
+  un riconoscitore di schemi («massimo 35 euro per pasto», «fino a 150 €
+  a notte») che **propone** i limiti da confermare. Oppure mandi il PDF
+  di K2 e i limiti te li imposto io. Da decidere.
+- **Il piè di lista in fattura.** Oggi sta in una sezione sua, fuori dal
+  totale, perché è una partita di giro: nessun importo di fattura si è
+  mosso. Se lo vuoi *dentro* la fattura, si cambia in una riga.
+- **La diaria** (indennità giornaliera) non è stata fatta: nei portali
+  c'è, ma per un forfettario che riaddebita analiticamente serve meno.
+- **Il multi-valuta**: Geneva è in franchi, ma oggi si scrive l'importo
+  già in euro. Una conversione semplice si può aggiungere.
