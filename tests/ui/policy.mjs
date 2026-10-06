@@ -84,7 +84,9 @@ console.log('\n=== LA POLICY HA UNA PAGINA SUA, CON I LIMITI ===');
   ok(/policy/i.test(await pg.evaluate(()=>document.querySelector('#app h1, #app .screenTitle')?.textContent||'')),
      'c’è una pagina della policy');
   ok(t.includes('K2'),'che parla del cliente');
-  ok(t.includes('Pranzo/Cena')&&t.includes('Albergo')&&t.includes('Volo'),'con tutte le voci di spesa');
+  const tl=t.toLowerCase();
+  ok(tl.includes('pranzo/cena')&&tl.includes('albergo')&&tl.includes('volo'),
+     'con tutte le voci di spesa');
   // I limiti: il pezzo che prima non c'era
   ok(!!(await campo(pg,'cap_pasti')),'e un campo per il limite del pasto');
   ok((await campo(pg,'cap_pasti')).val==='35','già a 35',String((await campo(pg,'cap_pasti')).val));

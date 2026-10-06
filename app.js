@@ -233,7 +233,7 @@ function fmtDays(hours){return fmtNum(Number(hours||0)/8,2)}
 function metricLine(hours,amount){return `${fmtNum(hours,1)} h <span class="dot">·</span> ${fmtDays(hours)} gg/u <span class="dot">·</span> ${fmtEUR(amount)}`}
 function amountLine(label,amount){return `${esc(label)} <span class="dot">·</span> ${fmtEUR(amount)}`}
 function dateIT(v){if(!v)return'';const s=String(v);return `${s.slice(8,10)}/${s.slice(5,7)}`}
-function viewLabel(v){return ({tripNew:'Nuova trasferta',tripEdit:'Modifica trasferta',home:'Dashboard',timesheet:'Timesheet',billing:'Fatturazione',billingDetail:'Dettaglio fattura',tax:'Profilo fiscale',taxPayments:'Pagamenti fiscali',taxPaymentEdit:'Pagamento fiscale',annualMonths:'Consuntivato annuale',annualInvoices:'Elenco fatture',settings:'Configurazione',clients:'Clienti',clientEdit:'Cliente',projects:'Progetti',projectEdit:'Progetto',activities:'Attività',activityEdit:'Attività',expenseCategories:'Voci spesa',vehicles:'Veicoli',vehicleEdit:'Veicolo',expenseCategoryEdit:'Voce spesa',invoiceTemplates:'Template fattura',invoiceTemplateEdit:'Template fattura',appearance:'Aspetto',exportTimesheet:'Export timesheet',dailyForm:'Consuntivo giornaliero',dailyEdit:'Consuntivo giornaliero',monthlyForm:'Compenso mensile',monthlyEdit:'Compenso mensile',manualForm:'Consuntivo manuale',manualEdit:'Consuntivo manuale',expenseForm:'Spesa trasferta',expenseEdit:'Spesa trasferta'})[v]||'schermata precedente'}
+function viewLabel(v){return ({tripNew:'Nuova trasferta',tripEdit:'Modifica trasferta',home:'Dashboard',timesheet:'Timesheet',billing:'Fatturazione',billingDetail:'Dettaglio fattura',tax:'Profilo fiscale',taxPayments:'Pagamenti fiscali',taxPaymentEdit:'Pagamento fiscale',annualMonths:'Consuntivato annuale',annualInvoices:'Elenco fatture',settings:'Configurazione',clients:'Clienti',clientEdit:'Cliente',projects:'Progetti',projectEdit:'Progetto',activities:'Attività',activityEdit:'Attività',expenseCategories:'Voci spesa',vehicles:'Veicoli',vehicleEdit:'Veicolo',policyRimborsi:'Policy rimborsi',expenseCategoryEdit:'Voce spesa',invoiceTemplates:'Template fattura',invoiceTemplateEdit:'Template fattura',appearance:'Aspetto',exportTimesheet:'Export timesheet',dailyForm:'Consuntivo giornaliero',dailyEdit:'Consuntivo giornaliero',monthlyForm:'Compenso mensile',monthlyEdit:'Compenso mensile',manualForm:'Consuntivo manuale',manualEdit:'Consuntivo manuale',expenseForm:'Spesa trasferta',expenseEdit:'Spesa trasferta'})[v]||'schermata precedente'}
 function guardUnsavedChanges(){if(!state.dirty)return true;const leave=confirm('Hai modifiche non salvate. Vuoi uscire da questa schermata e perdere i dati inseriti?');if(leave){state.dirty=false;return true}return false}
 function pushHistory(){const last=state.history[state.history.length-1];const cur={view:state.view,edit:state.edit,editType:state.editType,parent:state.parent};if(!last||last.view!==cur.view||last.edit!==cur.edit||last.editType!==cur.editType)state.history.push(cur);if(state.history.length>30)state.history.shift()}
 // `parent` e' il livello sopra: il cliente di un progetto nuovo, il
@@ -968,11 +968,65 @@ function trasfertaCambiata(form){
     const d=form.expense_date.value;
     if(!d||d<tripDa(t)||d>tripA(t))form.expense_date.value=tripDa(t);
   }
-  if(form.reimbursement_type)updateExpenseCalc(form,true);
+  if(form.reimbursement_type)aggiornaCalcoloEAvviso(form,true);
 }
 function reimbTypeOptions(selected){return REIMB_TYPES.map(([v,l])=>`<option value="${v}" ${v===selected?'selected':''}>${l}</option>`).join('')}
 function parsePolicy(c){try{const p=c&&c.expense_policy;if(!p)return [];return Array.isArray(p)?p:JSON.parse(p)}catch(e){return []}}
-function clientPolicyType(clientId,categoryId){const c=clientById(clientId);if(!c)return '';const pol=parsePolicy(c);const catName=(expenseCategoryById(categoryId)||{}).name;const hit=pol.find(r=>r.category_id===categoryId||(r.category&&catName&&String(r.category).toLowerCase()===String(catName).toLowerCase()));return hit?hit.type:''}
+function policyRiga(clientId,categoryId){
+  const c=clientById(clientId);
+  if(!c)return null;
+  const pol=parsePolicy(c);
+  const catName=(expenseCategoryById(categoryId)||{}).name;
+  return pol.find(r=>r.category_id===categoryId||(r.category&&catName&&String(r.category).toLowerCase()===String(catName).toLowerCase()))||null;
+}
+function clientPolicyType(clientId,categoryId){const h=policyRiga(clientId,categoryId);return h?h.type||'':''}
+// \u2500\u2500\u2500 I limiti \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// L'editor della policy esisteva ma non aveva limiti: solo una tendina
+// coi tre tipi di rimborso. I limiti sono la sostanza di qualsiasi
+// travel policy, e l'app li deve dire MENTRE si inserisce \u2014 non a
+// fattura emessa, quando non si puo' piu' fare niente.
+function policyCap(clientId,categoryId,quantita){
+  const h=policyRiga(clientId,categoryId);
+  const cap=Number(h&&h.cap||0);
+  if(!(cap>0))return null;
+  const perUnit=!!(h&&h.per_unit);
+  const q=Math.max(1,Number(quantita||0)||1);
+  return {cap,perUnit,massimo:perUnit?cap*q:cap,quantita:q};
+}
+function sforamento(clientId,categoryId,importo,quantita){
+  const c=policyCap(clientId,categoryId,quantita);
+  if(!c)return null;
+  const ecc=Number(importo||0)-c.massimo;
+  if(!(ecc>0.005))return null;
+  return {...c,importo:Number(importo||0),eccedenza:ecc};
+}
+// L'avviso: dice il limite, l'eccedenza, e offre di spezzare. Non
+// impedisce di sforare \u2014 l'eccedenza a volte si tiene e basta.
+function avvisoPolicy(clientId,categoryId,importo,quantita){
+  const sf=sforamento(clientId,categoryId,importo,quantita);
+  if(!sf)return '';
+  const dettaglio=sf.perUnit
+    ? fmtEUR(sf.cap)+' per '+esc(unitaVoce(categoryId))+' \u00d7 '+fmtNum(sf.quantita,0)+' = '+fmtEUR(sf.massimo)
+    : fmtEUR(sf.massimo);
+  return `<div class="avvisoPolicy"><b>Oltre il limite di ${esc(clientName(clientId))}</b><div class="desc">${esc(expenseCategoryName(categoryId))}: ${dettaglio}. Tu hai messo ${fmtEUR(sf.importo)}, quindi <b>${fmtEUR(sf.eccedenza)}</b> sono oltre.</div><label class="manoLbl"><input type="checkbox" name="spezza"> Spezza in due righe: ${fmtEUR(sf.massimo)} in fattura, ${fmtEUR(sf.eccedenza)} a mio carico</label></div>`;
+}
+function unitaVoce(categoryId){
+  const cat=expenseCategoryById(categoryId);
+  return (cat&&cat.unit_label)||'unit\u00e0';
+}
+// Si ridisegna solo l'avviso, non il modulo: ridisegnare il modulo
+// mentre uno scrive gli porta via il fuoco dal campo.
+function aggiornaAvvisoPolicy(form){
+  const box=document.getElementById('policyBox');
+  if(!box||!form)return;
+  const spezzaPrima=!!(form.spezza&&form.spezza.checked);
+  box.innerHTML=avvisoPolicy(
+    form.client_id?form.client_id.value:'',
+    form.expense_category_id?form.expense_category_id.value:'',
+    Number(form.amount?form.amount.value:0),
+    Number(form.quantity?form.quantity.value:0));
+  if(spezzaPrima&&form.spezza)form.spezza.checked=true;
+}
 // ─── Il modulo della spesa, in tre blocchi ──────────────────
 // Prima erano undici campi in fila, tutti con lo stesso peso: la data
 // che cambi ogni volta accanto al costo unitario a quattro decimali che
@@ -1013,7 +1067,7 @@ function clienteSpesaCambiato(form){
     blocco.innerHTML=campiCommessaSpesa(cli,{});
     if(form.hier_project_id)hierChanged(form,'client');
   }
-  updateExpenseCalc(form,true);
+  aggiornaCalcoloEAvviso(form,true);
 }
 function campiCosa(v={}){
   const cat=expenseCategoryById(v.expense_category_id);
@@ -1024,9 +1078,9 @@ function campiCosa(v={}){
   return bloccoCampi('Cosa','La voce di spesa e quanto',
     `<div class="field"><label>Voce di spesa</label><select name="expense_category_id" onchange="voceSpesaCambiata(this.form)">${expenseOptions(v.expense_category_id||'')}</select></div>`
     +campiPercorso(v,km)
-    +`<div class="field" id="qtaField"${aQ&&!km?'':' hidden'}><label>Quantit\u00e0 <span id="qtaUnita">(${esc(unita)})</span></label><input name="quantity" type="number" step="0.01" value="${Number(v.quantity||(aQ?1:0))}" oninput="updateExpenseCalc(this.form)"></div>`
-    +`<div class="field" id="rateField"${aQ?'':' hidden'}><label id="rateLbl">${km?'Tariffa \u20ac/km':'Tariffa unitaria'}</label><input name="unit_rate" type="number" step="0.0001" value="${Number(v.unit_rate||0)}" oninput="updateExpenseCalc(this.form)">${km?'<div class="small">La proponi tu: le tabelle ACI stanno su costikm.aci.it e cambiano a gennaio. Il veicolo la suggerisce, qui si corregge.</div>':''}</div>`
-    +`<div class="field"><label>Importo totale</label><input name="amount" type="number" step="0.01" value="${Number(v.amount||0)}"${aQ?' readonly':''}><label class="manoLbl"><input type="checkbox" name="amount_a_mano" onchange="totaleAMano(this.form)"${aQ?'':' checked'}> Lo scrivo a mano</label><div class="small" id="calcNota">${aQ?NOTA_CALCOLO:NOTA_MANO}</div></div>`
+    +`<div class="field" id="qtaField"${aQ&&!km?'':' hidden'}><label>Quantit\u00e0 <span id="qtaUnita">(${esc(unita)})</span></label><input name="quantity" type="number" step="0.01" value="${Number(v.quantity||(aQ?1:0))}" oninput="aggiornaCalcoloEAvviso(this.form)"></div>`
+    +`<div class="field" id="rateField"${aQ?'':' hidden'}><label id="rateLbl">${km?'Tariffa \u20ac/km':'Tariffa unitaria'}</label><input name="unit_rate" type="number" step="0.0001" value="${Number(v.unit_rate||0)}" oninput="aggiornaCalcoloEAvviso(this.form)">${km?'<div class="small">La proponi tu: le tabelle ACI stanno su costikm.aci.it e cambiano a gennaio. Il veicolo la suggerisce, qui si corregge.</div>':''}</div>`
+    +`<div class="field"><label>Importo totale</label><input name="amount" type="number" step="0.01" value="${Number(v.amount||0)}"${aQ?' readonly':''} oninput="aggiornaAvvisoPolicy(this.form)"><label class="manoLbl"><input type="checkbox" name="amount_a_mano" onchange="totaleAMano(this.form)"${aQ?'':' checked'}> Lo scrivo a mano</label><div class="small" id="calcNota">${aQ?NOTA_CALCOLO:NOTA_MANO}</div></div>`
     +`<div class="field"><label>Descrizione</label><textarea name="description" placeholder="Es. Volo Milano\u2013Catania andata">${esc(v.description||'')}</textarea></div>`);
 }
 // I km a tratta: quello che una persona ha in testa. Il totale \u2014 che
@@ -1067,10 +1121,12 @@ function kmCambiati(form){
   const t=document.getElementById('kmTot');
   if(t)t.textContent=totaleKmTesto(tratta,ar);
   updateExpenseCalc(form);
+  aggiornaAvvisoPolicy(form);
 }
 function campiComeLaTratto(v={},nuova=false){
   return bloccoCampi('Come la tratto','Chi la paga, alla fine',
     `<div class="field"><label>Tipo rimborso</label><select name="reimbursement_type">${reimbTypeOptions(nuova?'own':expType(v))}</select></div>`
+    +`<div id="policyBox">${avvisoPolicy(v.client_id||activeClients()[0]?.id||'',v.expense_category_id||'',Number(v.amount||0),Number(v.quantity||0))}</div>`
     +`<div class="field"><label>Note</label><textarea name="notes">${esc(v.notes||'')}</textarea></div>`);
 }
 const NOTA_CALCOLO='Lo calcola l\u2019app: quantit\u00e0 \u00d7 tariffa.';
@@ -1097,6 +1153,7 @@ function voceSpesaCambiata(form){
   if(n)n.textContent=aQ?NOTA_CALCOLO:NOTA_MANO;
   if(km&&form.vehicle_id&&form.vehicle_id.value)veicoloCambiato(form);
   else updateExpenseCalc(form,true);
+  aggiornaAvvisoPolicy(form);
 }
 function totaleAMano(form){
   const aMano=!!(form.amount_a_mano&&form.amount_a_mano.checked);
@@ -1104,6 +1161,7 @@ function totaleAMano(form){
   const n=document.getElementById('calcNota');
   if(n)n.textContent=aMano?NOTA_MANO:NOTA_CALCOLO;
   if(!aMano)updateExpenseCalc(form);
+  aggiornaAvvisoPolicy(form);
 }
 function expenseForm(){
   const clients=activeClients();
@@ -1147,8 +1205,67 @@ function updateExpenseCalc(form,proposeType){
   if(Number(form.unit_rate.value||0)>0)
     form.amount.value=(Number(form.quantity.value||0)*Number(form.unit_rate.value||0)).toFixed(2);
 }
-async function saveExpense(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const rt=f.reimbursement_type||'own';const lin=f.wbs_id?wbsLineage(f.wbs_id):null;const payload={expense_date:f.expense_date,client_id:f.client_id,project_id:(lin?lin.project.id:f.project_id)||null,wbs_id:f.wbs_id||null,expense_category_id:f.expense_category_id,work_city:norm(f.work_city)||null,description:f.description||null,quantity:Number(f.quantity||0)||null,unit_rate:Number(f.unit_rate||0)||null,amount:Number(f.amount||0),reimbursement_type:rt,reimbursable:rt!=='own',notes:f.notes||null,trip_id:f.trip_id||null,vehicle_id:f.vehicle_id||null,from_place:norm(f.from_place)||null,to_place:norm(f.to_place)||null,round_trip:f.round_trip==='on'||f.round_trip===true};const {error}=await insertResilient('travel_expenses',payload,['reimbursement_type','trip_id','wbs_id','vehicle_id','from_place','to_place','round_trip']);if(error)return setMsg(error.message,7000);await reload();state.view='expenses';render()}
-async function saveExpenseEdit(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const rt=f.reimbursement_type||'own';const lin=f.wbs_id?wbsLineage(f.wbs_id):null;const payload={expense_date:f.expense_date,client_id:f.client_id,project_id:(lin?lin.project.id:f.project_id)||null,wbs_id:f.wbs_id||null,expense_category_id:f.expense_category_id,work_city:norm(f.work_city)||null,description:f.description||null,quantity:Number(f.quantity||0)||null,unit_rate:Number(f.unit_rate||0)||null,amount:Number(f.amount||0),reimbursement_type:rt,reimbursable:rt!=='own',notes:f.notes||null,trip_id:f.trip_id||null,vehicle_id:f.vehicle_id||null,from_place:norm(f.from_place)||null,to_place:norm(f.to_place)||null,round_trip:f.round_trip==='on'||f.round_trip===true};const {error}=await updateResilient('travel_expenses',payload,state.edit,['reimbursement_type','trip_id','wbs_id','vehicle_id','from_place','to_place','round_trip']);if(error)return setMsg(error.message,7000);await reload();state.view='expenses';state.edit=null;render()}
+// updateExpenseCalc esce presto in molti rami (voce non scelta, totale
+// a mano, voce non a quantita'): l'avviso va aggiornato comunque, da
+// fuori, altrimenti resta appeso a un importo vecchio.
+function aggiornaCalcoloEAvviso(form,proposeType){
+  updateExpenseCalc(form,proposeType);
+  aggiornaAvvisoPolicy(form);
+}
+// Salvare puo' scrivere DUE righe: fino al limite col tipo della
+// policy, l'eccedenza a mio carico. Lo si fa solo se chi inserisce lo
+// ha spuntato: l'avviso informa, non decide.
+const DROP_SPESA=['reimbursement_type','trip_id','wbs_id','vehicle_id','from_place','to_place','round_trip'];
+function payloadSpesa(f){
+  const rt=f.reimbursement_type||'own';
+  const lin=f.wbs_id?wbsLineage(f.wbs_id):null;
+  return {expense_date:f.expense_date,client_id:f.client_id,
+    project_id:(lin?lin.project.id:f.project_id)||null,wbs_id:f.wbs_id||null,
+    expense_category_id:f.expense_category_id,work_city:norm(f.work_city)||null,
+    description:f.description||null,
+    quantity:Number(f.quantity||0)||null,unit_rate:Number(f.unit_rate||0)||null,
+    amount:Number(f.amount||0),reimbursement_type:rt,reimbursable:rt!=='own',
+    notes:f.notes||null,trip_id:f.trip_id||null,vehicle_id:f.vehicle_id||null,
+    from_place:norm(f.from_place)||null,to_place:norm(f.to_place)||null,
+    round_trip:f.round_trip==='on'||f.round_trip===true};
+}
+async function saveExpense(ev){
+  ev.preventDefault();
+  const f=Object.fromEntries(new FormData(ev.target));
+  const payload=payloadSpesa(f);
+  const spezza=f.spezza==='on'||f.spezza===true;
+  const sf=spezza?sforamento(f.client_id,f.expense_category_id,payload.amount,payload.quantity):null;
+  if(sf){
+    const voce=expenseCategoryName(f.expense_category_id);
+    const dentro={...payload,amount:Number(sf.massimo.toFixed(2)),
+      description:payload.description||voce,
+      notes:[payload.notes,'Entro il limite '+clientName(f.client_id)+' di '+fmtEUR(sf.massimo)].filter(Boolean).join(' \u00b7 ')};
+    const fuori={...payload,amount:Number(sf.eccedenza.toFixed(2)),
+      reimbursement_type:'own',reimbursable:false,
+      quantity:null,unit_rate:null,
+      description:(payload.description||voce)+' \u2014 eccedenza oltre il limite',
+      notes:[payload.notes,'Eccedenza oltre il limite '+clientName(f.client_id)+' di '+fmtEUR(sf.massimo)].filter(Boolean).join(' \u00b7 ')};
+    const a=await insertResilient('travel_expenses',dentro,DROP_SPESA);
+    if(a.error)return setMsg('Non si \u00e8 potuta salvare: '+motivoLeggibile(a.error),9000);
+    const b=await insertResilient('travel_expenses',fuori,DROP_SPESA);
+    if(b.error){
+      await reload();
+      return setMsg('La parte in fattura \u00e8 stata salvata, l\u2019eccedenza no: '+motivoLeggibile(b.error)+' Aggiungila a mano.',11000);
+    }
+    await reload();state.view='expenses';render();
+    return setMsg('Spezzata in due: '+fmtEUR(sf.massimo)+' in fattura, '+fmtEUR(sf.eccedenza)+' a mio carico.',6000);
+  }
+  const {error}=await insertResilient('travel_expenses',payload,DROP_SPESA);
+  if(error)return setMsg('Non si \u00e8 potuta salvare: '+motivoLeggibile(error),9000);
+  await reload();state.view='expenses';render();
+}
+async function saveExpenseEdit(ev){
+  ev.preventDefault();
+  const f=Object.fromEntries(new FormData(ev.target));
+  const {error}=await updateResilient('travel_expenses',payloadSpesa(f),state.edit,DROP_SPESA);
+  if(error)return setMsg('Non si sono potute salvare le modifiche: '+motivoLeggibile(error),9000);
+  await reload();state.view='expenses';state.edit=null;render();
+}
 async function duplicateExpense(idv){const e=data.travelExpenses.find(x=>x.id===idv);if(!e)return;const copy={expense_date:new Date().toISOString().slice(0,10),client_id:e.client_id,project_id:e.project_id,wbs_id:e.wbs_id||null,trip_id:e.trip_id||null,vehicle_id:e.vehicle_id||null,from_place:e.from_place||null,to_place:e.to_place||null,round_trip:!!e.round_trip,expense_category_id:e.expense_category_id,work_site:e.work_site,work_city:e.work_city,description:e.description,quantity:e.quantity,unit_rate:e.unit_rate,amount:e.amount,reimbursement_type:expType(e),reimbursable:expType(e)!=='own',notes:e.notes};const {error}=await insertResilient('travel_expenses',copy,['reimbursement_type','wbs_id','trip_id','vehicle_id','from_place','to_place','round_trip']);if(error)return setMsg(error.message,7000);await reload();state.view='expenses';render()}
 async function deleteExpense(idv){if(!confirm('Eliminare questa spesa di trasferta?'))return;const {error}=await sb.from('travel_expenses').delete().eq('id',idv);if(error)return setMsg(error.message,7000);await reload();state.view='timesheet';render()}
 
@@ -2441,7 +2558,7 @@ function settingsRow(view,icon,title,desc,onclick){return `<div class="row" oncl
 function settings(){const email=esc(session?.user?.email||'');return appShell(`<div class="screenTitle">Impostazioni</div>
 <h2>Account</h2><div class="list">${settingsRow('account','◔','Profilo e password',email||'Dati di contatto e accesso')}</div>
 <h2>Anagrafiche</h2>${wbsReady()?`<p class="sub">Si parte dal cliente e si scende: <b>Cliente › Progetto / cliente finale › Commessa › Attività</b>.
-    Ogni livello si crea da dentro quello sopra, così non ci sono elenchi separati da tenere allineati a mano.</p>`:''}<div class="list">${settingsRow('clients','👤','Clienti','Da qui si scende a progetti, commesse e attività')}${wbsReady()?settingsRow('projects','📁','Progetti / Clienti finali','Elenco di tutti i progetti, per ritrovarli'):settingsRow('projects','📁','Progetti / Clienti finali','Collegati al cliente principale')}${wbsReady()?settingsRow('engagements','📄','Commesse','Elenco di tutte le commesse, per ritrovarle'):''}${settingsRow('activities','🏷️','Attività','PM, AMS, Gestione... l\'elenco unico da cui pescare')}${settingsRow('expenseCategories','🧾','Voci di costo / spesa','Rimborsabili e non rimborsabili')}${settingsRow('vehicles','🚗','Veicoli e rimborso km','Tariffa €/km, la scrivi tu')}</div>
+    Ogni livello si crea da dentro quello sopra, così non ci sono elenchi separati da tenere allineati a mano.</p>`:''}<div class="list">${settingsRow('clients','👤','Clienti','Da qui si scende a progetti, commesse e attività')}${wbsReady()?settingsRow('projects','📁','Progetti / Clienti finali','Elenco di tutti i progetti, per ritrovarli'):settingsRow('projects','📁','Progetti / Clienti finali','Collegati al cliente principale')}${wbsReady()?settingsRow('engagements','📄','Commesse','Elenco di tutte le commesse, per ritrovarle'):''}${settingsRow('activities','🏷️','Attività','PM, AMS, Gestione... l\'elenco unico da cui pescare')}${settingsRow('expenseCategories','🧾','Voci di costo / spesa','Rimborsabili e non rimborsabili')}${settingsRow('vehicles','🚗','Veicoli e rimborso km','Tariffa €/km, la scrivi tu')}${settingsRow('policyRimborsi','📋','Policy rimborsi per cliente','Chi paga cosa, e fino a quanto')}</div>
 <h2>Fatturazione e fisco</h2><div class="list">${settingsRow('invoiceTemplates','📄','Template fattura','Descrizioni da copiare su Fiscozen')}${settingsRow('taxSettings','%','Configurazione fiscale','Forfettario, ATECO, aliquote e proiezione')}${settingsRow('taxPayments','◈','Pagamenti fiscali','Contributi INPS e versamenti')}</div>
 <h2>Analisi e dati</h2><div class="list">${settingsRow('exportTimesheet','⬇','Export Timesheet Excel','Scarica il dettaglio mensile')}<label class="row" style="cursor:pointer"><div class="roundIcon blue">⬆</div><div><div class="title">Importa da CSV</div><div class="desc">Consuntivi in blocco</div></div><div>›</div><input type="file" accept=".csv,text/csv" style="display:none" onchange="importCsv(event)"></label></div>
 <h2>App</h2><div class="list">${settingsRow('appearance','◐','Aspetto / Tema','Chiaro o scuro')}<div class="row"><div class="roundIcon blue">☁</div><div><div class="title">Database</div><div class="desc">Supabase PostgreSQL${email?' · '+email:''}</div></div><div></div></div></div>
@@ -2454,14 +2571,68 @@ function exportTimesheet(){return appShell(`<div class="screenTitle">Export Time
 
 function clients(){return appShell(`<h1>Clienti</h1><form class="form" onsubmit="addClient(event)"><div class="field"><label>Nome cliente</label><input name="name" required></div><div class="field"><label>Codice cliente</label><input name="code" maxlength="5" placeholder="Es. SO" oninput="this.value=normCode(this.value)"><div class="small">Da 2 a 5 lettere o cifre. Entra nel codice di ogni commessa: una volta usato non si cambia piu'.</div></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h">Tariffa giornaliera 8h</option><option value="monthly_flat">Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="0"></div><button class="primary">Aggiungi cliente</button></form>${sortControl('clients')}<div class="list">${sortEntities('clients',data.clients).map(c=>`<div class="row" onclick="${wbsReady()?`openClient('${c.id}')`:`editClient('${c.id}')`}"><div></div><div><div class="title">${esc(c.name)}</div><div class="desc">${c.compensation_type==='daily_rate_8h'?'Tariffa giornaliera 8h · '+fmtEUR(c.daily_rate||0):'Una tantum mensile'} · ${c.active?'Attivo':'Disattivo'}</div></div>${moveBtns('clients',c.id)}</div>`).join('')||emptyForm('Nessun cliente ancora inserito.')}</div>`)}
 function editClient(id){navigateTo('clientEdit',{edit:id})}
-function clientPolicyEditor(c){const pol=parsePolicy(c);const typeOf=id=>{const h=pol.find(r=>r.category_id===id);return h?h.type:'own'};const cats=data.expenseCategories.filter(x=>x.active);if(!cats.length)return '<p class="sub">Crea prima delle voci di spesa per definire la policy.</p>';return `<div class="card" style="margin-top:6px">${cats.map(cat=>`<div class="policyRow"><div><div class="title">${esc(cat.name)}</div></div><select name="policy_${cat.id}">${reimbTypeOptions(typeOf(cat.id))}</select></div>`).join('')}</div>`}
-function clientEdit(){const c=clientById(state.edit);if(!c)return clients();return appShell(`<h1>Modifica cliente</h1><form class="form" onsubmit="saveClient(event)"><div class="field"><label>Nome cliente</label><input name="name" value="${esc(c.name)}" required></div><div class="field"><label>Codice cliente</label><input name="code" maxlength="5" value="${esc(c.code||'')}" oninput="this.value=normCode(this.value)"${projectsOfClient(c.id).some(p=>p.code)?' readonly title="Ha gia\' dei progetti: il codice non si cambia"':''}><div class="small">${projectsOfClient(c.id).some(p=>p.code)?'Bloccato: da questo codice dipendono i codici dei progetti.':'Da 2 a 5 lettere o cifre.'}</div></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h" ${c.compensation_type==='daily_rate_8h'?'selected':''}>Tariffa giornaliera 8h</option><option value="monthly_flat" ${c.compensation_type==='monthly_flat'?'selected':''}>Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="${Number(c.daily_rate||0)}"></div><div class="field"><label>Ore standard giornata</label><input name="standard_hours" type="number" step="0.25" value="${Number(c.standard_hours||8)}"></div><div class="field"><label>Sede operativa (base trasferte)</label><input name="base_city" value="${esc(c.base_city||'')}" placeholder="Es. Milano"></div><div class="field"><label>Attivo</label><select name="active"><option value="true" ${c.active?'selected':''}>Sì</option><option value="false" ${!c.active?'selected':''}>No</option></select></div><h2>Policy rimborsi spese</h2><p class="sub">Per ogni voce di spesa scegli come viene gestita con questo cliente. L'app la proporrà in automatico quando inserisci una spesa.</p>${clientPolicyEditor(c)}<div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteClient('${c.id}')">Elimina cliente</button><button type="button" class="secondary" onclick="${wbsReady()?`openClient('${c.id}')`:`go('clients')`}">Annulla</button></div></form>`)}
+// \u2500\u2500\u2500 Policy rimborsi: una pagina sua \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// Stava in fondo al modulo di modifica cliente, una tendina per voce,
+// senza una riga che spiegasse cosa si stesse impostando. E non aveva
+// limiti, che sono la cosa per cui una policy esiste.
+function policyClienteScelto(){
+  const cl=activeClients();
+  const id=state.edit&&clientById(state.edit)?state.edit:(cl[0]?.id||'');
+  return id;
+}
+function apriPolicy(id){navigateTo('policyRimborsi',{edit:id})}
+function cambiaClientePolicy(id){navigateTo('policyRimborsi',{edit:id,track:false})}
+function policyRimborsi(){
+  const cl=activeClients();
+  if(!cl.length)return appShell(`<div class="screenTitle">Policy rimborsi</div><div class="card">Crea prima un cliente.</div>`);
+  const id=policyClienteScelto();
+  const c=clientById(id)||cl[0];
+  const pol=parsePolicy(c);
+  const riga=cid=>pol.find(r=>r.category_id===cid)||{};
+  const cats=(data.expenseCategories||[]).filter(x=>x.active);
+  if(!cats.length)return appShell(`<div class="screenTitle">Policy rimborsi</div><div class="card">Crea prima delle voci di spesa: la policy dice cosa fare di ognuna.</div><button class="secondary" onclick="go('expenseCategories')">Vai alle voci di spesa</button>`);
+  return appShell(`<div class="screenTitle">Policy rimborsi</div><p class="sub">Per ogni voce di spesa: <b>chi la paga</b> e, se il cliente ha un tetto, <b>fino a quanto</b>. Il limite non impedisce di sforare: quando lo superi l'app te lo dice mentre inserisci, e ti offre di spezzare la spesa in due \u2014 la parte entro il tetto in fattura, l'eccedenza a tuo carico. <b>Massimo 0 = nessun limite.</b></p><div class="field"><label>Cliente</label><select onchange="cambiaClientePolicy(this.value)">${cl.map(x=>`<option value="${x.id}"${x.id===c.id?' selected':''}>${esc(x.name)}</option>`).join('')}</select></div><form class="form" onsubmit="savePolicy(event)"><input type="hidden" name="client_id" value="${c.id}">${cats.map(cat=>{
+    const r=riga(cat.id);
+    const unita=cat.unit_label?esc(cat.unit_label):'';
+    return `<div class="bloccoCampi policyVoce"><div class="bloccoTit">${esc(cat.name)}</div><div class="field"><label>Chi la paga</label><select name="policy_${cat.id}">${reimbTypeOptions(r.type||'own')}</select></div><div class="field"><label>Massimo \u20ac</label><input name="cap_${cat.id}" type="number" step="0.01" value="${Number(r.cap||0)||''}" placeholder="0 = nessun limite"></div>${unita?`<div class="field"><label>Il massimo vale</label><select name="perunit_${cat.id}"><option value="false"${r.per_unit?'':' selected'}>per l\u2019intera spesa</option><option value="true"${r.per_unit?' selected':''}>per ogni ${unita}</option></select></div>`:`<input type="hidden" name="perunit_${cat.id}" value="false">`}</div>`;
+  }).join('')}<div class="actions"><button class="primary">Salva la policy di ${esc(c.name)}</button><button type="button" class="secondary" onclick="go('settings')">Indietro</button></div></form>`);
+}
+async function savePolicy(ev){
+  ev.preventDefault();
+  const f=Object.fromEntries(new FormData(ev.target));
+  const id=f.client_id;
+  const policy=collectPolicyFromForm(f,parsePolicy(clientById(id)));
+  const res=await updateResilient('clients',{expense_policy:policy},id,['expense_policy']);
+  if(res.error)return setMsg('Non si \u00e8 potuta salvare la policy: '+motivoLeggibile(res.error),9000);
+  await reload();
+  state.view='policyRimborsi';state.edit=id;render();
+  setMsg('Policy di '+clientName(id)+' salvata.',4000);
+}
+function clientEdit(){const c=clientById(state.edit);if(!c)return clients();return appShell(`<h1>Modifica cliente</h1><form class="form" onsubmit="saveClient(event)"><div class="field"><label>Nome cliente</label><input name="name" value="${esc(c.name)}" required></div><div class="field"><label>Codice cliente</label><input name="code" maxlength="5" value="${esc(c.code||'')}" oninput="this.value=normCode(this.value)"${projectsOfClient(c.id).some(p=>p.code)?' readonly title="Ha gia\' dei progetti: il codice non si cambia"':''}><div class="small">${projectsOfClient(c.id).some(p=>p.code)?'Bloccato: da questo codice dipendono i codici dei progetti.':'Da 2 a 5 lettere o cifre.'}</div></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h" ${c.compensation_type==='daily_rate_8h'?'selected':''}>Tariffa giornaliera 8h</option><option value="monthly_flat" ${c.compensation_type==='monthly_flat'?'selected':''}>Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="${Number(c.daily_rate||0)}"></div><div class="field"><label>Ore standard giornata</label><input name="standard_hours" type="number" step="0.25" value="${Number(c.standard_hours||8)}"></div><div class="field"><label>Sede operativa (base trasferte)</label><input name="base_city" value="${esc(c.base_city||'')}" placeholder="Es. Milano"></div><div class="field"><label>Attivo</label><select name="active"><option value="true" ${c.active?'selected':''}>Sì</option><option value="false" ${!c.active?'selected':''}>No</option></select></div><h2>Policy rimborsi spese</h2><p class="sub">Per ogni voce di spesa scegli come viene gestita con questo cliente. L'app la proporrà in automatico quando inserisci una spesa.</p><div class="card"><b>Policy rimborsi</b><div class="desc" style="margin-top:4px">Chi paga ogni voce di spesa e fino a quanto. Sta in una pagina sua, così c'è spazio per i limiti.</div><button type="button" class="secondary" style="margin-top:12px" onclick="apriPolicy('${c.id}')">Apri la policy di ${esc(c.name)}</button></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteClient('${c.id}')">Elimina cliente</button><button type="button" class="secondary" onclick="${wbsReady()?`openClient('${c.id}')`:`go('clients')`}">Annulla</button></div></form>`)}
 async function addClient(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));
   // il codice cliente regge tutta la catena dei codici sotto: se non
   // lo si scrive, dal cliente non si riesce piu' a creare un progetto
   const payload={name:norm(f.name),code:normCode(f.code)||null,compensation_type:f.compensation_type,daily_rate:Number(f.daily_rate||0),standard_hours:8,active:true};const {error}=await insertResilient('clients',payload,['code']);if(error)return setMsg(error.message,7000);await reload();state.view='clients';render()}
-function collectPolicyFromForm(f){const pol=[];data.expenseCategories.forEach(cat=>{const v=f['policy_'+cat.id];if(v&&v!=='own')pol.push({category_id:cat.id,category:cat.name,type:v})});return pol}
-async function saveClient(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const policy=collectPolicyFromForm(f);const payload={name:norm(f.name),compensation_type:f.compensation_type,daily_rate:Number(f.daily_rate||0),standard_hours:Number(f.standard_hours||8),active:f.active==='true',base_city:norm(f.base_city)||null,expense_policy:policy};
+// Se il modulo non contiene nemmeno un campo della policy, la policy
+// non si tocca. Senza questa riga, salvare il cliente da un modulo
+// senza editor scriverebbe una policy vuota e i limiti sparirebbero
+// in silenzio.
+function collectPolicyFromForm(f,esistente){
+  const presenti=(data.expenseCategories||[]).some(cat=>f['policy_'+cat.id]!==undefined||f['cap_'+cat.id]!==undefined);
+  if(!presenti)return esistente||[];
+  const pol=[];
+  (data.expenseCategories||[]).forEach(cat=>{
+    const tipo=f['policy_'+cat.id]||'own';
+    const cap=Number(f['cap_'+cat.id]||0)||0;
+    const perUnit=f['perunit_'+cat.id]==='true';
+    if(tipo==='own'&&!cap)return;
+    const riga={category_id:cat.id,category:cat.name,type:tipo};
+    if(cap>0){riga.cap=cap;riga.per_unit=perUnit}
+    pol.push(riga);
+  });
+  return pol;
+}
+async function saveClient(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const policy=collectPolicyFromForm(f,parsePolicy(clientById(state.edit)));const payload={name:norm(f.name),compensation_type:f.compensation_type,daily_rate:Number(f.daily_rate||0),standard_hours:Number(f.standard_hours||8),active:f.active==='true',base_city:norm(f.base_city)||null,expense_policy:policy};
   // il codice si scrive solo se il modulo lo ha lasciato modificabile:
   // dove ci sono gia' dei progetti e' bloccato, e non va sovrascritto
   if(f.code!==undefined&&normCode(f.code))payload.code=normCode(f.code);
@@ -4144,7 +4315,7 @@ function render(){
       <button type="button" class="primary" onclick="go('home')">Torna alla dashboard</button>`;
   }
 }
-function renderInterno(){document.documentElement.setAttribute('data-view',state.view||'home');if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,reportWbs,reportEconomico,fatturazioneCommessa,engagements,engagementNew,engagementEdit,engagementDetail,projectNew,projectDetail,clientDetail,wbsEdit,importaConsuntivi,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,tripNew,tripEdit,timesheet,griglia,pivot,billing,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,vehicles,vehicleEdit,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,balance,taxSettings,tasseFuture,fatturatoDetail,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
+function renderInterno(){document.documentElement.setAttribute('data-view',state.view||'home');if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,reportWbs,reportEconomico,fatturazioneCommessa,engagements,engagementNew,engagementEdit,engagementDetail,projectNew,projectDetail,clientDetail,wbsEdit,importaConsuntivi,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,tripNew,tripEdit,timesheet,griglia,pivot,billing,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,vehicles,vehicleEdit,policyRimborsi,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,balance,taxSettings,tasseFuture,fatturatoDetail,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
 
 Object.assign(window,{
   setRep,
@@ -4353,11 +4524,16 @@ Object.assign(window,{
   expenseForm,
   updateExpenseCalc,
   cambiaVistaSpese,
+  cambiaClientePolicy,
+  savePolicy,
+  apriPolicy,
   trasfertaCambiata,
   clienteSpesaCambiato,
   voceSpesaCambiata,
   totaleAMano,
   veicoloCambiato,
+  aggiornaCalcoloEAvviso,
+  aggiornaAvvisoPolicy,
   kmCambiati,
   addVehicle,
   editVehicle,

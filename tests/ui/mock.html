@@ -29,7 +29,18 @@ function makeChain(table){
     // dell'app sul comportamento di prima non si prova mai.
     if((window.__tabelleMancanti||[]).includes(table))
       return {data:null,error:{code:'PGRST205',message:'Could not find the table \'public.'+table+'\' in the schema cache'}};
+    // Una colonna che il database non ha ancora: e' quello che vede chi
+    // non ha lanciato la migrazione. L'app deve togliere la colonna dal
+    // payload e riprovare, e senza poterlo simulare quel ripiego non si
+    // prova mai.
+    const colonnaMancante=r=>{
+      for(const c of (window.__colonneMancanti||[]))
+        if(r&&Object.prototype.hasOwnProperty.call(r,c))
+          return {data:null,error:{code:'PGRST204',message:"Could not find the '"+c+"' column of '"+table+"' in the schema cache"}};
+      return null;
+    };
     if(op==='insert'){const arr=Array.isArray(pl)?pl:[pl];
+      for(const r of arr){const e=colonnaMancante(r);if(e)return e;}
       // i vincoli veri del database, almeno quelli che l'app puo'
       // violare da sola: senza di loro il mock accetta tutto e i test
       // non vedono mai l'errore che vede la persona
@@ -49,7 +60,8 @@ function makeChain(table){
       arr.forEach(r=>{const riga={id:'n'+(++seq),...r};rows().push(riga);scritte.push(riga);
         if(!window.__ins)window.__ins=[];window.__ins.push({__table:table,...r})});
       return {data:single?(scritte[0]||null):scritte,error:null};}
-    if(op==='update'){const i=rows().findIndex(r=>r.id===eqVal);if(i>=0)rows()[i]={...rows()[i],...pl};return {data:null,error:null};}
+    if(op==='update'){const e=colonnaMancante(pl);if(e)return e;
+      const i=rows().findIndex(r=>r.id===eqVal);if(i>=0)rows()[i]={...rows()[i],...pl};return {data:null,error:null};}
     if(op==='delete'){
       // Il vincolo severo, che e' quello che l'app puo' violare: una
       // trasferta ancora referenziata da una spesa non si cancella. Se
@@ -66,6 +78,6 @@ function makeChain(table){
   const proxy=new Proxy({},{get(t,k){if(k==='then'){const p=Promise.resolve(resolve());return p.then.bind(p);}return h[k]||(()=>proxy);}});
   return proxy;
 }
-window.__stores=STORES;window.__ins=[];window.__tabelleMancanti=[];
+window.__stores=STORES;window.__ins=[];window.__tabelleMancanti=[];window.__colonneMancanti=[];
 window.supabase={createClient(){return {from(t){return makeChain(t);},auth:{async getSession(){return {data:{session:{user:{id:'u1'}}}};},onAuthStateChange(){return {data:{subscription:{unsubscribe(){}}}};}}};}};
 </script><script type="module" src="app.js"></script></body></html>
