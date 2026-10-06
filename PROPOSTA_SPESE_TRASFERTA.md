@@ -331,6 +331,11 @@ scaricando i file e confrontandoli byte per byte con quelli testati.
 | v1.30.1 | **Strato 6** — la scelta su rimborsi e reddito, default invariato | — |
 | v1.30.2 | **Strato 7** — sezione «Trasferte e spese» nel menu | — |
 | v1.31.0 | **Strato 5b** — le foto delle ricevute su Supabase Storage | `2026-10-06_ricevute-storage.sql` |
+| v1.31.1 | La ricevuta non cancella più il modulo mezzo compilato (P1 Codex) | — |
+| v1.31.2 | Il conto del rimborso km si vede: «210 km × 0,45 €/km = 94,50 €» | — |
+| v1.31.3 | Le righe vecchie coi km non vengono più azzerate scegliendo il veicolo (P1 Codex) | — |
+| v1.31.4 | Stessa protezione per le righe importate senza tariffa (P1 Codex) | — |
+| v1.31.5 | Il ripiego «importo a mano» si spegne quando la riga si completa (Codex) | — |
 
 ## Le quattro migrazioni da lanciare
 
@@ -372,6 +377,31 @@ scrivono prima e si sabotano dopo.
 6. **Un test verde per il motivo sbagliato**: quello sul caricamento
    della ricevuta leggeva il toast ancora fermo su «Carico la
    ricevuta…», quindi passava anche con l'app muta sul guasto.
+
+## I bug trovati dopo il rilascio — dall'uso vero e da Codex
+
+Questi non li ha trovati la batteria. Vale la pena dirlo.
+
+1. **Il rimborso km non calcolava l'importo** (trovato usando l'app).
+   Due cause distinte: una voce di spesa chilometrica rimasta su
+   «importo secco» nascondeva del tutto il campo della tariffa, e con
+   tariffa a zero il totale restava 0 senza dire perché. I test non
+   l'avevano preso perché la fixture era scritta sul disegno nuovo, non
+   sulle voci di spesa già esistenti. Ora la chilometrica porta sempre
+   con sé km e tariffa, e se la tariffa manca lo scrive.
+2. **Caricare una ricevuta cancellava il modulo mezzo compilato.** La
+   causa era più a monte di come era stata segnalata: `setMsg()` rifà
+   tutta la pagina, quindi perfino il messaggio «Carico la ricevuta…»
+   buttava via quello che stavi scrivendo. Ora i messaggi leggeri non
+   rifanno la pagina.
+3. **Una mia correzione ha messo a rischio dati veri.** Il ripiego
+   introdotto al punto 1 azzerava a 0,00 le righe vecchie che avevano
+   l'importo ma non i km, appena si scegliesse un veicolo — e lasciava
+   il campo in sola lettura, quindi irreparabile. Segnalato da Codex su
+   tre giri successivi (righe senza km, righe senza tariffa, e il
+   ripiego che non si spegneva mai) e sistemato ogni volta con un caso
+   di test che parte da una riga vecchia vera. Nessun dato è stato
+   perso: il difetto è stato chiuso prima che tu ci lavorassi sopra.
 
 ## Cosa resta aperto
 
