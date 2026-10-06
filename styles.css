@@ -865,3 +865,11 @@ table.griglia.numeriRiga td.riga .n{font-variant-numeric:tabular-nums}
 .manoLbl{display:flex;align-items:center;gap:9px;margin-top:9px;color:var(--muted);font-size:13px;font-weight:600;cursor:pointer;min-height:44px}
 .manoLbl input{width:20px;height:20px;flex:0 0 auto;accent-color:var(--primary)}
 .field input[readonly]{color:var(--soft);background:rgba(124,137,166,.08);border-style:dashed}
+
+/* v1.29.2 — le spese fuori trasferta si vedono, non solo si contano */
+.propGruppo{margin-top:12px}
+.propGruppo:first-of-type{margin-top:14px}
+.propHead{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:11px 13px;background:rgba(124,137,166,.10);border:1px solid var(--line);border-bottom:0}
+.propHead .secondary{width:auto;white-space:nowrap;padding:10px 14px;min-height:44px;font-size:14px}
+.propRighe{margin:0;box-shadow:none;border-radius:0}
+@media(max-width:559px){.propHead{grid-template-columns:1fr}.propHead .secondary{width:100%}}

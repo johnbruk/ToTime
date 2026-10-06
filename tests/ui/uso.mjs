@@ -331,7 +331,8 @@ const pg5=await apri(390);
 const errs5=[];pg5.on('pageerror',e=>errs5.push(e.message));
 await pg5.evaluate(()=>{const S=window.__stores;
   S.expense_categories=[
-    {id:'km',name:'Rimborso KM',active:true,reimbursable:true,calculation_type:'quantity_rate',unit_label:'km',default_unit_rate:0.45}];
+    {id:'km',name:'Rimborso KM',active:true,reimbursable:true,calculation_type:'quantity_rate',unit_label:'km',default_unit_rate:0.45,is_mileage:true}];
+  S.vehicles=[{id:'v1',name:'Panda',plate:'AB123CD',rate_per_km:0.45,aci_year:2026,active:true}];
   S.travel_expenses=[];S.trips=[];
   return window.reload();
 });
@@ -350,13 +351,20 @@ await pg5.evaluate(()=>{
   sel.value='km'; sel.dispatchEvent(new Event('change',{bubbles:true}));
 });
 await pg5.waitForTimeout(350);
+ok(await siLegge(pg5,'Km a tratta'),'e il modulo chiede i km di una tratta, non il totale');
 await pg5.evaluate(()=>{
-  const q=document.querySelector('#app [name=quantity]');
-  q.value='210'; q.dispatchEvent(new Event('input',{bubbles:true}));
+  const q=document.querySelector('#app [name=km_tratta]');
+  q.value='105'; q.dispatchEvent(new Event('input',{bubbles:true}));
 });
 await pg5.waitForTimeout(300);
+await pg5.evaluate(()=>{
+  const c=document.querySelector('#app [name=round_trip]');
+  c.checked=true; c.dispatchEvent(new Event('change',{bubbles:true}));
+});
+await pg5.waitForTimeout(300);
+ok(await siLegge(pg5,'In tutto 210 km'),'spuntando «andata e ritorno» l\'app dice 210 km');
 const tot=await pg5.evaluate(()=>document.querySelector('#app [name=amount]')?.value);
-ok(Math.abs(Number(tot)-94.5)<0.005,'210 km diventano 94,50 € senza che si debba moltiplicare a mano',String(tot));
+ok(Math.abs(Number(tot)-94.5)<0.005,'105 km andata e ritorno diventano 94,50 € senza moltiplicare a mente',String(tot));
 ok(await pg5.evaluate(()=>!!document.querySelector('#app [name=amount]')?.readOnly),
    'e il totale non si può scrivere a mano per sbaglio: una fonte di verità sola');
 ok(await siLegge(pg5,'Lo scrivo a mano'),'ma la via per correggerlo è a schermo, non nascosta');
