@@ -521,6 +521,73 @@ console.log('\n=== CAMBIANDO CLIENTE LA TARIFFA TOLTA RESTA TOLTA ===');
   await pg.close();
 }
 
+console.log('\n=== COMPLETANDO UNA RIGA VECCHIA, IL CONTO SE LA RIPRENDE ===');
+{
+  // Il ripiego «a mano» serve finche' manca un pezzo. Ma non si
+  // spegneva mai: aggiungendo la tariffa mancante, l'importo restava
+  // quello di prima accanto a km e tariffa nuovi — una cifra che
+  // contraddice il suo stesso conto — e al giro dopo veniva pure
+  // bloccata in sola lettura, perche' ormai sembrava ricostruibile.
+  const pg=await apri();
+  await pg.evaluate(()=>{
+    window.__stores.travel_expenses=[{id:'mezza',expense_date:'2026-10-29',
+      client_id:'k2',project_id:'omni',expense_category_id:'km',work_city:'Catania',
+      quantity:210,amount:94.5,reimbursement_type:'invoice'}];   // senza tariffa
+    return window.reload();
+  });
+  await pg.waitForTimeout(700);
+  await pg.evaluate(()=>window.editEntry('mezza','expense'));
+  await pg.waitForTimeout(500);
+  ok((await campo(pg,'amount_a_mano')).checked,'si apre a mano, perch\u00e9 la tariffa manca');
+  ok(!(await campo(pg,'amount')).readonly,'e l\u2019importo si pu\u00f2 scrivere');
+  // si mette la tariffa che mancava
+  await scrivi(pg,'unit_rate','0.50');
+  ok(!(await campo(pg,'amount_a_mano')).checked,
+     'messa la tariffa, il ripiego si spegne da solo');
+  ok((await campo(pg,'amount')).readonly,'e l\u2019importo torna al conto');
+  ok(Math.abs(Number((await campo(pg,'amount')).val)-105)<0.005,
+     'che lo rifa\u2019: 210 km \u00d7 0,50 = 105,00, non piu\u2019 i 94,50 di prima',
+     String((await campo(pg,'amount')).val));
+  // e salvando i tre numeri sono d'accordo fra loro
+  await pg.evaluate(()=>document.querySelector('#app form.form').requestSubmit());
+  await pg.waitForTimeout(800);
+  const e=await pg.evaluate(()=>window.__stores.travel_expenses.find(x=>x.id==='mezza'));
+  ok(e&&Math.abs(Number(e.amount)-Number(e.quantity)*Number(e.unit_rate))<0.005,
+     'e la riga salvata torna coi suoi conti: importo = km \u00d7 tariffa',
+     JSON.stringify({q:e&&e.quantity,t:e&&e.unit_rate,a:e&&e.amount}));
+  await pg.close();
+}
+
+console.log('\n=== MA UNA SCELTA DI CHI SCRIVE NON SI TOCCA ===');
+{
+  // Il ripiego si spegne da solo. La scelta di una persona no: su una
+  // riga vecchia, se chi scrive toglie la spunta e poi la rimette, da
+  // quel momento comanda lui — completare i campi non gliela deve
+  // ritogliere. E' l'unico punto in cui le due cose si distinguono.
+  const pg=await apri();
+  await pg.evaluate(()=>{
+    window.__stores.travel_expenses=[{id:'mezza2',expense_date:'2026-10-29',
+      client_id:'k2',project_id:'omni',expense_category_id:'km',work_city:'Catania',
+      quantity:210,amount:94.5,reimbursement_type:'invoice'}];   // senza tariffa
+    return window.reload();
+  });
+  await pg.waitForTimeout(700);
+  await pg.evaluate(()=>window.editEntry('mezza2','expense'));
+  await pg.waitForTimeout(500);
+  ok((await campo(pg,'amount_a_mano')).checked,'si apre a mano, per ripiego');
+  // chi scrive la toglie e poi la rimette: ora e' una decisione sua
+  await spunta(pg,'amount_a_mano',false);
+  await spunta(pg,'amount_a_mano',true);
+  await scrivi(pg,'amount','80');
+  // e completa i campi, che prima avrebbero riacceso il conto
+  await scrivi(pg,'unit_rate','0.50');
+  ok((await campo(pg,'amount_a_mano')).checked,
+     'messa a mano da una persona, la spunta resta anche completando i campi');
+  ok(Math.abs(Number((await campo(pg,'amount')).val)-80)<0.005,
+     'e l\u2019importo scritto a mano non viene ricalcolato',String((await campo(pg,'amount')).val));
+  await pg.close();
+}
+
 await b.close(); srv.close();
 console.log(`\n=== chilometrica: OK ${pass} · KO ${fail} ===`);
 process.exit(fail?1:0);
