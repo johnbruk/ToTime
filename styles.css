@@ -902,3 +902,12 @@ table.griglia.numeriRiga td.riga .n{font-variant-numeric:tabular-nums}
 .ricevutaBtn{display:grid;gap:10px;margin-top:12px}
 @media(min-width:560px){.ricevutaBtn{grid-template-columns:1fr 1fr}}
 .ricevutaNota{color:var(--muted);border-left:2px solid var(--line);padding-left:11px}
+
+/* La domanda sulle modifiche non salvate: una scheda dell'app, non un
+   avviso del browser. Deve farsi notare in cima alla schermata e dare
+   due vie d'uscita visibili, perche' prima su iOS poteva non comparire
+   affatto e lasciare tutto bloccato. */
+.uscitaCard{border-color:rgba(247,166,71,.55);background:rgba(247,166,71,.10);position:sticky;top:0;z-index:35}
+.uscitaCard b{font-size:15px}
+.uscitaBottoni{display:grid;gap:10px;margin-top:13px}
+@media(min-width:560px){.uscitaBottoni{grid-template-columns:1fr 1fr}}

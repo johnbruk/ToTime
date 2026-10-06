@@ -317,17 +317,93 @@ function metricLine(hours,amount){return `${fmtNum(hours,1)} h <span class="dot"
 function amountLine(label,amount){return `${esc(label)} <span class="dot">·</span> ${fmtEUR(amount)}`}
 function dateIT(v){if(!v)return'';const s=String(v);return `${s.slice(8,10)}/${s.slice(5,7)}`}
 function viewLabel(v){return ({tripNew:'Nuova trasferta',tripEdit:'Modifica trasferta',home:'Dashboard',timesheet:'Timesheet',billing:'Fatturazione',billingDetail:'Dettaglio fattura',tax:'Profilo fiscale',taxPayments:'Pagamenti fiscali',taxPaymentEdit:'Pagamento fiscale',annualMonths:'Consuntivato annuale',annualInvoices:'Elenco fatture',settings:'Configurazione',clients:'Clienti',clientEdit:'Cliente',projects:'Progetti',projectEdit:'Progetto',activities:'Attività',activityEdit:'Attività',expenseCategories:'Voci spesa',vehicles:'Veicoli',vehicleEdit:'Veicolo',policyRimborsi:'Policy rimborsi',expenseCategoryEdit:'Voce spesa',invoiceTemplates:'Template fattura',invoiceTemplateEdit:'Template fattura',appearance:'Aspetto',exportTimesheet:'Export timesheet',dailyForm:'Consuntivo giornaliero',dailyEdit:'Consuntivo giornaliero',monthlyForm:'Compenso mensile',monthlyEdit:'Compenso mensile',manualForm:'Consuntivo manuale',manualEdit:'Consuntivo manuale',expenseForm:'Spesa trasferta',expenseEdit:'Spesa trasferta'})[v]||'schermata precedente'}
-function guardUnsavedChanges(){if(!state.dirty)return true;const leave=confirm('Hai modifiche non salvate. Vuoi uscire da questa schermata e perdere i dati inseriti?');if(leave){state.dirty=false;return true}return false}
+// La domanda sulle modifiche non salvate non la fa piu' il browser.
+//
+// Un confirm() dentro una web app aggiunta alla schermata home, su iOS,
+// puo' restare appeso o rispondere «no» da solo quando gli avvisi sono
+// bloccati. E qui «no» significa: non navigare. Il guasto che ne
+// veniva: toccando «Spese» il gruppo non si apriva — le sue voci
+// compaiono solo quando la vista e' cambiata — e il menu restava
+// aperto su niente, senza un errore. Sembrava tutto bloccato, e in
+// pratica lo era: nessuna delle vie d'uscita passava.
+//
+// Ora la domanda e' una scheda dell'app: due pulsanti sempre visibili,
+// che nessuna impostazione del browser puo' togliere. E si infila nel
+// DOM senza ridisegnare, come il menu e i messaggi leggeri: se si
+// risponde «resta qui», il modulo e' ancora quello di prima, parola per
+// parola. Con render() si sarebbe perso proprio quello che si voleva
+// salvare.
+function guardUnsavedChanges(azione){
+  if(!state.dirty)return true;
+  // L'ULTIMA richiesta e' quella che conta. Tenendo la prima, chi
+  // toccava «Spese» e poi «Nuova spesa» finiva sull'elenco invece che
+  // sul modulo: accettava una cosa e gliene arrivava un'altra.
+  chiediUscita(azione||null);
+  return false;
+}
+function chiediUscita(azione){
+  const app=document.getElementById('app');
+  const dove=app&&app.querySelector('.app');
+  // Senza la shell non c'e' dove infilarla: meglio lasciar passare che
+  // bloccare qualcuno senza mostrargli niente.
+  if(!dove){state.dirty=false;if(typeof azione==='function')azione();return}
+  state.uscitaInSospeso=azione;
+  // La scheda c'e' gia': si aggiorna la destinazione, non si impila
+  // un'altra domanda identica.
+  if(document.getElementById('uscitaCard'))return;
+  const box=document.createElement('div');
+  box.className='card uscitaCard';
+  box.id='uscitaCard';
+  box.innerHTML='<b>Hai modifiche non salvate</b>'
+    +'<div class="desc" style="margin-top:6px">Se esci da questa schermata, quello che hai scritto e non hai ancora salvato va perso.</div>'
+    +'<div class="uscitaBottoni"><button type="button" onclick="uscitaAnnullata()">Resta qui</button>'
+    +'<button type="button" class="primary" onclick="uscitaConfermata()">Esci e perdi i dati</button></div>';
+  dove.insertBefore(box,dove.firstChild);
+  box.scrollIntoView({block:'nearest'});
+}
+function togliSchedaUscita(){
+  const c=document.getElementById('uscitaCard');
+  if(c)c.remove();
+  state.uscitaInSospeso=null;
+}
+function uscitaAnnullata(){togliSchedaUscita()}
+function uscitaConfermata(){
+  const azione=state.uscitaInSospeso;
+  togliSchedaUscita();
+  state.dirty=false;
+  if(typeof azione==='function')azione();
+}
 function pushHistory(){const last=state.history[state.history.length-1];const cur={view:state.view,edit:state.edit,editType:state.editType,parent:state.parent};if(!last||last.view!==cur.view||last.edit!==cur.edit||last.editType!==cur.editType)state.history.push(cur);if(state.history.length>30)state.history.shift()}
 // `parent` e' il livello sopra: il cliente di un progetto nuovo, il
 // progetto di una commessa nuova. Senza di lui quelle due maschere non
 // sanno sotto cosa stanno creando e ricadono sull'elenco, in silenzio.
-function navigateTo(v,{edit=null,editType=null,track=true,resetEdit=true,prefill=null,parent=null,keepMenu=false}={}){if(!guardUnsavedChanges())return;if(track&&state.view!==v)pushHistory();state.view=v;state.edit=resetEdit?edit:state.edit;state.editType=resetEdit?editType:state.editType;state.prefill=prefill;state.parent=parent;if(!keepMenu)state.menuOpen=false;clearSel();render()}
+function navigateTo(v,{edit=null,editType=null,track=true,resetEdit=true,prefill=null,parent=null,keepMenu=false,forza=false}={}){if(!forza&&!guardUnsavedChanges(()=>navigateTo(v,{edit,editType,track,resetEdit,prefill,parent,keepMenu,forza:true})))return;if(track&&state.view!==v)pushHistory();state.view=v;state.edit=resetEdit?edit:state.edit;state.editType=resetEdit?editType:state.editType;state.prefill=prefill;state.parent=parent;state.gruppoAperto=null;if(!keepMenu)state.menuOpen=false;clearSel();render()}
 function go(v){navigateTo(v)}
 // Le intestazioni del menu aprono la sezione senza chiudere il menu:
 // cosi' le sottovoci si vedono subito, con un tocco invece di tre.
-function apriGruppo(v){navigateTo(v,{keepMenu:true})}
-function back(){if(!guardUnsavedChanges())return;const prev=state.history.pop()||{view:'home',edit:null,editType:null};state.view=prev.view||'home';state.edit=prev.edit||null;state.editType=prev.editType||null;state.parent=prev.parent||null;state.menuOpen=false;render()}
+// Aprire un gruppo del menu non costa niente: si fa sempre, subito,
+// senza chiedere niente e senza ridisegnare la pagina. La pagina della
+// sezione — l'elenco delle spese, per dire — e' invece un cambio di
+// schermata vero, e quello si chiede. Prima le due cose erano una sola:
+// toccando «Spese» con un modulo aperto, il cambio veniva fermato e il
+// gruppo non si apriva nemmeno. Il menu restava aperto su niente, e da
+// li' non si raggiungeva piu' nulla.
+function apriGruppo(main){
+  const m=MENU.find(x=>x.main===main);
+  state.gruppoAperto=m?m.l:null;
+  ridisegnaMenu();
+  navigateTo(main,{keepMenu:true});
+}
+// Il menu si riscrive da solo, al suo posto: la schermata sotto non si
+// tocca, cosi' un modulo mezzo compilato resta dov'e'.
+function ridisegnaMenu(){
+  const wrap=document.querySelector('.headerMenuWrap');
+  const pan=wrap&&wrap.querySelector('.topMenu');
+  if(pan){pan.remove();wrap.insertAdjacentHTML('beforeend',menuDropdown())}
+  const side=document.querySelector('.sidebarNav');
+  if(side)side.innerHTML=navMenu();
+}
+function back(){if(!guardUnsavedChanges(()=>{state.dirty=false;back()}))return;const prev=state.history.pop()||{view:'home',edit:null,editType:null};state.view=prev.view||'home';state.edit=prev.edit||null;state.editType=prev.editType||null;state.parent=prev.parent||null;state.menuOpen=false;render()}
 // Aprire il menu NON e' uscire dalla schermata: non si perde niente, e
 // non si deve chiedere niente. Ma render() ricostruisce tutto con
 // innerHTML, quindi aprirlo cancellava davvero il modulo mezzo
@@ -343,6 +419,7 @@ function back(){if(!guardUnsavedChanges())return;const prev=state.history.pop()|
 // scegliere fra guardare il menu e tenere quello che ha scritto.
 function toggleMainMenu(){
   state.menuOpen=!state.menuOpen;
+  if(state.menuOpen)state.gruppoAperto=null;   // riparte dalla sezione in cui si e'
   const wrap=document.querySelector('.headerMenuWrap');
   if(!wrap){render();return}   // schermate senza shell: si ridisegna
   const gia=wrap.querySelector('.topMenu');
@@ -399,7 +476,11 @@ const NAV_CHILDREN={
   settings:['settings','clients','clientEdit','clientDetail','engagements','engagementDetail','engagementNew','engagementEdit','projects','projectEdit','projectDetail','projectNew','wbsEdit','activities','activityEdit','expenseCategories','expenseCategoryEdit','invoiceTemplates','invoiceTemplateEdit','appearance','account','exportTimesheet']
 };
 function navSectionLabel(view){for(const m of MENU){const key=m.main||m.v;const kids=NAV_CHILDREN[key]||[key];if(kids.includes(view))return m.l;}return null;}
-function navMenu(){const cur=navSectionLabel(state.view);return MENU.map(m=>{
+// Quale gruppo e' aperto e su quale pagina si e' sono due cose
+// distinte. Tenerle insieme voleva dire che per aprire un gruppo si
+// doveva cambiare pagina — e se il cambio veniva fermato, il gruppo
+// non si apriva nemmeno.
+function navMenu(){const cur=state.gruppoAperto||navSectionLabel(state.view);return MENU.map(m=>{
   if(!m.sub)return `<button class="${cur===m.l?'active':''}" onclick="go('${m.v}')"><span>${m.ic}</span><b>${m.l}</b></button>`;
   const open=cur===m.l;
   const parent=`<button class="navParentBtn ${open?'active':''}" onclick="apriGruppo('${m.main}')"><span>${m.ic}</span><b>${m.l}</b><i class="navChev">${open?'▾':'▸'}</i></button>`;
@@ -5087,6 +5168,7 @@ Object.assign(window,{
   clienteSpesaCambiato,
   voceSpesaCambiata,
   totaleAMano,importoACambiato,
+  uscitaAnnullata,uscitaConfermata,
   veicoloCambiato,
   aggiornaCalcoloEAvviso,
   aggiornaAvvisoPolicy,

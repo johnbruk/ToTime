@@ -66,6 +66,22 @@ const alModuloScritto=async(pg,quanto='45')=>{
   await pg.waitForTimeout(300);
 };
 
+// Un modulo sporco in un'ALTRA sezione: e' il caso che conta. Stando
+// gia' sul modulo spesa, il gruppo Spese risulta aperto da se' (la
+// vista appartiene a quella sezione) e non si proverebbe niente.
+const alConsuntivoScritto=async pg=>{
+  await pg.evaluate(()=>window.go('dailyForm'));
+  await pg.waitForTimeout(500);
+  const scritto=await pg.evaluate(()=>{
+    const campi=[...document.querySelectorAll('#app form.form input[type=text],#app form.form input:not([type]),#app form.form textarea,#app form.form input[type=number]')];
+    const c=campi.find(x=>!x.readOnly&&!x.disabled);
+    if(!c)return null;
+    c.value='qualcosa'; c.dispatchEvent(new Event('input',{bubbles:true}));
+    return c.name||'(senza nome)';
+  });
+  await pg.waitForTimeout(300);
+  return scritto;
+};
 const apri=async(sopprimiAvvisi=false)=>{
   const pg=await b.newPage({viewport:{width:390,height:844},hasTouch:true});
   const chiesti=[];
@@ -125,24 +141,119 @@ console.log('\n=== FUNZIONA ANCHE SE IL BROWSER RIFIUTA GLI AVVISI (iOS) ===');
   await pg.close();
 }
 
-console.log('\n=== MA CAMBIARE SCHERMATA DAVVERO CHIEDE ANCORA ===');
+console.log('\n=== IL TAB SPESE SI APRE DA UN’ALTRA SEZIONE, A MODULO SCRITTO ===');
 {
-  // La protezione non e' stata buttata: e' stata messa dove serve.
-  // Scegliere una destinazione perde il modulo, e quello si chiede.
+  // Il guasto come l'hai visto: «non funziona il tab spese, il menu si
+  // blocca e rimane aperto senza darti navigare». Le voci del gruppo
+  // compaiono SOLO quando la vista e' gia' cambiata; con la guardia che
+  // bloccava il cambio, il gruppo non si apriva, il menu restava aperto
+  // su niente, e da li' non si raggiungeva piu' nulla.
+  const {pg,chiesti}=await apri();
+  const campo=await alConsuntivoScritto(pg);
+  ok(!!campo,'ho un consuntivo mezzo compilato (sezione Consuntivi)',String(campo));
+  await toccaMenu(pg);
+  ok(await menuAperto(pg),'il menu si apre');
+  const primaVoci=await pg.evaluate(()=>[...document.querySelectorAll('.topMenu .navSubItem')].map(x=>x.textContent.trim()));
+  ok(!primaVoci.includes('Nuova spesa'),'e il gruppo Spese parte chiuso, come dev’essere',JSON.stringify(primaVoci));
+  await pg.evaluate(()=>{
+    const g=[...document.querySelectorAll('.topMenu button')].find(x=>/Spese/.test(x.textContent));
+    if(!g)throw new Error('il gruppo Spese non c’è nel menu');
+    g.click();
+  });
+  await pg.waitForTimeout(450);
+  const voci=await pg.evaluate(()=>[...document.querySelectorAll('.topMenu .navSubItem')].map(x=>x.textContent.trim()));
+  ok(voci.includes('Nuova spesa')&&voci.includes('Nuova trasferta'),
+     'toccando Spese il gruppo si apre e mostra le sue voci: non resta aperto su niente',JSON.stringify(voci));
+  ok(await menuAperto(pg),'col menu ancora aperto, per scegliere dove andare');
+  ok(chiesti.length===0,'e nessun avviso del browser in tutto il giro',
+     chiesti.length?chiesti[0].slice(0,50):'nessuno');
+  // e da li' si arriva davvero alla spesa nuova
+  await pg.evaluate(()=>{
+    const v=[...document.querySelectorAll('.topMenu .navSubItem')].find(x=>/Nuova spesa/.test(x.textContent));
+    v.click();
+  });
+  await pg.waitForTimeout(450);
+  ok(await pg.evaluate(()=>!!document.getElementById('uscitaCard')),
+     'scegliendo «Nuova spesa» chiede, perché il consuntivo si perderebbe');
+  await pg.evaluate(()=>window.uscitaConfermata());
+  await pg.waitForTimeout(600);
+  ok((await pg.evaluate(()=>document.documentElement.getAttribute('data-view')))==='expenseForm',
+     'e accettando si arriva al modulo spesa: il percorso va fino in fondo');
+  await pg.close();
+}
+
+console.log('\n=== CAMBIARE SCHERMATA LO CHIEDE, MA CON UNA SCHEDA DELL’APP ===');
+{
+  // La protezione non e' stata buttata: e' stata spostata dal browser
+  // all'app. Un confirm() su iOS puo' restare appeso o rispondere «no»
+  // da solo; una scheda con due pulsanti non puo' fare nessuna delle
+  // due cose.
   const {pg,chiesti}=await apri();
   await alModuloScritto(pg,'45');
   await toccaMenu(pg);
   await pg.evaluate(()=>{
     const d=[...document.querySelectorAll('.topMenu button')].find(x=>/Dashboard/.test(x.textContent));
-    if(!d)throw new Error('voce Dashboard non trovata nel menu');
+    if(!d)throw new Error('voce Dashboard non trovata');
     d.click();
   });
-  await pg.waitForTimeout(400);
-  ok(chiesti.length>0,'scegliendo una destinazione lo chiede',chiesti[0]?chiesti[0].slice(0,55):'nessuna domanda');
+  await pg.waitForTimeout(450);
+  ok(chiesti.length===0,'nessun avviso del browser: la domanda non è più sua',
+     chiesti.length?chiesti[0].slice(0,50):'nessuno');
+  ok(await pg.evaluate(()=>!!document.getElementById('uscitaCard')),
+     'compare invece una scheda nell’app');
+  const t=await pg.evaluate(()=>document.getElementById('uscitaCard').innerText.replace(/\s+/g,' '));
+  ok(/modifiche non salvate/i.test(t),'che dice di cosa si tratta',t.slice(0,60));
+  ok(/Resta qui/.test(t)&&/Esci e perdi i dati/.test(t),
+     'e offre due vie d’uscita, entrambe a schermo',t.slice(0,90));
+  // «Resta qui»: devo ritrovare il modulo come l'ho lasciato
+  await pg.evaluate(()=>window.uscitaAnnullata());
+  await pg.waitForTimeout(300);
+  ok(!(await pg.evaluate(()=>!!document.getElementById('uscitaCard'))),'scegliendo «Resta qui» la scheda se ne va');
   ok((await valore(pg,'amount'))==='45',
-     'e avendo risposto «Annulla» resto sul modulo coi miei 45: niente è andato perso',
-     String(await valore(pg,'amount')));
-  ok(await menuAperto(pg),'col menu ancora aperto, per chiuderlo e continuare a lavorare');
+     'e i 45 sono ancora nel campo: la domanda non ha ridisegnato niente',String(await valore(pg,'amount')));
+  await pg.close();
+}
+
+console.log('\n=== «ESCI» PORTA DAVVERO DOVE VOLEVO ANDARE ===');
+{
+  // Non basta che la scheda compaia: la destinazione che avevo scelto
+  // prima della domanda deve essere quella dove finisco.
+  const {pg}=await apri();
+  await alModuloScritto(pg,'45');
+  await toccaMenu(pg);
+  await pg.evaluate(()=>{
+    const d=[...document.querySelectorAll('.topMenu button')].find(x=>/Dashboard/.test(x.textContent));
+    d.click();
+  });
+  await pg.waitForTimeout(450);
+  await pg.evaluate(()=>window.uscitaConfermata());
+  await pg.waitForTimeout(600);
+  const dove=await pg.evaluate(()=>document.documentElement.getAttribute('data-view'));
+  ok(dove==='home','scegliendo «Esci» arrivo alla Dashboard, la voce che avevo toccato',String(dove));
+  ok(!(await pg.evaluate(()=>!!document.getElementById('uscitaCard'))),'e la scheda non resta appesa');
+  await pg.close();
+}
+
+console.log('\n=== NIENTE SI BLOCCA NEMMENO SE IL BROWSER NON SA FARE AVVISI ===');
+{
+  // La prova che il percorso di navigazione non tocca piu' il browser:
+  // confirm() qui ESPLODE. Prima questo avrebbe fermato tutto.
+  const {pg}=await apri();
+  await pg.evaluate(()=>{window.confirm=()=>{throw new Error('confirm vietato')}});
+  await alModuloScritto(pg,'45');
+  await toccaMenu(pg);
+  ok(await menuAperto(pg),'il menu si apre');
+  await pg.evaluate(()=>{
+    const d=[...document.querySelectorAll('.topMenu button')].find(x=>/Dashboard/.test(x.textContent));
+    d.click();
+  });
+  await pg.waitForTimeout(450);
+  ok(await pg.evaluate(()=>!!document.getElementById('uscitaCard')),
+     'e la domanda compare comunque: nessun confirm viene chiamato');
+  await pg.evaluate(()=>window.uscitaConfermata());
+  await pg.waitForTimeout(600);
+  ok((await pg.evaluate(()=>document.documentElement.getAttribute('data-view')))==='home',
+     'e si naviga fino in fondo');
   await pg.close();
 }
 
