@@ -19,7 +19,7 @@ const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);
 const repository=createRepository(sb);
 let state={cerca:'',view:'home',month:ym(today),edit:null,editType:null,loading:true,message:'',theme:localStorage.getItem('totime-theme')||'light',menuOpen:false,history:[],dirty:false,selMode:false,sel:[]};
 let session=null;
-let data={clients:[],projects:[],activities:[],entries:[],monthly:[],billingHeaders:[],profiles:[],expenseCategories:[],travelExpenses:[],manualEntries:[],invoiceTemplates:[],appSettings:[],taxSettings:[],taxPayments:[]};
+let data={clients:[],projects:[],activities:[],entries:[],monthly:[],billingHeaders:[],profiles:[],expenseCategories:[],travelExpenses:[],trips:[],manualEntries:[],invoiceTemplates:[],appSettings:[],taxSettings:[],taxPayments:[]};
 applyTheme();watchSystemTheme();
 
 
@@ -123,6 +123,46 @@ function expIsInvoice(e){return expType(e)==='invoice'}
 function expIsOwn(e){return expType(e)==='own'}
 function expIsPie(e){return expType(e)==='expense_report'}
 function expReimbursable(e){return expType(e)!=='own'}
+// ─── La trasferta ───────────────────────────────────────────────────
+// Prima di questo, una spesa era sola al mondo: il volo del 25 e il
+// rimborso km del 29 erano la stessa trasferta a Catania e l'app non
+// lo sapeva. Ora la trasferta e' un oggetto suo, e la spesa ci sta
+// dentro — ma solo se vuole: trip_id resta vuoto per i costi puri
+// (software, abbonamenti) che non sono trasferte.
+const TRIP_STATI=[['draft','Bozza'],['to_recharge','Da riaddebitare'],['invoiced','In fattura'],['closed','Chiusa']];
+function tripStatoLabel(s){const h=TRIP_STATI.find(x=>x[0]===s);return h?h[1]:'Bozza'}
+function tripStatoClass(s){return ({draft:'gray',to_recharge:'orange',invoiced:'blue',closed:'green'})[s]||'gray'}
+// Senza la migrazione la tabella non c'e': la pagina Spese deve
+// ricadere sull'elenco piatto invece di mostrare una vista vuota.
+function trasferteReady(){return !(state.missingTables&&state.missingTables.has('trips'))}
+function tripById(id){return (data.trips||[]).find(t=>t.id===id)}
+function tripSpese(id){return (data.travelExpenses||[]).filter(e=>e.trip_id===id)}
+function tripTotale(id){return tripSpese(id).reduce((s,e)=>s+Number(e.amount||0),0)}
+function tripDa(t){return String(t&&t.start_date||'')}
+function tripA(t){return String(t&&(t.end_date||t.start_date)||'')}
+// «25 – 29 ott» su una trasferta di piu' giorni, «6 ott» su una di uno.
+function tripPeriodo(t){
+  const a=tripDa(t),b=tripA(t);
+  if(!a)return '';
+  if(!b||b===a)return dateIT(a);
+  return dateIT(a)+' – '+dateIT(b);
+}
+function tripTitolo(t){
+  const dove=norm(t&&t.destination_city)||'Senza destinazione';
+  return dove+(t&&t.destination_country?' ('+t.destination_country+')':'');
+}
+// Una trasferta appartiene al mese se lo tocca, anche solo di sconfinamento:
+// una 28/10 – 2/11 si deve vedere in ottobre e in novembre.
+function tripNelMese(t,m=state.month){
+  const a=tripDa(t).slice(0,7),b=tripA(t).slice(0,7);
+  if(!a)return false;
+  return a===m||b===m||(a<m&&b>m);
+}
+function trasferteDelMese(){
+  return (data.trips||[]).filter(t=>tripNelMese(t))
+    .sort((a,b)=>tripDa(b).localeCompare(tripDa(a))||tripTitolo(a).localeCompare(tripTitolo(b)));
+}
+
 function isMissingColumnError(err){return !!err && /column|schema cache|does not exist|could not find/i.test(err.message||'')}
 function missingColumnName(err){if(!err)return null;const m=(err.message||'').match(/'([a-zA-Z_]\w*)'\s+column|column\s+'([a-zA-Z_]\w*)'|column\s+"([a-zA-Z_]\w*)"/);return m?(m[1]||m[2]||m[3]):null}
 // Esegue la scrittura; se il DB segnala una colonna mancante (schema non ancora
@@ -143,7 +183,7 @@ function fmtDays(hours){return fmtNum(Number(hours||0)/8,2)}
 function metricLine(hours,amount){return `${fmtNum(hours,1)} h <span class="dot">·</span> ${fmtDays(hours)} gg/u <span class="dot">·</span> ${fmtEUR(amount)}`}
 function amountLine(label,amount){return `${esc(label)} <span class="dot">·</span> ${fmtEUR(amount)}`}
 function dateIT(v){if(!v)return'';const s=String(v);return `${s.slice(8,10)}/${s.slice(5,7)}`}
-function viewLabel(v){return ({home:'Dashboard',timesheet:'Timesheet',billing:'Fatturazione',billingDetail:'Dettaglio fattura',tax:'Profilo fiscale',taxPayments:'Pagamenti fiscali',taxPaymentEdit:'Pagamento fiscale',annualMonths:'Consuntivato annuale',annualInvoices:'Elenco fatture',settings:'Configurazione',clients:'Clienti',clientEdit:'Cliente',projects:'Progetti',projectEdit:'Progetto',activities:'Attività',activityEdit:'Attività',expenseCategories:'Voci spesa',expenseCategoryEdit:'Voce spesa',invoiceTemplates:'Template fattura',invoiceTemplateEdit:'Template fattura',appearance:'Aspetto',exportTimesheet:'Export timesheet',dailyForm:'Consuntivo giornaliero',dailyEdit:'Consuntivo giornaliero',monthlyForm:'Compenso mensile',monthlyEdit:'Compenso mensile',manualForm:'Consuntivo manuale',manualEdit:'Consuntivo manuale',expenseForm:'Spesa trasferta',expenseEdit:'Spesa trasferta'})[v]||'schermata precedente'}
+function viewLabel(v){return ({tripNew:'Nuova trasferta',tripEdit:'Modifica trasferta',home:'Dashboard',timesheet:'Timesheet',billing:'Fatturazione',billingDetail:'Dettaglio fattura',tax:'Profilo fiscale',taxPayments:'Pagamenti fiscali',taxPaymentEdit:'Pagamento fiscale',annualMonths:'Consuntivato annuale',annualInvoices:'Elenco fatture',settings:'Configurazione',clients:'Clienti',clientEdit:'Cliente',projects:'Progetti',projectEdit:'Progetto',activities:'Attività',activityEdit:'Attività',expenseCategories:'Voci spesa',expenseCategoryEdit:'Voce spesa',invoiceTemplates:'Template fattura',invoiceTemplateEdit:'Template fattura',appearance:'Aspetto',exportTimesheet:'Export timesheet',dailyForm:'Consuntivo giornaliero',dailyEdit:'Consuntivo giornaliero',monthlyForm:'Compenso mensile',monthlyEdit:'Compenso mensile',manualForm:'Consuntivo manuale',manualEdit:'Consuntivo manuale',expenseForm:'Spesa trasferta',expenseEdit:'Spesa trasferta'})[v]||'schermata precedente'}
 function guardUnsavedChanges(){if(!state.dirty)return true;const leave=confirm('Hai modifiche non salvate. Vuoi uscire da questa schermata e perdere i dati inseriti?');if(leave){state.dirty=false;return true}return false}
 function pushHistory(){const last=state.history[state.history.length-1];const cur={view:state.view,edit:state.edit,editType:state.editType,parent:state.parent};if(!last||last.view!==cur.view||last.edit!==cur.edit||last.editType!==cur.editType)state.history.push(cur);if(state.history.length>30)state.history.shift()}
 // `parent` e' il livello sopra: il cliente di un progetto nuovo, il
@@ -169,7 +209,7 @@ const MENU=[
     {v:'importaConsuntivi',l:'Carica da foglio'},
     {v:'tmManage',l:'Incarichi continuativi'},
     {v:'pivot',l:'Analisi consuntivi'}]},
-  {main:'expenses',ic:'▦',l:'Spese',sub:[{v:'expenseForm',l:'Nuova spesa'}]},
+  {main:'expenses',ic:'▦',l:'Spese',sub:[{v:'expenseForm',l:'Nuova spesa'},{v:'tripNew',l:'Nuova trasferta'}]},
   // «Per commessa» e «Report analitico WBS» non stanno piu' qui: si
   // aprono dalla commessa a cui si riferiscono, che e' il posto dove
   // uno le cerca. Il menu non e' un elenco di tutto quello che esiste.
@@ -200,7 +240,7 @@ const MENU=[
 // chiudesse da solo a ogni clic.
 const NAV_CHILDREN={
   timesheet:['timesheet','calendario','giorno','griglia','pivot','reportWbs','tmManage','tmForm','importaConsuntivi','dailyForm','dailyEdit','monthlyForm','monthlyEdit','manualForm','manualEdit','annualMonths'],
-  expenses:['expenses','expenseForm','expenseEdit'],
+  expenses:['expenses','expenseForm','expenseEdit','tripNew','tripEdit'],
   billing:['billing','billingDetail','annualInvoices','fatturatoDetail','fatturazioneCommessa','reportEconomico'],
   tax:['tax','tasseFuture','taxPayments','taxPaymentEdit','taxSettings'],
   settings:['settings','clients','clientEdit','clientDetail','engagements','engagementDetail','engagementNew','engagementEdit','projects','projectEdit','projectDetail','projectNew','wbsEdit','activities','activityEdit','expenseCategories','expenseCategoryEdit','invoiceTemplates','invoiceTemplateEdit','appearance','account','exportTimesheet']
@@ -851,15 +891,44 @@ async function saveManualEdit(ev){ev.preventDefault();const f=Object.fromEntries
 async function duplicateManual(idv){const e=data.manualEntries.find(x=>x.id===idv);if(!e)return;const copy={entry_date:new Date().toISOString().slice(0,10),client_id:e.client_id,project_id:e.project_id,activity_id:e.activity_id,wbs_id:e.wbs_id||null,work_site:e.work_site,work_city:e.work_city,description:e.description,amount:e.amount,notes:e.notes};const {error}=await insertResilient('manual_entries',copy,['wbs_id']);if(error)return setMsg(error.message,7000);await reload();state.view='timesheet';render()}
 async function deleteManual(idv){if(!confirm('Eliminare questo consuntivo manuale?'))return;const {error}=await sb.from('manual_entries').delete().eq('id',idv);if(error)return setMsg(error.message,7000);await reload();state.view='timesheet';render()}
 
+// Le trasferte fra cui scegliere: quelle del mese piu' quella gia'
+// agganciata alla spesa, che puo' stare in un mese diverso.
+function tripScelta(selected=''){
+  const viaggi=(data.trips||[]).slice()
+    .filter(t=>tripNelMese(t)||t.id===selected)
+    .sort((a,b)=>tripDa(b).localeCompare(tripDa(a)));
+  return `<option value="">— Spesa singola, fuori trasferta —</option>${viaggi.map(t=>`<option value="${t.id}"${t.id===selected?' selected':''}>${esc(tripTitolo(t))} · ${esc(tripPeriodo(t))}</option>`).join('')}`;
+}
+function campoTrasferta(selected=''){
+  if(!trasferteReady())return '';
+  return `<div class="field"><label>Trasferta</label><select name="trip_id" onchange="trasfertaCambiata(this.form)">${tripScelta(selected)}</select><div class="small">Scegliendo una trasferta, cliente, progetto e città li prende da lei.</div></div>`;
+}
+// Scegliere la trasferta deve riempire i campi che da lei si deducono,
+// altrimenti uno li ribatte a mano e sbaglia.
+function trasfertaCambiata(form){
+  const t=tripById(form.trip_id&&form.trip_id.value);
+  if(!t)return;
+  if(t.client_id&&form.client_id){form.client_id.value=t.client_id;refreshProjectsForForm(form)}
+  if(t.project_id&&form.project_id){
+    const ok=[...form.project_id.options].some(o=>o.value===t.project_id);
+    if(ok)form.project_id.value=t.project_id;
+  }
+  if(t.destination_city&&form.work_city&&!norm(form.work_city.value))form.work_city.value=t.destination_city;
+  if(form.expense_date&&t.start_date){
+    const d=form.expense_date.value;
+    if(!d||d<tripDa(t)||d>tripA(t))form.expense_date.value=tripDa(t);
+  }
+  if(form.reimbursement_type)updateExpenseCalc(form,true);
+}
 function reimbTypeOptions(selected){return REIMB_TYPES.map(([v,l])=>`<option value="${v}" ${v===selected?'selected':''}>${l}</option>`).join('')}
 function parsePolicy(c){try{const p=c&&c.expense_policy;if(!p)return [];return Array.isArray(p)?p:JSON.parse(p)}catch(e){return []}}
 function clientPolicyType(clientId,categoryId){const c=clientById(clientId);if(!c)return '';const pol=parsePolicy(c);const catName=(expenseCategoryById(categoryId)||{}).name;const hit=pol.find(r=>r.category_id===categoryId||(r.category&&catName&&String(r.category).toLowerCase()===String(catName).toLowerCase()));return hit?hit.type:''}
-function expenseForm(){const clients=activeClients();const selected=clients[0]?.id||'';return appShell(`<h1>Nuova spesa</h1>${clients.length?`<form class="form" onsubmit="saveExpense(event)"><div class="field"><label>Data</label><input name="expense_date" type="date" value="${new Date().toISOString().slice(0,10)}"></div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form);updateExpenseCalc(this.form,true)">${clients.map(c=>`<option value="${c.id}"${c.id===selected?' selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Cliente/Progetto</label><select name="project_id">${projectOptions(selected)}</select></div><div class="field"><label>Voce spesa</label><select name="expense_category_id" onchange="updateExpenseCalc(this.form,true)">${expenseOptions()}</select></div><div class="field"><label>Tipo rimborso</label><select name="reimbursement_type">${reimbTypeOptions('own')}</select></div><div class="field"><label>Sede / Città</label><input name="work_city" placeholder="Es. Verona, Milano"></div><div class="field"><label>Descrizione</label><textarea name="description"></textarea></div><div class="field"><label>Quantità</label><input name="quantity" type="number" step="0.01" value="1" oninput="updateExpenseCalc(this.form)"></div><div class="field"><label>Costo unitario</label><input name="unit_rate" type="number" step="0.0001" value="0" oninput="updateExpenseCalc(this.form)"></div><div class="field"><label>Totale</label><input name="amount" type="number" step="0.01" value="0"></div><div class="field"><label>Note</label><textarea name="notes"></textarea></div><div class="actions"><button class="primary" data-busy="Salvataggio…">Salva</button><button type="button" class="secondary" onclick="go('expenses')">Annulla</button></div></form>`:`<div class="card">Crea prima un cliente in Impostazioni.</div>`}`)}
+function expenseForm(){const clients=activeClients();const selected=clients[0]?.id||'';return appShell(`<h1>Nuova spesa</h1>${clients.length?`<form class="form" onsubmit="saveExpense(event)"><div class="field"><label>Data</label><input name="expense_date" type="date" value="${new Date().toISOString().slice(0,10)}"></div>${campoTrasferta(state.prefill&&state.prefill.trip_id||"")}<div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form);updateExpenseCalc(this.form,true)">${clients.map(c=>`<option value="${c.id}"${c.id===selected?' selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Cliente/Progetto</label><select name="project_id">${projectOptions(selected)}</select></div><div class="field"><label>Voce spesa</label><select name="expense_category_id" onchange="updateExpenseCalc(this.form,true)">${expenseOptions()}</select></div><div class="field"><label>Tipo rimborso</label><select name="reimbursement_type">${reimbTypeOptions('own')}</select></div><div class="field"><label>Sede / Città</label><input name="work_city" placeholder="Es. Verona, Milano"></div><div class="field"><label>Descrizione</label><textarea name="description"></textarea></div><div class="field"><label>Quantità</label><input name="quantity" type="number" step="0.01" value="1" oninput="updateExpenseCalc(this.form)"></div><div class="field"><label>Costo unitario</label><input name="unit_rate" type="number" step="0.0001" value="0" oninput="updateExpenseCalc(this.form)"></div><div class="field"><label>Totale</label><input name="amount" type="number" step="0.01" value="0"></div><div class="field"><label>Note</label><textarea name="notes"></textarea></div><div class="actions"><button class="primary" data-busy="Salvataggio…">Salva</button><button type="button" class="secondary" onclick="go('expenses')">Annulla</button></div></form>`:`<div class="card">Crea prima un cliente in Impostazioni.</div>`}`)}
 function updateExpenseCalc(form,proposeType){const cat=expenseCategoryById(form.expense_category_id?.value);if(!cat)return; if(proposeType&&form.reimbursement_type){const proposed=clientPolicyType(form.client_id?.value,cat.id)||(cat.reimbursable===false?'own':'invoice');if(proposed)form.reimbursement_type.value=proposed} if(cat.calculation_type==='quantity_rate'){if((!form.unit_rate.value||Number(form.unit_rate.value)===0)&&cat.default_unit_rate)form.unit_rate.value=Number(cat.default_unit_rate)} if(Number(form.unit_rate.value||0)>0)form.amount.value=(Number(form.quantity.value||0)*Number(form.unit_rate.value||0)).toFixed(2)}
-async function saveExpense(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const rt=f.reimbursement_type||'own';const payload={expense_date:f.expense_date,client_id:f.client_id,project_id:f.project_id||null,expense_category_id:f.expense_category_id,work_city:norm(f.work_city)||null,description:f.description||null,quantity:Number(f.quantity||0)||null,unit_rate:Number(f.unit_rate||0)||null,amount:Number(f.amount||0),reimbursement_type:rt,reimbursable:rt!=='own',notes:f.notes||null};const {error}=await insertResilient('travel_expenses',payload,['reimbursement_type']);if(error)return setMsg(error.message,7000);await reload();state.view='expenses';render()}
-function expenseEdit(){const e=data.travelExpenses.find(x=>x.id===state.edit);if(!e)return timesheet();const clients=activeClients();return appShell(`<h1>Modifica spesa</h1><form class="form" onsubmit="saveExpenseEdit(event)"><div class="field"><label>Data</label><input name="expense_date" type="date" value="${esc(e.expense_date)}"></div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)">${clients.map(c=>`<option value="${c.id}" ${c.id===e.client_id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Cliente/Progetto</label><select name="project_id">${projectOptions(e.client_id,e.project_id||'')}</select></div><div class="field"><label>Voce spesa</label><select name="expense_category_id" onchange="updateExpenseCalc(this.form)">${expenseOptions(e.expense_category_id||'')}</select></div><div class="field"><label>Tipo rimborso</label><select name="reimbursement_type">${reimbTypeOptions(expType(e))}</select></div><div class="field"><label>Sede / Città</label><input name="work_city" value="${esc(e.work_city||'')}"></div><div class="field"><label>Descrizione</label><textarea name="description">${esc(e.description||'')}</textarea></div><div class="field"><label>Quantità</label><input name="quantity" type="number" step="0.01" value="${Number(e.quantity||0)}" oninput="updateExpenseCalc(this.form)"></div><div class="field"><label>Costo unitario</label><input name="unit_rate" type="number" step="0.0001" value="${Number(e.unit_rate||0)}" oninput="updateExpenseCalc(this.form)"></div><div class="field"><label>Totale</label><input name="amount" type="number" step="0.01" value="${Number(e.amount||0)}"></div><div class="field"><label>Note</label><textarea name="notes">${esc(e.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary" onclick="duplicateExpense('${e.id}')">Duplica</button><button type="button" class="secondary danger" onclick="deleteExpense('${e.id}')">Elimina</button><button type="button" class="secondary" onclick="go('expenses')">Annulla</button></div></form>`)}
-async function saveExpenseEdit(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const rt=f.reimbursement_type||'own';const payload={expense_date:f.expense_date,client_id:f.client_id,project_id:f.project_id||null,expense_category_id:f.expense_category_id,work_city:norm(f.work_city)||null,description:f.description||null,quantity:Number(f.quantity||0)||null,unit_rate:Number(f.unit_rate||0)||null,amount:Number(f.amount||0),reimbursement_type:rt,reimbursable:rt!=='own',notes:f.notes||null};const {error}=await updateResilient('travel_expenses',payload,state.edit,['reimbursement_type']);if(error)return setMsg(error.message,7000);await reload();state.view='expenses';state.edit=null;render()}
-async function duplicateExpense(idv){const e=data.travelExpenses.find(x=>x.id===idv);if(!e)return;const copy={expense_date:new Date().toISOString().slice(0,10),client_id:e.client_id,project_id:e.project_id,wbs_id:e.wbs_id||null,expense_category_id:e.expense_category_id,work_site:e.work_site,work_city:e.work_city,description:e.description,quantity:e.quantity,unit_rate:e.unit_rate,amount:e.amount,reimbursement_type:expType(e),reimbursable:expType(e)!=='own',notes:e.notes};const {error}=await insertResilient('travel_expenses',copy,['reimbursement_type','wbs_id']);if(error)return setMsg(error.message,7000);await reload();state.view='expenses';render()}
+async function saveExpense(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const rt=f.reimbursement_type||'own';const payload={expense_date:f.expense_date,client_id:f.client_id,project_id:f.project_id||null,expense_category_id:f.expense_category_id,work_city:norm(f.work_city)||null,description:f.description||null,quantity:Number(f.quantity||0)||null,unit_rate:Number(f.unit_rate||0)||null,amount:Number(f.amount||0),reimbursement_type:rt,reimbursable:rt!=='own',notes:f.notes||null,trip_id:f.trip_id||null};const {error}=await insertResilient('travel_expenses',payload,['reimbursement_type','trip_id']);if(error)return setMsg(error.message,7000);await reload();state.view='expenses';render()}
+function expenseEdit(){const e=data.travelExpenses.find(x=>x.id===state.edit);if(!e)return timesheet();const clients=activeClients();return appShell(`<h1>Modifica spesa</h1><form class="form" onsubmit="saveExpenseEdit(event)"><div class="field"><label>Data</label><input name="expense_date" type="date" value="${esc(e.expense_date)}"></div>${campoTrasferta(e.trip_id||"")}<div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)">${clients.map(c=>`<option value="${c.id}" ${c.id===e.client_id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Cliente/Progetto</label><select name="project_id">${projectOptions(e.client_id,e.project_id||'')}</select></div><div class="field"><label>Voce spesa</label><select name="expense_category_id" onchange="updateExpenseCalc(this.form)">${expenseOptions(e.expense_category_id||'')}</select></div><div class="field"><label>Tipo rimborso</label><select name="reimbursement_type">${reimbTypeOptions(expType(e))}</select></div><div class="field"><label>Sede / Città</label><input name="work_city" value="${esc(e.work_city||'')}"></div><div class="field"><label>Descrizione</label><textarea name="description">${esc(e.description||'')}</textarea></div><div class="field"><label>Quantità</label><input name="quantity" type="number" step="0.01" value="${Number(e.quantity||0)}" oninput="updateExpenseCalc(this.form)"></div><div class="field"><label>Costo unitario</label><input name="unit_rate" type="number" step="0.0001" value="${Number(e.unit_rate||0)}" oninput="updateExpenseCalc(this.form)"></div><div class="field"><label>Totale</label><input name="amount" type="number" step="0.01" value="${Number(e.amount||0)}"></div><div class="field"><label>Note</label><textarea name="notes">${esc(e.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary" onclick="duplicateExpense('${e.id}')">Duplica</button><button type="button" class="secondary danger" onclick="deleteExpense('${e.id}')">Elimina</button><button type="button" class="secondary" onclick="go('expenses')">Annulla</button></div></form>`)}
+async function saveExpenseEdit(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const rt=f.reimbursement_type||'own';const payload={expense_date:f.expense_date,client_id:f.client_id,project_id:f.project_id||null,expense_category_id:f.expense_category_id,work_city:norm(f.work_city)||null,description:f.description||null,quantity:Number(f.quantity||0)||null,unit_rate:Number(f.unit_rate||0)||null,amount:Number(f.amount||0),reimbursement_type:rt,reimbursable:rt!=='own',notes:f.notes||null,trip_id:f.trip_id||null};const {error}=await updateResilient('travel_expenses',payload,state.edit,['reimbursement_type','trip_id']);if(error)return setMsg(error.message,7000);await reload();state.view='expenses';state.edit=null;render()}
+async function duplicateExpense(idv){const e=data.travelExpenses.find(x=>x.id===idv);if(!e)return;const copy={expense_date:new Date().toISOString().slice(0,10),client_id:e.client_id,project_id:e.project_id,wbs_id:e.wbs_id||null,trip_id:e.trip_id||null,expense_category_id:e.expense_category_id,work_site:e.work_site,work_city:e.work_city,description:e.description,quantity:e.quantity,unit_rate:e.unit_rate,amount:e.amount,reimbursement_type:expType(e),reimbursable:expType(e)!=='own',notes:e.notes};const {error}=await insertResilient('travel_expenses',copy,['reimbursement_type','wbs_id','trip_id']);if(error)return setMsg(error.message,7000);await reload();state.view='expenses';render()}
 async function deleteExpense(idv){if(!confirm('Eliminare questa spesa di trasferta?'))return;const {error}=await sb.from('travel_expenses').delete().eq('id',idv);if(error)return setMsg(error.message,7000);await reload();state.view='timesheet';render()}
 
 function focusForm(){const f=document.querySelector('.app form.form');if(!f)return;const el=f.querySelector('input,select,textarea');if(!el)return;el.scrollIntoView({block:'center',behavior:'smooth'});setTimeout(()=>el.focus({preventScroll:true}),260)}
@@ -1933,7 +2002,197 @@ ${balFull()?`
 ${costsByCategoryBars(year)?`<div class="card"><b>Costi a mio carico per voce ${year}</b>${costsByCategoryBars(year)}</div>`:''}<div class="card"><b>Margine mensile ${year}</b><div class="desc" style="margin-top:2px">Compensi − costi a mio carico, mese per mese</div>${balanceMarginBars(year)}</div><h2>Andamento mensile ${year}</h2><div class="list">${annualMonthData(year).filter(m=>m.compensi||m.costi||m.rimborsiFattura||m.pieDiLista).map(m=>`<div class="row" onclick="openMonthExpenses(${year},${m.month})"><div class="date">${m.label}</div><div><div class="title">${monthNames[m.month-1]}</div><div class="desc">Compensi ${fmtEUR(m.compensi)} · Costi ${fmtEUR(m.costi)}</div></div><div class="value">${fmtEUR(m.compensi-m.costi)}</div></div>`).join('')||`<div class="empty">Nessun dato nel ${year}.</div>`}</div><button type="button" class="secondary dashToggle" onclick="toggleBalFull()">${balFull()?'▴ Nascondi dettaglio ricavi e costi':'▾ Mostra dettaglio ricavi e costi'}</button>`)}
 function openMonthExpenses(year,month){state.month=`${year}-${String(month).padStart(2,'0')}`;navigateTo('expenses')}
 function expenseTypeTag(e){const t=expType(e);const cls=t==='own'?'orange':t==='invoice'?'blue':'green';return `<span class="tag ${cls}">${reimbLabel(t)}</span>`}
-function expenses(){const rows=expenseRows().slice().sort((a,b)=>String(b.expense_date).localeCompare(String(a.expense_date)));const byDay={};rows.forEach(e=>{const d=String(e.expense_date||'').slice(0,10);(byDay[d]=byDay[d]||[]).push(e)});const days=Object.keys(byDay).sort((a,b)=>b.localeCompare(a));const costiMese=rows.filter(expIsOwn).reduce((s,e)=>s+Number(e.amount||0),0);const rimbMese=rows.filter(e=>!expIsOwn(e)).reduce((s,e)=>s+Number(e.amount||0),0);return appShell(`<h1>Spese</h1>${monthSelector()}<div class="card"><b>Riepilogo ${monthLabel(state.month)}</b><div class="statRow" style="margin-top:14px"><div class="stat tint-orange"><div class="statHead"><span class="statDot"></span><span class="statLbl">A mio carico</span></div><strong>${fmtEUR(costiMese)}</strong><small>non rimborsati</small></div><div class="stat tint-blue"><div class="statHead"><span class="statDot"></span><span class="statLbl">Rimborsi</span></div><strong>${fmtEUR(rimbMese)}</strong><small>fattura + piè di lista</small></div></div></div><button class="primary" onclick="go('expenseForm')">+ Nuova spesa</button><label class="secondary" style="display:block;text-align:center;cursor:pointer">Importa spese da CSV<input type="file" accept=".csv,text/csv" style="display:none" onchange="importCostsCsv(event)"></label>${days.map(d=>{const list=byDay[d];const sub=list.reduce((s,e)=>s+Number(e.amount||0),0);const cli=list[0]?clientName(list[0].client_id):'';const city=list.map(e=>e.work_city).find(Boolean)||'';return `<div class="card" style="padding:0;overflow:hidden"><div class="dayHead"><div><b>${dateIT(d)}</b> · ${esc(cli)}${city?' · '+esc(city):''}</div><div>${fmtEUR(sub)}</div></div><div class="list" style="box-shadow:none;border:0;margin:0">${list.map(e=>`<div class="row" onclick="editEntry('${e.id}','expense')"><div></div><div><div class="title">${esc(expenseCategoryName(e.expense_category_id))} ${expenseTypeTag(e)}</div><div class="desc">${esc(e.description||'')}${e.project_id?' · '+esc(projectName(e.project_id)):''}</div></div><div class="value">${fmtEUR(e.amount||0)}</div></div>`).join('')}</div></div>`}).join('')||emptyState('Nessuna spesa in questo mese.','+ Aggiungi una spesa',"go('expenseForm')")}`)}
+// ─── Pagina Spese: due viste ────────────────────────────────────────
+// «Per trasferta» raggruppa, «Tutte le spese» e' l'elenco per giorno
+// di sempre: chi cerca la lista piatta la trova dov'e' sempre stata.
+const SPESE_VISTE=[['trasferte','Per trasferta'],['tutte','Tutte le spese']];
+let vistaSpeseScelta=null;
+function vistaSpese(){
+  if(!trasferteReady())return 'tutte';
+  const v=vistaSpeseScelta!==null?vistaSpeseScelta:settingValue('spese_vista');
+  return SPESE_VISTE.some(x=>x[0]===v)?v:'trasferte';
+}
+async function cambiaVistaSpese(v){
+  const prima=vistaSpeseScelta;
+  vistaSpeseScelta=v;
+  render();
+  try{
+    const res=await saveSetting('spese_vista',v);
+    if(res&&res.error)throw res.error;
+  }catch(e){
+    vistaSpeseScelta=prima;
+    setMsg('La scelta non si è salvata: '+motivoLeggibile(e),5000);
+    render();
+  }
+}
+function sceltaVistaSpese(){
+  const v=vistaSpese();
+  return `<div class="tabs" role="tablist" aria-label="Come guardare le spese">${SPESE_VISTE.map(([k,l])=>
+    `<button type="button" role="tab" aria-selected="${k===v}" class="${k===v?'active':''}" onclick="cambiaVistaSpese('${k}')">${l}</button>`).join('')}</div>`;
+}
+
+// Le trasferte si aprono tutte: in un mese sono poche, e una scheda
+// chiusa che nasconde l'unica spesa del mese non aiuta nessuno.
+function trasfertaChiusa(id){return (state.trasferteChiuse||[]).includes(id)}
+function apriChiudiTrasferta(id){
+  state.trasferteChiuse=state.trasferteChiuse||[];
+  state.trasferteChiuse=trasfertaChiusa(id)?state.trasferteChiuse.filter(x=>x!==id):state.trasferteChiuse.concat([id]);
+  render();
+}
+
+function rigaSpesa(e){
+  return `<div class="row" onclick="editEntry('${e.id}','expense')"><div></div><div><div class="title">${esc(expenseCategoryName(e.expense_category_id))} ${expenseTypeTag(e)}</div><div class="desc">${dateIT(e.expense_date)}${e.description?' · '+esc(e.description):''}${e.project_id?' · '+esc(projectName(e.project_id)):''}</div></div><div class="value">${fmtEUR(e.amount||0)}</div></div>`;
+}
+
+function schedaTrasferta(t){
+  const spese=tripSpese(t.id).slice().sort((a,b)=>String(a.expense_date).localeCompare(String(b.expense_date)));
+  const tot=spese.reduce((s,e)=>s+Number(e.amount||0),0);
+  const daRiadd=spese.filter(e=>!expIsOwn(e)).reduce((s,e)=>s+Number(e.amount||0),0);
+  const mio=spese.filter(expIsOwn).reduce((s,e)=>s+Number(e.amount||0),0);
+  const chiusa=trasfertaChiusa(t.id);
+  return `<div class="cliGruppo trip"><div class="cliHead"><button type="button" class="cliToggle" aria-expanded="${!chiusa}" onclick="apriChiudiTrasferta('${t.id}')"><span class="cliChev">${chiusa?'▸':'▾'}</span><span><b>${esc(tripTitolo(t))}</b><small>${esc(tripPeriodo(t))}${t.client_id?' · '+esc(clientName(t.client_id)):''} · ${spese.length} ${spese.length===1?'spesa':'spese'}</small></span></button><div class="cliAzioni"><span class="tag ${tripStatoClass(t.status)}">${tripStatoLabel(t.status)}</span><span class="tripTot">${fmtEUR(tot)}</span></div></div>${chiusa?'':`<div class="tripCorpo"><div class="tripRighe">${spese.map(rigaSpesa).join('')||'<div class="empty">Nessuna spesa ancora in questa trasferta.</div>'}</div><div class="tripPiede"><div class="metricLine">${daRiadd>0?`Da riaddebitare <b>${fmtEUR(daRiadd)}</b>`:'Niente da riaddebitare'}${mio>0?` <span class="dot">·</span> A mio carico <b>${fmtEUR(mio)}</b>`:''}</div>${t.purpose?`<div class="desc">${esc(t.purpose)}</div>`:''}<div class="tripBtn"><button type="button" class="secondary" onclick="nuovaSpesaInTrasferta('${t.id}')">+ Spesa in questa trasferta</button><button type="button" class="secondary" onclick="editTrip('${t.id}')">Modifica trasferta</button></div></div></div>`}</div>`;
+}
+
+// ─── Raggruppare quello che c'e' gia' ───────────────────────────────
+// Senza questo, le spese inserite prima delle trasferte resterebbero
+// slegate per sempre: nessuno le riprende una per una a mano.
+function propostaTrasferte(righe){
+  const m=new Map();
+  righe.filter(e=>!e.trip_id&&e.client_id).forEach(e=>{
+    const citta=norm(e.work_city||e.work_site)||'';
+    const k=e.client_id+'|'+citta.toLowerCase();
+    if(!m.has(k))m.set(k,{client_id:e.client_id,citta,project_id:e.project_id||null,items:[]});
+    m.get(k).items.push(e);
+  });
+  return [...m.values()].map(g=>{
+    const date=g.items.map(e=>String(e.expense_date||'')).filter(Boolean).sort();
+    return {...g,dal:date[0]||'',al:date[date.length-1]||'',
+      tot:g.items.reduce((s,e)=>s+Number(e.amount||0),0)};
+  }).sort((a,b)=>String(b.dal).localeCompare(String(a.dal)));
+}
+function bloccoProposte(righe){
+  const p=propostaTrasferte(righe);
+  if(!p.length)return '';
+  return `<div class="card proposte"><b>Spese non ancora in una trasferta</b><p class="sub">Un tocco e diventano una trasferta, con destinazione e date prese dalle spese stesse.</p><div class="list" style="box-shadow:none;margin:12px 0 0">${p.map(g=>`<div class="row"><div></div><div><div class="title">${esc(g.citta||'Senza città')} · ${esc(clientName(g.client_id))}</div><div class="desc">${g.dal===g.al?dateIT(g.dal):dateIT(g.dal)+' – '+dateIT(g.al)} · ${g.items.length} ${g.items.length===1?'spesa':'spese'} · ${fmtEUR(g.tot)}</div></div><button type="button" class="secondary" onclick="creaTrasfertaDaSpese('${g.client_id}','${encodeURIComponent(g.citta)}')">Crea la trasferta</button></div>`).join('')}</div></div>`;
+}
+async function creaTrasfertaDaSpese(clientId,cittaEnc){
+  const citta=decodeURIComponent(String(cittaEnc||''));
+  const righe=expenseRows().filter(e=>!e.trip_id&&e.client_id===clientId&&norm(e.work_city||e.work_site||'').toLowerCase()===citta.toLowerCase());
+  if(!righe.length)return setMsg('Non ci sono più spese libere per questo gruppo: ricarica la pagina.',5000);
+  const date=righe.map(e=>String(e.expense_date||'')).filter(Boolean).sort();
+  const daRiadd=righe.some(e=>!expIsOwn(e));
+  setMsg('Creo la trasferta…',2500);
+  const payload={client_id:clientId,project_id:righe[0].project_id||null,
+    destination_city:citta||null,
+    start_date:date[0]||todayISO(),
+    end_date:date[date.length-1]||date[0]||todayISO(),
+    purpose:null,status:daRiadd?'to_recharge':'draft',notes:null};
+  const res=await insertReturningResilient('trips',payload);
+  if(res.error)return setMsg('Non si è potuta creare la trasferta: '+motivoLeggibile(res.error),9000);
+  const tripId=res.data&&res.data.id;
+  if(!tripId){await reload();return setMsg('La trasferta è stata creata ma non si è potuto agganciarci le spese. Apri la trasferta e aggiungile.',9000)}
+  let falliti=0;
+  for(const e of righe){
+    const r=await updateResilient('travel_expenses',{trip_id:tripId},e.id);
+    if(r.error)falliti++;
+  }
+  await reload();
+  if(falliti)return setMsg('Trasferta creata, ma '+falliti+' '+(falliti===1?'spesa non si è agganciata':'spese non si sono agganciate')+'.',9000);
+  setMsg('Trasferta creata con '+righe.length+' '+(righe.length===1?'spesa':'spese')+'.',5000);
+}
+
+function expenses(){
+  const rows=expenseRows().slice().sort((a,b)=>String(b.expense_date).localeCompare(String(a.expense_date)));
+  const costiMese=rows.filter(expIsOwn).reduce((s,e)=>s+Number(e.amount||0),0);
+  const rimbMese=rows.filter(e=>!expIsOwn(e)).reduce((s,e)=>s+Number(e.amount||0),0);
+  const vista=vistaSpese();
+  const testata=`<h1>Spese</h1>${monthSelector()}<div class="card"><b>Riepilogo ${monthLabel(state.month)}</b><div class="statRow" style="margin-top:14px"><div class="stat tint-orange"><div class="statHead"><span class="statDot"></span><span class="statLbl">A mio carico</span></div><strong>${fmtEUR(costiMese)}</strong><small>non rimborsati</small></div><div class="stat tint-blue"><div class="statHead"><span class="statDot"></span><span class="statLbl">Rimborsi</span></div><strong>${fmtEUR(rimbMese)}</strong><small>fattura + piè di lista</small></div></div></div>`;
+  const azioni=`<button class="primary" onclick="go('expenseForm')">+ Nuova spesa</button>${trasferteReady()?`<button class="secondary" onclick="go('tripNew')">+ Nuova trasferta</button>`:''}<label class="secondary" style="display:block;text-align:center;cursor:pointer">Importa spese da CSV<input type="file" accept=".csv,text/csv" style="display:none" onchange="importCostsCsv(event)"></label>`;
+  if(vista==='trasferte'){
+    const viaggi=trasferteDelMese();
+    const libere=rows.filter(e=>!e.trip_id);
+    const corpo=viaggi.map(schedaTrasferta).join('');
+    return appShell(testata+sceltaVistaSpese()+azioni+corpo+bloccoProposte(rows)+
+      (viaggi.length||libere.length?'':emptyState('Nessuna trasferta e nessuna spesa in questo mese.','+ Aggiungi una spesa',"go('expenseForm')")));
+  }
+  const byDay={};
+  rows.forEach(e=>{const d=String(e.expense_date||'').slice(0,10);(byDay[d]=byDay[d]||[]).push(e)});
+  const days=Object.keys(byDay).sort((a,b)=>b.localeCompare(a));
+  const elenco=days.map(d=>{
+    const list=byDay[d];
+    const sub=list.reduce((s,e)=>s+Number(e.amount||0),0);
+    const cli=list[0]?clientName(list[0].client_id):'';
+    const city=list.map(e=>e.work_city).find(Boolean)||'';
+    return `<div class="card" style="padding:0;overflow:hidden"><div class="dayHead"><div><b>${dateIT(d)}</b> · ${esc(cli)}${city?' · '+esc(city):''}</div><div>${fmtEUR(sub)}</div></div><div class="list" style="box-shadow:none;border:0;margin:0">${list.map(e=>`<div class="row" onclick="editEntry('${e.id}','expense')"><div></div><div><div class="title">${esc(expenseCategoryName(e.expense_category_id))} ${expenseTypeTag(e)}</div><div class="desc">${esc(e.description||'')}${e.project_id?' · '+esc(projectName(e.project_id)):''}${e.trip_id?' · '+esc(tripTitolo(tripById(e.trip_id)||{})):''}</div></div><div class="value">${fmtEUR(e.amount||0)}</div></div>`).join('')}</div></div>`;
+  }).join('')||emptyState('Nessuna spesa in questo mese.','+ Aggiungi una spesa',"go('expenseForm')");
+  return appShell(testata+(trasferteReady()?sceltaVistaSpese():'')+azioni+elenco);
+}
+
+// ─── Il modulo della trasferta ──────────────────────────────────────
+function tripCampi(t={}){
+  const clients=activeClients();
+  const sel=t.client_id||clients[0]?.id||'';
+  return `<div class="field"><label>Destinazione</label><input name="destination_city" value="${esc(t.destination_city||'')}" placeholder="Es. Catania" required></div><div class="field"><label>Paese</label><input name="destination_country" value="${esc(t.destination_country||'')}" placeholder="IT, CH, DE…" maxlength="3" oninput="this.value=this.value.toUpperCase()"></div><div class="field"><label>Dal</label><input name="start_date" type="date" value="${esc(t.start_date||todayISO())}" required></div><div class="field"><label>Al</label><input name="end_date" type="date" value="${esc(t.end_date||t.start_date||todayISO())}"></div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)">${clients.map(c=>`<option value="${c.id}"${c.id===sel?' selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Cliente/Progetto</label><select name="project_id">${projectOptions(sel,t.project_id||'')}</select></div><div class="field"><label>Motivo</label><input name="purpose" value="${esc(t.purpose||'')}" placeholder="Es. Go-live Omnichannel"></div><div class="field"><label>Stato</label><select name="status">${TRIP_STATI.map(([v,l])=>`<option value="${v}"${(t.status||'draft')===v?' selected':''}>${l}</option>`).join('')}</select></div><div class="field"><label>Note</label><textarea name="notes">${esc(t.notes||'')}</textarea></div>`;
+}
+function tripNew(){
+  const clients=activeClients();
+  if(!clients.length)return appShell(`<h1>Nuova trasferta</h1><div class="card">Crea prima un cliente in Impostazioni.</div>`);
+  return appShell(`<h1>Nuova trasferta</h1><p class="sub">La trasferta tiene insieme le spese di un viaggio: volo, albergo, pasti, chilometri. Le spese si aggiungono dopo, da dentro la trasferta.</p><form class="form" onsubmit="saveTrip(event)">${tripCampi({})}<div class="actions"><button class="primary" data-busy="Salvataggio…">Salva trasferta</button><button type="button" class="secondary" onclick="go('expenses')">Annulla</button></div></form>`);
+}
+function tripPayload(f){
+  return {client_id:f.client_id||null,project_id:f.project_id||null,
+    destination_city:norm(f.destination_city)||null,
+    destination_country:norm(f.destination_country)||null,
+    start_date:f.start_date||null,end_date:f.end_date||f.start_date||null,
+    purpose:norm(f.purpose)||null,status:f.status||'draft',notes:f.notes||null};
+}
+async function saveTrip(ev){
+  ev.preventDefault();
+  const f=Object.fromEntries(new FormData(ev.target));
+  const res=await insertReturningResilient('trips',tripPayload(f));
+  if(res.error)return setMsg('Non si è potuta salvare la trasferta: '+motivoLeggibile(res.error),9000);
+  await reload();
+  state.view='expenses';
+  vistaSpeseScelta='trasferte';
+  render();
+  setMsg('Trasferta creata. Ora aggiungici le spese.',5000);
+}
+function editTrip(id){navigateTo('tripEdit',{edit:id})}
+function tripEdit(){
+  const t=tripById(state.edit);
+  if(!t)return expenses();
+  const spese=tripSpese(t.id);
+  return appShell(`<h1>Modifica trasferta</h1><p class="sub">${esc(tripTitolo(t))} · ${esc(tripPeriodo(t))} · ${spese.length} ${spese.length===1?'spesa':'spese'} · ${fmtEUR(tripTotale(t.id))}</p><form class="form" onsubmit="saveTripEdit(event)">${tripCampi(t)}<div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary" onclick="nuovaSpesaInTrasferta('${t.id}')">+ Spesa in questa trasferta</button><button type="button" class="secondary danger" onclick="deleteTrip('${t.id}')">Elimina trasferta</button><button type="button" class="secondary" onclick="go('expenses')">Annulla</button></div></form>`);
+}
+async function saveTripEdit(ev){
+  ev.preventDefault();
+  const f=Object.fromEntries(new FormData(ev.target));
+  const res=await updateResilient('trips',tripPayload(f),state.edit);
+  if(res.error)return setMsg('Non si sono potute salvare le modifiche: '+motivoLeggibile(res.error),9000);
+  await reload();
+  state.view='expenses';state.edit=null;render();
+  setMsg('Trasferta aggiornata.',4000);
+}
+// Eliminare la trasferta non deve mai portarsi via le spese: si
+// sganciano e tornano libere nell'elenco, dove si vedono ancora.
+async function deleteTrip(id){
+  const spese=tripSpese(id);
+  const avviso=spese.length
+    ? 'Eliminare questa trasferta? Le '+spese.length+' spese NON vengono cancellate: tornano libere nell’elenco.'
+    : 'Eliminare questa trasferta?';
+  if(!confirm(avviso))return;
+  for(const e of spese){
+    const r=await updateResilient('travel_expenses',{trip_id:null},e.id);
+    if(r.error)return setMsg('Non si è potuta sganciare una spesa, la trasferta non è stata eliminata: '+motivoLeggibile(r.error),9000);
+  }
+  const {error}=await sb.from('trips').delete().eq('id',id);
+  if(error)return setMsg('Non si è potuta eliminare la trasferta: '+motivoLeggibile(error),9000);
+  await reload();
+  state.view='expenses';state.edit=null;render();
+  setMsg(spese.length?'Trasferta eliminata. Le spese sono tornate libere nell’elenco.':'Trasferta eliminata.',5000);
+}
+function nuovaSpesaInTrasferta(id){navigateTo('expenseForm',{prefill:{trip_id:id}})}
+
 async function ensureExpenseCategory(name,reimbursable){if(!name)return null;let c=data.expenseCategories.find(x=>x.name.toLowerCase()===name.toLowerCase());if(c)return c;const {data:row,error}=await insertReturningResilient('expense_categories',{name,calculation_type:'manual_amount',invoice_macro:'Spese di trasferta',reimbursable:reimbursable!==false,active:true},['reimbursable']);if(error)throw error;data.expenseCategories.push(row);return row}
 function excelSerialToDate(v){const n=Number(String(v).replace(',','.'));if(!isFinite(n)||n<20000||n>90000)return '';return new Date(Date.UTC(1899,11,30)+Math.round(n)*86400000).toISOString().slice(0,10)}
 function parseReimbType(v){const s=String(v||'').toLowerCase().trim();if(!s)return '';if(/expense[_ ]?report|pie|piè|piede|lista/.test(s))return 'expense_report';if(/invoice|fattura/.test(s))return 'invoice';if(/own|carico|costo|proprio|non\s*rimbors/.test(s))return 'own';return ''}
@@ -3596,7 +3855,7 @@ function render(){
       <button type="button" class="primary" onclick="go('home')">Torna alla dashboard</button>`;
   }
 }
-function renderInterno(){document.documentElement.setAttribute('data-view',state.view||'home');if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,reportWbs,reportEconomico,fatturazioneCommessa,engagements,engagementNew,engagementEdit,engagementDetail,projectNew,projectDetail,clientDetail,wbsEdit,importaConsuntivi,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,timesheet,griglia,pivot,billing,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,balance,taxSettings,tasseFuture,fatturatoDetail,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
+function renderInterno(){document.documentElement.setAttribute('data-view',state.view||'home');if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,reportWbs,reportEconomico,fatturazioneCommessa,engagements,engagementNew,engagementEdit,engagementDetail,projectNew,projectDetail,clientDetail,wbsEdit,importaConsuntivi,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,tripNew,tripEdit,timesheet,griglia,pivot,billing,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,balance,taxSettings,tasseFuture,fatturatoDetail,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
 
 Object.assign(window,{
   setRep,
@@ -3804,6 +4063,16 @@ Object.assign(window,{
   deleteManual,
   expenseForm,
   updateExpenseCalc,
+  cambiaVistaSpese,
+  trasfertaCambiata,
+  apriChiudiTrasferta,
+  creaTrasfertaDaSpese,
+  saveTrip,
+  saveTripEdit,
+  editTrip,
+  deleteTrip,
+  nuovaSpesaInTrasferta,
+
   saveExpense,
   expenseEdit,
   saveExpenseEdit,

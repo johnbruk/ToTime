@@ -8,6 +8,7 @@ export const APP_DATA_KEYS = [
   'profiles',
   'expenseCategories',
   'travelExpenses',
+  'trips',
   'manualEntries',
   'invoiceTemplates',
   'appSettings',

@@ -274,8 +274,58 @@ const perCliente=await pg3.evaluate(()=>[...document.querySelectorAll('#app .cli
   .every(b=>/\('[^']+'\)/.test(b.getAttribute('onclick')||'')));
 ok(perCliente,'e ogni pulsante manda i dati di un cliente solo');
 
-ok(errs.length===0&&errs2.length===0&&errs3.length===0,'nessun errore JS lungo i percorsi',
-   errs.concat(errs2,errs3).slice(0,2).join(' | ')||'nessuno');
-await pg.close();await pg2.close();await pg3.close();await b.close();srv.close();
+console.log('\n=== Percorso: «metto in ordine le spese di una trasferta» ===');
+// Si parte dalla Dashboard e si arriva a raggruppare delle spese in una
+// trasferta senza sapere dove sta niente: si tocca quello che si legge.
+const pg4=await apri(390);
+const errs4=[];pg4.on('pageerror',e=>errs4.push(e.message));
+await pg4.evaluate(()=>{const S=window.__stores;
+  S.expense_categories=[{id:'volo',name:'Volo',active:true,reimbursable:true,calculation_type:'manual_amount'}];
+  S.travel_expenses=[
+    {id:'t1',expense_date:'2026-07-14',client_id:'c1',project_id:'p1',expense_category_id:'volo',work_city:'Catania',amount:428,reimbursement_type:'invoice'},
+    {id:'t2',expense_date:'2026-07-16',client_id:'c1',project_id:'p1',expense_category_id:'volo',work_city:'Catania',amount:390,reimbursement_type:'invoice'}];
+  S.trips=[];
+  return window.reload();
+});
+await pg4.waitForTimeout(700);
+await tocca(pg4,'☰',{dove:'body'});
+ok(await tocca(pg4,'Spese',{dove:'body'}),'dal menu si arriva alle Spese');
+await pg4.waitForTimeout(300);
+// sul mese che ha le spese, come farebbe chi le cerca
+for(let i=0;i<36;i++){
+  if(/Luglio 2026/.test(await pg4.evaluate(()=>document.querySelector('#app .month strong')?.textContent||'')))break;
+  await pg4.evaluate(()=>{const b=[...document.querySelectorAll('#app .month button')][0];if(b)b.click()});
+  await pg4.waitForTimeout(120);
+}
+await pg4.waitForTimeout(400);
+ok(/Spese/i.test(await schermata(pg4)),'si è sulla pagina Spese',await schermata(pg4));
+ok(await siLegge(pg4,'Spese non ancora in una trasferta'),
+   'l\'app fa notare da sola che quelle spese non stanno in una trasferta');
+ok(await tocca(pg4,'Crea la trasferta'),'e il pulsante per rimediare si legge e si tocca');
+await pg4.waitForTimeout(500);
+ok((await pg4.evaluate(()=>(window.__stores.trips||[]).length))===1,
+   'la trasferta è nata',String(await pg4.evaluate(()=>(window.__stores.trips||[]).length)));
+ok(await siLegge(pg4,'818,00'),'e la scheda dice quanto è costata, 428 + 390');
+// E la cosa nuova deve essere possibile anche dall'altra vista della
+// pagina: una funzione che esiste in una vista sola è irraggiungibile
+// per chi apre l'altra. È l'errore del «Segna pagata».
+ok(await tocca(pg4,'Tutte le spese'),'si passa all\'altra vista della pagina');
+ok(await siLegge(pg4,'Catania'),'e le spese si vedono anche lì');
+const vociMenu=await pg4.evaluate(()=>{
+  const btn=[...document.querySelectorAll('body button')].find(b=>b.textContent.trim()==='☰');
+  if(btn)btn.click();
+  return true;
+});
+await pg4.waitForTimeout(400);
+await tocca(pg4,'Spese',{dove:'body'});
+await pg4.waitForTimeout(250);
+ok(await tocca(pg4,'Nuova trasferta',{dove:'body'}),'e dal menu si crea una trasferta da zero');
+await pg4.waitForTimeout(300);
+ok(await pg4.evaluate(()=>!!document.querySelector('#app form.form [name=destination_city]')),
+   'che apre un modulo in cui si può scrivere la destinazione',await schermata(pg4));
+
+ok(errs.length===0&&errs2.length===0&&errs3.length===0&&errs4.length===0,'nessun errore JS lungo i percorsi',
+   errs.concat(errs2,errs3,errs4).slice(0,2).join(' | ')||'nessuno');
+await pg.close();await pg2.close();await pg3.close();await pg4.close();await b.close();srv.close();
 console.log(`\nRISULTATO: ${pass} OK / ${fail} KO`);
 if(fail)process.exitCode=1;

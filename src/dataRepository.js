@@ -8,6 +8,7 @@ const DEFAULT_TABLES = [
   ['billing_headers', 'billingHeaders'],
   ['expense_categories', 'expenseCategories'],
   ['travel_expenses', 'travelExpenses'],
+  ['trips', 'trips'],
   ['manual_entries', 'manualEntries'],
   ['invoice_templates', 'invoiceTemplates'],
   ['app_settings', 'appSettings'],
@@ -25,7 +26,11 @@ const DEFAULT_TABLES = [
 // mostrare all'utente: l'app deve funzionare in entrambi i casi.
 const OPTIONAL_TABLES = new Set([
   'engagements', 'engagement_references', 'wbs_items',
-  'billing_lines', 'invoice_line_allocations'
+  'billing_lines', 'invoice_line_allocations',
+  // Le trasferte: finche' la migrazione non e' stata lanciata la
+  // tabella non esiste, e l'app deve funzionare comunque — la pagina
+  // Spese ricade sull'elenco piatto di sempre.
+  'trips'
 ]);
 
 function isMissingTable(error) {
@@ -41,6 +46,7 @@ function orderedQuery(sb, table) {
 
   if (table === 'timesheet_entries') return query.order('entry_date', { ascending: false });
   if (table === 'travel_expenses') return query.order('expense_date', { ascending: false });
+  if (table === 'trips') return query.order('start_date', { ascending: false });
   if (table === 'manual_entries') return query.order('entry_date', { ascending: false });
   if (table === 'monthly_compensations') return query.order('year', { ascending: false }).order('month', { ascending: false });
   if (table === 'invoice_templates') return query.order('sort_order', { ascending: true });
@@ -95,6 +101,7 @@ export function createRepository(sb) {
     billing: tableApi(sb, 'billing_headers'),
     expenseCategories: tableApi(sb, 'expense_categories'),
     travelExpenses: tableApi(sb, 'travel_expenses'),
+    trips: tableApi(sb, 'trips'),
     manualEntries: tableApi(sb, 'manual_entries'),
     invoiceTemplates: tableApi(sb, 'invoice_templates'),
     appSettings: tableApi(sb, 'app_settings'),
