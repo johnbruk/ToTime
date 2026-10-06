@@ -233,6 +233,115 @@ console.log('\n=== NIENTE TABELLA VEICOLI, NIENTE DANNI ===');
   await pg.close();
 }
 
+console.log('\n=== UNA VOCE CHILOMETRICA \u00c8 KM \u00d7 TARIFFA, QUALUNQUE COSA DICA IL «TIPO CALCOLO» ===');
+{
+  // Il guasto vero, trovato usando l'app e non i miei test: le voci che
+  // esistevano prima che is_mileage esistesse sono rimaste su «Importo
+  // manuale». La migrazione le marca chilometriche, il modulo mostra i
+  // km... e il campo della tariffa SPARISCE, perche' dipendeva dal
+  // tipo calcolo. Scrivevi i km e restavi a zero, senza nemmeno un
+  // posto dove mettere la tariffa. I miei test non lo vedevano perche'
+  // la fixture era scritta a immagine del mio disegno.
+  const pg=await apri();
+  await pg.evaluate(()=>{
+    window.__stores.expense_categories=[
+      {id:'km',name:'Rimborso KM',active:true,reimbursable:true,
+       calculation_type:'manual_amount',   // <-- com'\u00e8 nei dati veri
+       unit_label:'km',default_unit_rate:0.45,is_mileage:true}];
+    return window.reload();
+  });
+  await pg.waitForTimeout(700);
+  await alModulo(pg);
+  await scrivi(pg,'expense_category_id','km');
+  ok(!(await campo(pg,'unit_rate')).hidden,
+     'la tariffa si vede comunque: una chilometrica senza tariffa non \u00e8 niente');
+  ok(Number((await campo(pg,'unit_rate')).val)===0.45,
+     'e viene proposta quella della voce',String((await campo(pg,'unit_rate')).val));
+  await scrivi(pg,'km_tratta','105');
+  await spunta(pg,'round_trip');
+  ok(Math.abs(Number((await campo(pg,'amount')).val)-94.5)<0.005,
+     'e l\u2019importo si calcola: 210 km \u00d7 0,45 = 94,50',String((await campo(pg,'amount')).val));
+  // e si salva con l'importo giusto, che era il punto
+  await pg.evaluate(()=>document.querySelector('#app form.form').requestSubmit());
+  await pg.waitForTimeout(800);
+  const e=await pg.evaluate(()=>(window.__stores.travel_expenses||[]).slice(-1)[0]||null);
+  ok(e&&Math.abs(Number(e.amount)-94.5)<0.005,
+     'e la spesa salvata porta l\u2019importo, non uno zero',String(e&&e.amount));
+  await pg.close();
+}
+
+console.log('\n=== SENZA TARIFFA, L\u2019APP LO DICE INVECE DI LASCIARE ZERO ===');
+{
+  // L'altro modo di restare a zero: nessuna tariffa sulla voce e
+  // nessun veicolo. L'importo resta zero \u2014 ed \u00e8 giusto \u2014 ma prima
+  // non lo spiegava nessuno.
+  const pg=await apri();
+  await pg.evaluate(()=>{
+    window.__stores.expense_categories=[
+      {id:'km',name:'Rimborso KM',active:true,reimbursable:true,
+       calculation_type:'quantity_rate',unit_label:'km',default_unit_rate:0,is_mileage:true}];
+    window.__stores.vehicles=[];
+    return window.reload();
+  });
+  await pg.waitForTimeout(700);
+  await alModulo(pg);
+  await scrivi(pg,'expense_category_id','km');
+  await scrivi(pg,'km_tratta','105');
+  await spunta(pg,'round_trip');
+  const t=(await testo(pg)).toLowerCase();
+  ok(/manca la tariffa/.test(t),'l\u2019app dice che manca la tariffa',t.slice(Math.max(0,t.indexOf('manca la tariffa')-30),t.indexOf('manca la tariffa')+110));
+  ok(/veicolo/.test(t),'e dice anche come rimediare: scriverla o scegliere un veicolo');
+  // ...e mettendola, il conto parte
+  await scrivi(pg,'unit_rate','0.45');
+  ok(Math.abs(Number((await campo(pg,'amount')).val)-94.5)<0.005,
+     'messa la tariffa, l\u2019importo arriva',String((await campo(pg,'amount')).val));
+  ok(!(await testo(pg)).toLowerCase().includes('manca la tariffa'),'e l\u2019avviso sparisce');
+  await pg.close();
+}
+
+console.log('\n=== IL CONTO SI DEVE LEGGERE, NON SOLO AVVENIRE ===');
+{
+  // Senza la spunta «lo scrivo a mano» l'app deve calcolare E far
+  // vedere il conto: un numero in una casella grigia non dice da dove
+  // viene, e se e' sbagliato non si capisce dove.
+  const pg=await apri();
+  await alModulo(pg);
+  await scrivi(pg,'expense_category_id','km');
+  await scrivi(pg,'vehicle_id','v1');
+  await scrivi(pg,'km_tratta','105');
+  await spunta(pg,'round_trip');
+  const nota=await pg.evaluate(()=>document.getElementById('calcNota')?.textContent||'');
+  ok(/210/.test(nota),'il conto a schermo dice i chilometri',nota);
+  ok(/0,45/.test(nota),'la tariffa',nota);
+  ok(/94,50/.test(nota),'e il risultato',nota);
+  ok(/\u00d7/.test(nota)&&/=/.test(nota),'scritto come un conto: 210 km \u00d7 0,45 \u20ac/km = 94,50 \u20ac',nota);
+  ok(!(await campo(pg,'amount_a_mano')).checked,'e la spunta «lo scrivo a mano» \u00e8 gi\u00fa');
+  // Spuntandola, il conto smette e lo scrivi tu
+  await spunta(pg,'amount_a_mano');
+  const nota2=await pg.evaluate(()=>document.getElementById('calcNota')?.textContent||'');
+  ok(/scrivi tu/i.test(nota2),'spuntandola, l\u2019app dice che l\u2019importo lo scrivi tu',nota2);
+  await pg.close();
+}
+
+console.log('\n=== E VALE ANCHE PER LE VOCI A QUANTIT\u00c0 NON CHILOMETRICHE ===');
+{
+  const pg=await apri();
+  await pg.evaluate(()=>{
+    window.__stores.expense_categories.push(
+      {id:'notti',name:'Albergo',active:true,reimbursable:true,
+       calculation_type:'quantity_rate',unit_label:'notte',default_unit_rate:85,is_mileage:false});
+    return window.reload();
+  });
+  await pg.waitForTimeout(700);
+  await alModulo(pg);
+  await scrivi(pg,'expense_category_id','notti');
+  await scrivi(pg,'quantity','3');
+  const nota=await pg.evaluate(()=>document.getElementById('calcNota')?.textContent||'');
+  ok(/3 notte/.test(nota),'il conto usa l\u2019unit\u00e0 della voce',nota);
+  ok(/255,00/.test(nota),'e arriva al totale: 3 \u00d7 85 = 255,00',nota);
+  await pg.close();
+}
+
 await b.close(); srv.close();
 console.log(`\n=== chilometrica: OK ${pass} · KO ${fail} ===`);
 process.exit(fail?1:0);
