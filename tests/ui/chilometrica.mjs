@@ -439,6 +439,88 @@ console.log('\n=== CANCELLANDO I KM L\u2019IMPORTO NON VA A ZERO DA SOLO ===');
   await pg.close();
 }
 
+console.log('\n=== IMPORTO E KM MA SENZA TARIFFA: ANCHE QUESTA NON SI AZZERA ===');
+{
+  // La stessa perdita di dati, su una forma diversa che la prima
+  // correzione non copriva: una spesa importata da CSV puo' avere
+  // importo E quantita' ma NON la tariffa — le colonne sono opzionali e
+  // l'import accetta quella combinazione. Il conto faceva quantita' x 0
+  // e cancellava la cifra storica.
+  const pg=await apri();
+  await pg.evaluate(()=>{
+    window.__stores.travel_expenses=[{id:'daCsv',expense_date:'2026-10-29',
+      client_id:'k2',project_id:'omni',expense_category_id:'km',work_city:'Catania',
+      quantity:210,amount:94.5,reimbursement_type:'invoice'}];   // nessuna unit_rate
+    return window.reload();
+  });
+  await pg.waitForTimeout(700);
+  await pg.evaluate(()=>window.editEntry('daCsv','expense'));
+  await pg.waitForTimeout(500);
+  ok(!(await campo(pg,'amount')).readonly,
+     'senza tariffa l\u2019importo resta a mano: il conto non lo sa rifare');
+  await scrivi(pg,'km_tratta','50');
+  ok(Math.abs(Number((await campo(pg,'amount')).val)-94.5)<0.005,
+     'e cambiando i km l\u2019importo storico NON si azzera',String((await campo(pg,'amount')).val));
+  await pg.evaluate(()=>document.querySelector('#app form.form').requestSubmit());
+  await pg.waitForTimeout(800);
+  const e=await pg.evaluate(()=>window.__stores.travel_expenses.find(x=>x.id==='daCsv'));
+  ok(e&&Math.abs(Number(e.amount)-94.5)<0.005,'e si salva intero',String(e&&e.amount));
+  await pg.close();
+}
+
+console.log('\n=== UNA RIGA VECCHIA SI PU\u00d2 COMPLETARE ===');
+{
+  // Sbloccare l'importo nascondeva anche i campi del conto: non si
+  // poteva piu' scrivere la tariffa mancante, quindi la riga restava
+  // per sempre fuori dal calcolo. I campi devono restare a schermo.
+  const pg=await apri();
+  await pg.evaluate(()=>{
+    window.__stores.vehicles=[];   // nessun veicolo: la tariffa si scrive a mano o niente
+    window.__stores.travel_expenses=[{id:'vecchia',expense_date:'2026-10-29',
+      client_id:'k2',project_id:'omni',expense_category_id:'km',work_city:'Catania',
+      amount:94.5,reimbursement_type:'invoice'}];
+    return window.reload();
+  });
+  await pg.waitForTimeout(700);
+  await pg.evaluate(()=>window.editEntry('vecchia','expense'));
+  await pg.waitForTimeout(500);
+  ok(!(await campo(pg,'unit_rate')).hidden,
+     'il campo della tariffa si vede, anche senza veicoli: altrimenti la riga non si completa mai');
+  ok(!(await campo(pg,'km_tratta')).hidden,'e cos\u00ec i km');
+  // la si completa, e da quel momento il conto la governa
+  await scrivi(pg,'unit_rate','0.45');
+  await scrivi(pg,'km_tratta','105');
+  await spunta(pg,'round_trip');
+  ok(Math.abs(Number((await campo(pg,'amount')).val)-94.5)<0.005,
+     'completandola, il conto la ricostruisce',String((await campo(pg,'amount')).val));
+  await pg.close();
+}
+
+console.log('\n=== CAMBIANDO CLIENTE LA TARIFFA TOLTA RESTA TOLTA ===');
+{
+  // Cambiare cliente ripropone il tipo di rimborso (dipende dalla
+  // policy del cliente) ma NON deve rimettere una tariffa che e' stata
+  // cancellata apposta.
+  const pg=await apri();
+  await pg.evaluate(()=>{
+    window.__stores.clients.push({id:'alt',name:'Altro cliente',active:true,
+      daily_rate:400,standard_hours:8,compensation_type:'daily_rate_8h'});
+    return window.reload();
+  });
+  await pg.waitForTimeout(700);
+  await alModulo(pg);
+  await scrivi(pg,'expense_category_id','km');
+  ok(Number((await campo(pg,'unit_rate')).val)>0,'scegliendo la voce la tariffa viene proposta',
+     String((await campo(pg,'unit_rate')).val));
+  await scrivi(pg,'unit_rate','');
+  ok(!Number((await campo(pg,'unit_rate')).val),'la si cancella',String((await campo(pg,'unit_rate')).val));
+  await scrivi(pg,'client_id','alt');
+  ok(!Number((await campo(pg,'unit_rate')).val),
+     'e cambiando cliente resta cancellata: non torna da sola',
+     String((await campo(pg,'unit_rate')).val));
+  await pg.close();
+}
+
 await b.close(); srv.close();
 console.log(`\n=== chilometrica: OK ${pass} · KO ${fail} ===`);
 process.exit(fail?1:0);
