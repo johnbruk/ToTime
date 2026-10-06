@@ -923,11 +923,133 @@ function trasfertaCambiata(form){
 function reimbTypeOptions(selected){return REIMB_TYPES.map(([v,l])=>`<option value="${v}" ${v===selected?'selected':''}>${l}</option>`).join('')}
 function parsePolicy(c){try{const p=c&&c.expense_policy;if(!p)return [];return Array.isArray(p)?p:JSON.parse(p)}catch(e){return []}}
 function clientPolicyType(clientId,categoryId){const c=clientById(clientId);if(!c)return '';const pol=parsePolicy(c);const catName=(expenseCategoryById(categoryId)||{}).name;const hit=pol.find(r=>r.category_id===categoryId||(r.category&&catName&&String(r.category).toLowerCase()===String(catName).toLowerCase()));return hit?hit.type:''}
-function expenseForm(){const clients=activeClients();const selected=clients[0]?.id||'';return appShell(`<h1>Nuova spesa</h1>${clients.length?`<form class="form" onsubmit="saveExpense(event)"><div class="field"><label>Data</label><input name="expense_date" type="date" value="${new Date().toISOString().slice(0,10)}"></div>${campoTrasferta(state.prefill&&state.prefill.trip_id||"")}<div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form);updateExpenseCalc(this.form,true)">${clients.map(c=>`<option value="${c.id}"${c.id===selected?' selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Cliente/Progetto</label><select name="project_id">${projectOptions(selected)}</select></div><div class="field"><label>Voce spesa</label><select name="expense_category_id" onchange="updateExpenseCalc(this.form,true)">${expenseOptions()}</select></div><div class="field"><label>Tipo rimborso</label><select name="reimbursement_type">${reimbTypeOptions('own')}</select></div><div class="field"><label>Sede / Città</label><input name="work_city" placeholder="Es. Verona, Milano"></div><div class="field"><label>Descrizione</label><textarea name="description"></textarea></div><div class="field"><label>Quantità</label><input name="quantity" type="number" step="0.01" value="1" oninput="updateExpenseCalc(this.form)"></div><div class="field"><label>Costo unitario</label><input name="unit_rate" type="number" step="0.0001" value="0" oninput="updateExpenseCalc(this.form)"></div><div class="field"><label>Totale</label><input name="amount" type="number" step="0.01" value="0"></div><div class="field"><label>Note</label><textarea name="notes"></textarea></div><div class="actions"><button class="primary" data-busy="Salvataggio…">Salva</button><button type="button" class="secondary" onclick="go('expenses')">Annulla</button></div></form>`:`<div class="card">Crea prima un cliente in Impostazioni.</div>`}`)}
-function updateExpenseCalc(form,proposeType){const cat=expenseCategoryById(form.expense_category_id?.value);if(!cat)return; if(proposeType&&form.reimbursement_type){const proposed=clientPolicyType(form.client_id?.value,cat.id)||(cat.reimbursable===false?'own':'invoice');if(proposed)form.reimbursement_type.value=proposed} if(cat.calculation_type==='quantity_rate'){if((!form.unit_rate.value||Number(form.unit_rate.value)===0)&&cat.default_unit_rate)form.unit_rate.value=Number(cat.default_unit_rate)} if(Number(form.unit_rate.value||0)>0)form.amount.value=(Number(form.quantity.value||0)*Number(form.unit_rate.value||0)).toFixed(2)}
-async function saveExpense(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const rt=f.reimbursement_type||'own';const payload={expense_date:f.expense_date,client_id:f.client_id,project_id:f.project_id||null,expense_category_id:f.expense_category_id,work_city:norm(f.work_city)||null,description:f.description||null,quantity:Number(f.quantity||0)||null,unit_rate:Number(f.unit_rate||0)||null,amount:Number(f.amount||0),reimbursement_type:rt,reimbursable:rt!=='own',notes:f.notes||null,trip_id:f.trip_id||null};const {error}=await insertResilient('travel_expenses',payload,['reimbursement_type','trip_id']);if(error)return setMsg(error.message,7000);await reload();state.view='expenses';render()}
-function expenseEdit(){const e=data.travelExpenses.find(x=>x.id===state.edit);if(!e)return timesheet();const clients=activeClients();return appShell(`<h1>Modifica spesa</h1><form class="form" onsubmit="saveExpenseEdit(event)"><div class="field"><label>Data</label><input name="expense_date" type="date" value="${esc(e.expense_date)}"></div>${campoTrasferta(e.trip_id||"")}<div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)">${clients.map(c=>`<option value="${c.id}" ${c.id===e.client_id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Cliente/Progetto</label><select name="project_id">${projectOptions(e.client_id,e.project_id||'')}</select></div><div class="field"><label>Voce spesa</label><select name="expense_category_id" onchange="updateExpenseCalc(this.form)">${expenseOptions(e.expense_category_id||'')}</select></div><div class="field"><label>Tipo rimborso</label><select name="reimbursement_type">${reimbTypeOptions(expType(e))}</select></div><div class="field"><label>Sede / Città</label><input name="work_city" value="${esc(e.work_city||'')}"></div><div class="field"><label>Descrizione</label><textarea name="description">${esc(e.description||'')}</textarea></div><div class="field"><label>Quantità</label><input name="quantity" type="number" step="0.01" value="${Number(e.quantity||0)}" oninput="updateExpenseCalc(this.form)"></div><div class="field"><label>Costo unitario</label><input name="unit_rate" type="number" step="0.0001" value="${Number(e.unit_rate||0)}" oninput="updateExpenseCalc(this.form)"></div><div class="field"><label>Totale</label><input name="amount" type="number" step="0.01" value="${Number(e.amount||0)}"></div><div class="field"><label>Note</label><textarea name="notes">${esc(e.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary" onclick="duplicateExpense('${e.id}')">Duplica</button><button type="button" class="secondary danger" onclick="deleteExpense('${e.id}')">Elimina</button><button type="button" class="secondary" onclick="go('expenses')">Annulla</button></div></form>`)}
-async function saveExpenseEdit(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const rt=f.reimbursement_type||'own';const payload={expense_date:f.expense_date,client_id:f.client_id,project_id:f.project_id||null,expense_category_id:f.expense_category_id,work_city:norm(f.work_city)||null,description:f.description||null,quantity:Number(f.quantity||0)||null,unit_rate:Number(f.unit_rate||0)||null,amount:Number(f.amount||0),reimbursement_type:rt,reimbursable:rt!=='own',notes:f.notes||null,trip_id:f.trip_id||null};const {error}=await updateResilient('travel_expenses',payload,state.edit,['reimbursement_type','trip_id']);if(error)return setMsg(error.message,7000);await reload();state.view='expenses';state.edit=null;render()}
+// ─── Il modulo della spesa, in tre blocchi ──────────────────
+// Prima erano undici campi in fila, tutti con lo stesso peso: la data
+// che cambi ogni volta accanto al costo unitario a quattro decimali che
+// non tocchi mai. E chiedeva SIA quantita' x tariffa SIA il totale, in
+// tre caselle scrivibili, senza dire quale vince: due fonti di verita'
+// per lo stesso numero, e se correggevi il totale a mano quantita' e
+// tariffa restavano li' a raccontare un'altra cifra.
+//
+// Ora: «Quando e dove», «Cosa», «Come la tratto». Il totale lo calcola
+// l'app quando la voce e' a quantita' x tariffa; per correggerlo a mano
+// si spunta «Lo scrivo a mano», cosi' resta flessibile ma mai ambiguo.
+function bloccoCampi(titolo,sotto,campi){
+  return `<div class="bloccoCampi"><div class="bloccoTit">${titolo}${sotto?`<small>${esc(sotto)}</small>`:''}</div>${campi}</div>`;
+}
+function campiQuandoDove(v={},nuova=false){
+  const clients=activeClients();
+  const sel=v.client_id||clients[0]?.id||'';
+  const quando=nuova?(v.expense_date||todayISO()):(v.expense_date||'');
+  return bloccoCampi('Quando e dove','La data, e per chi',
+    `<div class="field"><label>Data</label><input name="expense_date" type="date" value="${esc(quando)}" required></div>`
+    +campoTrasferta(v.trip_id||'')
+    +`<div class="field"><label>Cliente</label><select name="client_id" onchange="clienteSpesaCambiato(this.form)">${clients.map(c=>`<option value="${c.id}"${c.id===sel?' selected':''}>${esc(c.name)}</option>`).join('')}</select></div>`
+    +`<div id="speseHier">${campiCommessaSpesa(sel,v)}</div>`
+    +`<div class="field"><label>Sede / Città</label><input name="work_city" value="${esc(v.work_city||'')}" placeholder="Es. Catania, Verona"></div>`);
+}
+// La commessa mancava del tutto: le spese nuove nascevano con wbs_id
+// vuoto e l'analisi per commessa tornava a bucarsi a ogni inserimento,
+// nonostante la bonifica di settembre.
+function campiCommessaSpesa(clientId,v={}){
+  if(hierAvailable(clientId))
+    return hierFields(clientId,v.wbs_id||'')+`<input type="hidden" name="project_id" value="${esc(v.project_id||'')}">`;
+  return `<div class="field"><label>Cliente/Progetto</label><select name="project_id">${projectOptions(clientId,v.project_id||'')}</select></div>`;
+}
+function clienteSpesaCambiato(form){
+  const cli=form.client_id?form.client_id.value:'';
+  const blocco=document.getElementById('speseHier');
+  if(blocco){
+    blocco.innerHTML=campiCommessaSpesa(cli,{});
+    if(form.hier_project_id)hierChanged(form,'client');
+  }
+  updateExpenseCalc(form,true);
+}
+function campiCosa(v={}){
+  const cat=expenseCategoryById(v.expense_category_id);
+  const aQ=!!cat&&cat.calculation_type==='quantity_rate';
+  const unita=(cat&&cat.unit_label)||'unità';
+  return bloccoCampi('Cosa','La voce di spesa e quanto',
+    `<div class="field"><label>Voce di spesa</label><select name="expense_category_id" onchange="voceSpesaCambiata(this.form)">${expenseOptions(v.expense_category_id||'')}</select></div>`
+    +`<div class="field qtaRiga" id="qtaField"${aQ?'':' hidden'}><label>Quantità <span id="qtaUnita">(${esc(unita)})</span> × tariffa</label><div class="qtaCoppia"><input name="quantity" type="number" step="0.01" value="${Number(v.quantity||1)||1}" oninput="updateExpenseCalc(this.form)" aria-label="Quantità"><span>×</span><input name="unit_rate" type="number" step="0.0001" value="${Number(v.unit_rate||0)}" oninput="updateExpenseCalc(this.form)" aria-label="Tariffa unitaria"></div></div>`
+    +`<div class="field"><label>Importo totale</label><input name="amount" type="number" step="0.01" value="${Number(v.amount||0)}"${aQ?' readonly':''}><label class="manoLbl"><input type="checkbox" name="amount_a_mano" onchange="totaleAMano(this.form)"${aQ?'':' checked'}> Lo scrivo a mano</label><div class="small" id="calcNota">${aQ?NOTA_CALCOLO:NOTA_MANO}</div></div>`
+    +`<div class="field"><label>Descrizione</label><textarea name="description" placeholder="Es. Volo Milano–Catania andata">${esc(v.description||'')}</textarea></div>`);
+}
+function campiComeLaTratto(v={},nuova=false){
+  return bloccoCampi('Come la tratto','Chi la paga, alla fine',
+    `<div class="field"><label>Tipo rimborso</label><select name="reimbursement_type">${reimbTypeOptions(nuova?'own':expType(v))}</select></div>`
+    +`<div class="field"><label>Note</label><textarea name="notes">${esc(v.notes||'')}</textarea></div>`);
+}
+const NOTA_CALCOLO='Lo calcola l\u2019app: quantit\u00e0 \u00d7 tariffa.';
+const NOTA_MANO='Scrivi tu l\u2019importo.';
+// Cambiare voce deve aprire o chiudere la coppia quantita'/tariffa:
+// prima il campo c'era sempre, anche per un volo, dove non vuol dire
+// niente — e il costo unitario a quattro decimali restava li' a far
+// pensare che servisse.
+function voceSpesaCambiata(form){
+  const cat=expenseCategoryById(form.expense_category_id&&form.expense_category_id.value);
+  const aQ=!!cat&&cat.calculation_type==='quantity_rate';
+  const campo=document.getElementById('qtaField');
+  if(campo)campo.hidden=!aQ;
+  const u=document.getElementById('qtaUnita');
+  if(u)u.textContent='('+((cat&&cat.unit_label)||'unit\u00e0')+')';
+  if(form.amount_a_mano)form.amount_a_mano.checked=!aQ;
+  if(form.amount)form.amount.readOnly=aQ;
+  const n=document.getElementById('calcNota');
+  if(n)n.textContent=aQ?NOTA_CALCOLO:NOTA_MANO;
+  updateExpenseCalc(form,true);
+}
+function totaleAMano(form){
+  const aMano=!!(form.amount_a_mano&&form.amount_a_mano.checked);
+  if(form.amount)form.amount.readOnly=!aMano;
+  const n=document.getElementById('calcNota');
+  if(n)n.textContent=aMano?NOTA_MANO:NOTA_CALCOLO;
+  if(!aMano)updateExpenseCalc(form);
+}
+function expenseForm(){
+  const clients=activeClients();
+  if(!clients.length)return appShell(`<h1>Nuova spesa</h1><div class="card">Crea prima un cliente in Impostazioni.</div>`);
+  const pre=state.prefill||{};
+  const v={trip_id:pre.trip_id||'',client_id:pre.client_id||'',project_id:pre.project_id||''};
+  const t=v.trip_id?tripById(v.trip_id):null;
+  if(t){
+    v.client_id=t.client_id||v.client_id;
+    v.project_id=t.project_id||v.project_id;
+    v.work_city=t.destination_city||'';
+    v.expense_date=tripDa(t)||todayISO();
+    v.wbs_id=t.wbs_id||'';
+  }
+  return appShell(`<h1>Nuova spesa</h1>${t?`<p class="sub">Dentro la trasferta <b>${esc(tripTitolo(t))}</b> · ${esc(tripPeriodo(t))}</p>`:''}<form class="form" onsubmit="saveExpense(event)">${campiQuandoDove(v,true)}${campiCosa(v)}${campiComeLaTratto(v,true)}<div class="actions"><button class="primary" data-busy="Salvataggio…">Salva</button><button type="button" class="secondary" onclick="go('expenses')">Annulla</button></div></form>`);
+}
+function expenseEdit(){
+  const e=data.travelExpenses.find(x=>x.id===state.edit);
+  if(!e)return timesheet();
+  const t=e.trip_id?tripById(e.trip_id):null;
+  return appShell(`<h1>Modifica spesa</h1>${t?`<p class="sub">Dentro la trasferta <b>${esc(tripTitolo(t))}</b> · ${esc(tripPeriodo(t))}</p>`:''}<form class="form" onsubmit="saveExpenseEdit(event)">${campiQuandoDove(e)}${campiCosa(e)}${campiComeLaTratto(e)}<div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary" onclick="duplicateExpense('${e.id}')">Duplica</button><button type="button" class="secondary danger" onclick="deleteExpense('${e.id}')">Elimina</button><button type="button" class="secondary" onclick="go('expenses')">Annulla</button></div></form>`);
+}
+// Il totale: lo calcola l'app da quantita' x tariffa, ma solo se non
+// e' stato corretto a mano. Prima lo riscriveva sempre, quindi una
+// correzione a mano veniva cancellata al tocco successivo su quantita'
+// o tariffa — senza dire niente.
+function updateExpenseCalc(form,proposeType){
+  const cat=expenseCategoryById(form.expense_category_id?.value);
+  if(!cat)return;
+  if(proposeType&&form.reimbursement_type){
+    const proposed=clientPolicyType(form.client_id?.value,cat.id)||(cat.reimbursable===false?'own':'invoice');
+    if(proposed)form.reimbursement_type.value=proposed;
+  }
+  if(cat.calculation_type==='quantity_rate'&&form.unit_rate){
+    if((!form.unit_rate.value||Number(form.unit_rate.value)===0)&&cat.default_unit_rate)
+      form.unit_rate.value=Number(cat.default_unit_rate);
+  }
+  if(form.amount_a_mano&&form.amount_a_mano.checked)return;
+  if(cat.calculation_type!=='quantity_rate')return;
+  if(!form.unit_rate||!form.quantity||!form.amount)return;
+  if(Number(form.unit_rate.value||0)>0)
+    form.amount.value=(Number(form.quantity.value||0)*Number(form.unit_rate.value||0)).toFixed(2);
+}
+async function saveExpense(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const rt=f.reimbursement_type||'own';const lin=f.wbs_id?wbsLineage(f.wbs_id):null;const payload={expense_date:f.expense_date,client_id:f.client_id,project_id:(lin?lin.project.id:f.project_id)||null,wbs_id:f.wbs_id||null,expense_category_id:f.expense_category_id,work_city:norm(f.work_city)||null,description:f.description||null,quantity:Number(f.quantity||0)||null,unit_rate:Number(f.unit_rate||0)||null,amount:Number(f.amount||0),reimbursement_type:rt,reimbursable:rt!=='own',notes:f.notes||null,trip_id:f.trip_id||null};const {error}=await insertResilient('travel_expenses',payload,['reimbursement_type','trip_id','wbs_id']);if(error)return setMsg(error.message,7000);await reload();state.view='expenses';render()}
+async function saveExpenseEdit(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const rt=f.reimbursement_type||'own';const lin=f.wbs_id?wbsLineage(f.wbs_id):null;const payload={expense_date:f.expense_date,client_id:f.client_id,project_id:(lin?lin.project.id:f.project_id)||null,wbs_id:f.wbs_id||null,expense_category_id:f.expense_category_id,work_city:norm(f.work_city)||null,description:f.description||null,quantity:Number(f.quantity||0)||null,unit_rate:Number(f.unit_rate||0)||null,amount:Number(f.amount||0),reimbursement_type:rt,reimbursable:rt!=='own',notes:f.notes||null,trip_id:f.trip_id||null};const {error}=await updateResilient('travel_expenses',payload,state.edit,['reimbursement_type','trip_id','wbs_id']);if(error)return setMsg(error.message,7000);await reload();state.view='expenses';state.edit=null;render()}
 async function duplicateExpense(idv){const e=data.travelExpenses.find(x=>x.id===idv);if(!e)return;const copy={expense_date:new Date().toISOString().slice(0,10),client_id:e.client_id,project_id:e.project_id,wbs_id:e.wbs_id||null,trip_id:e.trip_id||null,expense_category_id:e.expense_category_id,work_site:e.work_site,work_city:e.work_city,description:e.description,quantity:e.quantity,unit_rate:e.unit_rate,amount:e.amount,reimbursement_type:expType(e),reimbursable:expType(e)!=='own',notes:e.notes};const {error}=await insertResilient('travel_expenses',copy,['reimbursement_type','wbs_id','trip_id']);if(error)return setMsg(error.message,7000);await reload();state.view='expenses';render()}
 async function deleteExpense(idv){if(!confirm('Eliminare questa spesa di trasferta?'))return;const {error}=await sb.from('travel_expenses').delete().eq('id',idv);if(error)return setMsg(error.message,7000);await reload();state.view='timesheet';render()}
 
@@ -4065,6 +4187,9 @@ Object.assign(window,{
   updateExpenseCalc,
   cambiaVistaSpese,
   trasfertaCambiata,
+  clienteSpesaCambiato,
+  voceSpesaCambiata,
+  totaleAMano,
   apriChiudiTrasferta,
   creaTrasfertaDaSpese,
   saveTrip,

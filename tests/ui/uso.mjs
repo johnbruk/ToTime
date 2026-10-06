@@ -324,8 +324,45 @@ await pg4.waitForTimeout(300);
 ok(await pg4.evaluate(()=>!!document.querySelector('#app form.form [name=destination_city]')),
    'che apre un modulo in cui si può scrivere la destinazione',await schermata(pg4));
 
-ok(errs.length===0&&errs2.length===0&&errs3.length===0&&errs4.length===0,'nessun errore JS lungo i percorsi',
-   errs.concat(errs2,errs3,errs4).slice(0,2).join(' | ')||'nessuno');
-await pg.close();await pg2.close();await pg3.close();await pg4.close();await b.close();srv.close();
+console.log('\n=== Percorso: «registro una spesa chilometrica» ===');
+// Partendo dalla Dashboard, si deve arrivare a registrare dei
+// chilometri e vedere il totale calcolato, senza sapere dove sta niente.
+const pg5=await apri(390);
+const errs5=[];pg5.on('pageerror',e=>errs5.push(e.message));
+await pg5.evaluate(()=>{const S=window.__stores;
+  S.expense_categories=[
+    {id:'km',name:'Rimborso KM',active:true,reimbursable:true,calculation_type:'quantity_rate',unit_label:'km',default_unit_rate:0.45}];
+  S.travel_expenses=[];S.trips=[];
+  return window.reload();
+});
+await pg5.waitForTimeout(700);
+await tocca(pg5,'☰',{dove:'body'});
+await tocca(pg5,'Spese',{dove:'body'});
+ok(await tocca(pg5,'Nuova spesa',{dove:'body'}),'dal menu si arriva al modulo della spesa');
+await pg5.waitForTimeout(300);
+ok(/Nuova spesa/i.test(await schermata(pg5)),'ed è il modulo giusto',await schermata(pg5));
+// I tre blocchi si devono leggere: è la cosa che si è chiesto di sistemare
+ok(await siLegge(pg5,'Quando e dove'),'il modulo si legge a blocchi: «Quando e dove»');
+ok(await siLegge(pg5,'Come la tratto'),'e «Come la tratto»');
+// Si scelgono i chilometri e si scrive la quantità, come si fa col dito
+await pg5.evaluate(()=>{
+  const sel=document.querySelector('#app [name=expense_category_id]');
+  sel.value='km'; sel.dispatchEvent(new Event('change',{bubbles:true}));
+});
+await pg5.waitForTimeout(350);
+await pg5.evaluate(()=>{
+  const q=document.querySelector('#app [name=quantity]');
+  q.value='210'; q.dispatchEvent(new Event('input',{bubbles:true}));
+});
+await pg5.waitForTimeout(300);
+const tot=await pg5.evaluate(()=>document.querySelector('#app [name=amount]')?.value);
+ok(Math.abs(Number(tot)-94.5)<0.005,'210 km diventano 94,50 € senza che si debba moltiplicare a mano',String(tot));
+ok(await pg5.evaluate(()=>!!document.querySelector('#app [name=amount]')?.readOnly),
+   'e il totale non si può scrivere a mano per sbaglio: una fonte di verità sola');
+ok(await siLegge(pg5,'Lo scrivo a mano'),'ma la via per correggerlo è a schermo, non nascosta');
+
+ok(errs.length===0&&errs2.length===0&&errs3.length===0&&errs4.length===0&&errs5.length===0,'nessun errore JS lungo i percorsi',
+   errs.concat(errs2,errs3,errs4,errs5).slice(0,2).join(' | ')||'nessuno');
+await pg.close();await pg2.close();await pg3.close();await pg4.close();await pg5.close();await b.close();srv.close();
 console.log(`\nRISULTATO: ${pass} OK / ${fail} KO`);
 if(fail)process.exitCode=1;
