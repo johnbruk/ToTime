@@ -195,6 +195,65 @@ console.log('\n=== LA TRASFERTA DICE LE DUE NATURE ===');
   await pg.close();
 }
 
+console.log('\n=== L\u2019ECCEZIONE DELLE SPESE ESTERE, NEL CALCOLO ===');
+{
+  // L'obbligo di tracciabilita' riguarda le spese sostenute IN ITALIA:
+  // quelle estere ne sono fuori. Il modulo lo diceva, ma il calcolo no:
+  // una cena a Ginevra pagata in contanti risultava «senza requisiti»
+  // quando invece li ha.
+  const pg=await apri();
+  await pg.evaluate(()=>{
+    const S=window.__stores;
+    S.trips=[
+      {id:'ch',client_id:'k2',project_id:'omni',destination_city:'Geneva',destination_country:'CH',
+       start_date:'2026-03-14',end_date:'2026-03-14',status:'to_recharge'},
+      {id:'it',client_id:'k2',project_id:'omni',destination_city:'Catania',destination_country:'IT',
+       start_date:'2026-03-10',end_date:'2026-03-10',status:'to_recharge'}];
+    // r3 e' la cena da 120 pagata in CONTANTI: la si mette a Ginevra
+    S.travel_expenses.find(e=>e.id==='r3').trip_id='ch';
+    S.travel_expenses.find(e=>e.id==='r1').trip_id='it';
+    return window.reload();
+  });
+  await pg.waitForTimeout(700);
+  const sc=await scomp(pg);
+  ok(Math.abs(sc.analitici-720)<0.01,
+     'la cena in contanti a Ginevra conta fra gli analitici: all\u2019estero il mezzo di pagamento non vincola',
+     String(sc.analitici));
+  ok(Math.abs(sc.senzaRequisiti-0)<0.01,'e non resta niente senza requisiti',String(sc.senzaRequisiti));
+  // La stessa cena in Italia, invece, non deve passare
+  await pg.evaluate(()=>{
+    window.__stores.travel_expenses.find(e=>e.id==='r3').trip_id='it';
+    return window.reload();
+  });
+  await pg.waitForTimeout(700);
+  const sc2=await scomp(pg);
+  ok(Math.abs(sc2.analitici-600)<0.01,
+     'spostata in Italia torna fuori: in contanti, in Italia, non regge',String(sc2.analitici));
+  ok(Math.abs(sc2.senzaRequisiti-120)<0.01,'e torna fra quelle senza requisiti',String(sc2.senzaRequisiti));
+  await pg.close();
+}
+
+console.log('\n=== ALL\u2019ESTERO SERVE COMUNQUE LA RICEVUTA ===');
+{
+  // Cade l'obbligo sul mezzo di pagamento, non quello sul
+  // giustificativo: senza ricevuta non regge comunque.
+  const pg=await apri();
+  await pg.evaluate(()=>{
+    const S=window.__stores;
+    S.trips=[{id:'ch',client_id:'k2',project_id:'omni',destination_city:'Geneva',
+      destination_country:'CH',start_date:'2026-03-14',end_date:'2026-03-14',status:'to_recharge'}];
+    const r3=S.travel_expenses.find(e=>e.id==='r3');
+    r3.trip_id='ch'; r3.receipt_kept=false;
+    return window.reload();
+  });
+  await pg.waitForTimeout(700);
+  const sc=await scomp(pg);
+  ok(Math.abs(sc.analitici-600)<0.01,
+     'senza ricevuta non passa nemmeno all\u2019estero',String(sc.analitici));
+  ok(Math.abs(sc.senzaRequisiti-120)<0.01,'resta fra quelle senza requisiti',String(sc.senzaRequisiti));
+  await pg.close();
+}
+
 await b.close(); srv.close();
 console.log(`\n=== rimborsi e reddito: OK ${pass} · KO ${fail} ===`);
 process.exit(fail?1:0);

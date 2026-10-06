@@ -65,6 +65,29 @@ async function saveThemeChoice(theme){state.theme=theme;applyTheme();const exist
 function monthLabel(m){const [y,mo]=m.split('-').map(Number);return `${monthNames[mo-1]} ${y}`}
 function periodParts(m=state.month){const [year,month]=m.split('-').map(Number);return {year,month}}
 function changeMonth(delta){let [y,m]=state.month.split('-').map(Number);m+=delta;if(m<1){m=12;y--}if(m>12){m=1;y++}state.month=`${y}-${String(m).padStart(2,'0')}`;render()}
+// Un messaggio non deve portare via quello che stai scrivendo.
+// setMsg ridisegna tutta la schermata: va benissimo quando si cambia
+// pagina, e' un disastro mentre un modulo e' aperto e compilato a
+// meta'. Questo infila il messaggio nel DOM e basta.
+function setMsgLeggero(msg,timeout=6000){
+  const app=document.getElementById('app');
+  const dove=app&&app.querySelector('.app');
+  if(!dove)return setMsg(msg,timeout);
+  state.message=msg;
+  let t=dove.querySelector(':scope > .toast');
+  if(!t){
+    t=document.createElement('div');
+    t.className='toast';
+    dove.insertBefore(t,dove.firstChild);
+  }
+  t.textContent=msg;
+  setTimeout(()=>{
+    if(state.message!==msg)return;
+    state.message='';
+    const x=dove.querySelector(':scope > .toast');
+    if(x)x.remove();
+  },timeout);
+}
 function setMsg(msg,timeout=4200){
   state.message=msg;render();
   setTimeout(()=>{
@@ -218,7 +241,57 @@ function missingColumnName(err){if(!err)return null;const m=(err.message||'').ma
 // Esegue la scrittura; se il DB segnala una colonna mancante (schema non ancora
 // migrato), la rimuove dal payload e ritenta, finche' la scrittura riesce.
 // Cosi' i salvataggi non si bloccano mai per colonne nuove non ancora create.
-async function runResilient(makeCall,payload,dropKeys){const p={...payload};let res=await makeCall(p);let guard=0;while(isMissingColumnError(res.error)&&guard++<40){let removed=false;const col=missingColumnName(res.error);if(col&&Object.prototype.hasOwnProperty.call(p,col)){delete p[col];removed=true}if(!removed){(dropKeys||[]).forEach(k=>{if(Object.prototype.hasOwnProperty.call(p,k)){delete p[k];removed=true}})}if(!removed)break;res=await makeCall(p)}return res}
+// Il ripiego sulle colonne mancanti serviva a non bloccare i
+// salvataggi quando il database non e' ancora migrato. Ma scartava i
+// campi IN SILENZIO: uno scriveva come aveva pagato, la riga si
+// salvava, e quel dato non c'era. Ora dice cosa ha dovuto lasciare
+// fuori, in res.scartate, e chi salva lo riferisce.
+async function runResilient(makeCall,payload,dropKeys){
+  const p={...payload};
+  const scartate=[];
+  let res=await makeCall(p);
+  let guard=0;
+  while(isMissingColumnError(res.error)&&guard++<40){
+    let removed=false;
+    const col=missingColumnName(res.error);
+    if(col&&Object.prototype.hasOwnProperty.call(p,col)){delete p[col];scartate.push(col);removed=true}
+    if(!removed){(dropKeys||[]).forEach(k=>{if(Object.prototype.hasOwnProperty.call(p,k)){delete p[k];scartate.push(k);removed=true}})}
+    if(!removed)break;
+    res=await makeCall(p);
+  }
+  if(res&&typeof res==='object')res.scartate=scartate;
+  return res;
+}
+// Quali migrazioni servono per le colonne che il database non ha.
+const MIGRAZIONE_DI={
+  trip_id:'2026-10-06_trasferte.sql',
+  vehicle_id:'2026-10-06_veicoli-e-chilometrica.sql',
+  from_place:'2026-10-06_veicoli-e-chilometrica.sql',
+  to_place:'2026-10-06_veicoli-e-chilometrica.sql',
+  round_trip:'2026-10-06_veicoli-e-chilometrica.sql',
+  is_mileage:'2026-10-06_veicoli-e-chilometrica.sql',
+  payment_method:'2026-10-06_tracciabilita.sql',
+  receipt_kept:'2026-10-06_tracciabilita.sql',
+  receipt_path:'2026-10-06_ricevute-storage.sql'
+};
+const NOME_COLONNA={
+  trip_id:'la trasferta',vehicle_id:'il veicolo',from_place:'la partenza',
+  to_place:'l\u2019arrivo',round_trip:'l\u2019andata e ritorno',
+  payment_method:'come l\u2019hai pagata',receipt_kept:'la ricevuta',
+  receipt_path:'la ricevuta allegata',wbs_id:'la commessa',
+  is_mileage:'il rimborso chilometrico'
+};
+// Il messaggio da dire quando una scrittura ha dovuto lasciare fuori
+// dei campi: cosa non e' stato salvato, e quale migrazione lo sistema.
+function avvisoScartate(res){
+  const sc=(res&&res.scartate)||[];
+  if(!sc.length)return '';
+  const nomi=[...new Set(sc.map(c=>NOME_COLONNA[c]||c))];
+  const mig=[...new Set(sc.map(c=>MIGRAZIONE_DI[c]).filter(Boolean))];
+  return 'Salvato, ma il database non ha ancora dove mettere '+nomi.join(', ')+
+    ': quel dato non \u00e8 stato scritto.'+
+    (mig.length?' Lancia '+mig.join(' e ')+'.':'');
+}
 async function insertResilient(table,payload,dropKeys){return runResilient(p=>sb.from(table).insert(p),payload,dropKeys)}
 async function updateResilient(table,payload,id,dropKeys){return runResilient(p=>sb.from(table).update(p).eq('id',id),payload,dropKeys)}
 async function insertReturningResilient(table,payload,dropKeys){return runResilient(p=>sb.from(table).insert(p).select().single(),payload,dropKeys)}
@@ -380,11 +453,21 @@ function meseIncassato(year,month,clientId){
 }
 // I rimborsi che il requisito lo reggono davvero: analitici (non
 // chilometrici), pagati tracciabile, con la ricevuta, e incassati.
+// L'obbligo di tracciabilita' riguarda le spese di vitto, alloggio,
+// viaggio e trasporto sostenute IN ITALIA: quelle sostenute all'estero
+// ne sono fuori. L'app lo diceva nel modulo ma il calcolo non lo
+// applicava, e una cena a Ginevra pagata in contanti risultava senza
+// requisiti quando invece li ha. Il paese lo dice la trasferta.
+function spesaAllEstero(e){
+  const t=e&&e.trip_id?tripById(e.trip_id):null;
+  const paese=norm(t&&t.destination_country).toUpperCase();
+  return !!paese&&paese!=='IT'&&paese!=='ITA';
+}
 function spesaFuoriReddito(e,year){
   if(!expIsInvoice(e))return false;
   if(spesaChilometrica(e))return false;             // forfettario: resta compenso
-  if(!metodoTracciabile(e.payment_method))return false;
-  if(e.receipt_kept===false)return false;
+  if(e.receipt_kept!==true)return false;            // il giustificativo serve sempre
+  if(!spesaAllEstero(e)&&!metodoTracciabile(e.payment_method))return false;
   const mese=Number(String(e.expense_date||'').slice(5,7));
   return meseIncassato(year,mese,e.client_id);
 }
@@ -1084,10 +1167,10 @@ async function caricaRicevuta(ev){
   if(!file)return;
   const id=state.edit;
   const e=(data.travelExpenses||[]).find(x=>x.id===id);
-  if(!e)return setMsg('Spesa non trovata: riapri la schermata.',6000);
+  if(!e)return setMsgLeggero('Spesa non trovata: riapri la schermata.',6000);
   const path=percorsoRicevuta(id,file.name);
-  if(!path)return setMsg('Non si sa chi sei: esci e rientra.',7000);
-  setMsg('Carico la ricevuta\u2026',4000);
+  if(!path)return setMsgLeggero('Non si sa chi sei: esci e rientra.',7000);
+  setMsgLeggero('Carico la ricevuta\u2026',4000);
   try{
     const up=await sb.storage.from(BUCKET_RICEVUTE).upload(path,file,{upsert:false});
     if(up&&up.error)throw up.error;
@@ -1096,25 +1179,40 @@ async function caricaRicevuta(ev){
       // Il file c'e' ma la riga no: si rimuove il file, altrimenti
       // resta un orfano nel bucket che nessuno ritrovera' piu'.
       try{await sb.storage.from(BUCKET_RICEVUTE).remove([path])}catch(x){}
-      return setMsg('La ricevuta \u00e8 stata caricata ma non si \u00e8 potuta collegare alla spesa: '+motivoLeggibile(res.error),9000);
+      return setMsgLeggero('La ricevuta \u00e8 stata caricata ma non si \u00e8 potuta collegare alla spesa: '+motivoLeggibile(res.error),9000);
     }
-    await reload();render();
-    setMsg('Ricevuta allegata.',4000);
+    // NIENTE reload()+render() qui: ridisegnerebbe il modulo dal
+    // database e porterebbe via le modifiche non ancora salvate \u2014 e
+    // fetchAll() azzera anche state.dirty, quindi nemmeno un avviso.
+    // Si aggiorna la riga in memoria e si ridisegna il solo campo.
+    e.receipt_path=path;e.receipt_kept=true;
+    const form=ev.target.form;
+    if(form&&form.receipt_kept)form.receipt_kept.checked=true;
+    const box=document.getElementById('ricevutaCampo');
+    if(box)box.innerHTML=campoRicevuta(e,false);
+    if(form)aggiornaTracciabilita(form);
+    setMsgLeggero('Ricevuta allegata.',4000);
   }catch(err){
-    setMsg('Non si \u00e8 potuta caricare la ricevuta: '+motivoStorage(err),10000);
+    setMsgLeggero('Non si \u00e8 potuta caricare la ricevuta: '+motivoStorage(err),10000);
   }
 }
+// La finestra si apre SUBITO, dentro il gesto: aspettare il
+// collegamento firmato e aprirla dopo la fa scambiare per un popup non
+// richiesto, e su telefono lento il pulsante sembra non fare niente.
 async function apriRicevuta(){
   const e=(data.travelExpenses||[]).find(x=>x.id===state.edit);
   if(!e||!e.receipt_path)return;
+  const w=window.open('','_blank','noopener');
   try{
     const r=await sb.storage.from(BUCKET_RICEVUTE).createSignedUrl(e.receipt_path,120);
     if(r&&r.error)throw r.error;
     const url=r&&r.data&&(r.data.signedUrl||r.data.signedURL);
     if(!url)throw new Error('nessun collegamento');
-    window.open(url,'_blank','noopener');
+    if(w&&!w.closed)w.location.href=url;
+    else window.open(url,'_blank','noopener');
   }catch(err){
-    setMsg('Non si \u00e8 potuta aprire la ricevuta: '+motivoStorage(err),9000);
+    try{if(w&&!w.closed)w.close()}catch(x){}
+    setMsgLeggero('Non si \u00e8 potuta aprire la ricevuta: '+motivoStorage(err),9000);
   }
 }
 async function togliRicevuta(){
@@ -1126,12 +1224,19 @@ async function togliRicevuta(){
     const r=await sb.storage.from(BUCKET_RICEVUTE).remove([e.receipt_path]);
     if(r&&r.error)throw r.error;
   }catch(err){
-    return setMsg('Non si \u00e8 potuto cancellare il file: '+motivoStorage(err),9000);
+    return setMsgLeggero('Non si \u00e8 potuto cancellare il file: '+motivoStorage(err),9000);
   }
-  const res=await updateResilient('travel_expenses',{receipt_path:null},id,['receipt_path']);
-  if(res.error)return setMsg('Il file \u00e8 stato cancellato ma la spesa lo nomina ancora: '+motivoLeggibile(res.error),9000);
-  await reload();render();
-  setMsg('Ricevuta rimossa.',4000);
+  // La spunta va azzerata con il file: era il file a metterla, e senza
+  // di lui la spesa direbbe di avere una ricevuta che non c'e' piu'.
+  const res=await updateResilient('travel_expenses',{receipt_path:null,receipt_kept:false},id,['receipt_path','receipt_kept']);
+  if(res.error)return setMsgLeggero('Il file \u00e8 stato cancellato ma la spesa lo nomina ancora: '+motivoLeggibile(res.error),9000);
+  e.receipt_path=null;e.receipt_kept=false;
+  const form=document.querySelector('#app form.form');
+  if(form&&form.receipt_kept)form.receipt_kept.checked=false;
+  const box=document.getElementById('ricevutaCampo');
+  if(box)box.innerHTML=campoRicevuta(e,false);
+  if(form)aggiornaTracciabilita(form);
+  setMsgLeggero('Ricevuta rimossa. Se la conservi su carta, rimetti la spunta.',6000);
 }
 // Il campo: su una spesa nuova non si puo' allegare niente, perche' il
 // percorso ha bisogno dell'id della spesa. Lo si dice, invece di
@@ -1346,7 +1451,7 @@ function campiComeLaTratto(v={},nuova=false){
     +`<div id="policyBox">${avvisoPolicy(v.client_id||activeClients()[0]?.id||'',v.expense_category_id||'',Number(v.amount||0),Number(v.quantity||0))}</div>`
     +`<div class="field"><label>Come l\u2019hai pagata</label><select name="payment_method" onchange="aggiornaTracciabilita(this.form)">${metodoOptions(v.payment_method||'')}</select><label class="manoLbl"><input type="checkbox" name="receipt_kept" onchange="aggiornaTracciabilita(this.form)"${v.receipt_kept?' checked':''}> La ricevuta ce l\u2019ho e la conservo</label></div>`
     +`<div id="tracciaBox">${notaTracciabilita(v.client_id||activeClients()[0]?.id||'',v.expense_category_id||'',nuova?'own':expType(v),v.payment_method||'',!!v.receipt_kept)}</div>`
-    +campoRicevuta(v,nuova)
+    +`<div id="ricevutaCampo">${campoRicevuta(v,nuova)}</div>`
     +`<div class="field"><label>Note</label><textarea name="notes">${esc(v.notes||'')}</textarea></div>`);
 }
 const NOTA_CALCOLO='Lo calcola l\u2019app: quantit\u00e0 \u00d7 tariffa.';
@@ -1479,19 +1584,44 @@ async function saveExpense(ev){
     await reload();state.view='expenses';render();
     return setMsg('Spezzata in due: '+fmtEUR(sf.massimo)+' in fattura, '+fmtEUR(sf.eccedenza)+' a mio carico.',6000);
   }
-  const {error}=await insertResilient('travel_expenses',payload,DROP_SPESA);
-  if(error)return setMsg('Non si \u00e8 potuta salvare: '+motivoLeggibile(error),9000);
+  const res=await insertResilient('travel_expenses',payload,DROP_SPESA);
+  if(res.error)return setMsg('Non si \u00e8 potuta salvare: '+motivoLeggibile(res.error),9000);
   await reload();state.view='expenses';render();
+  const avviso=avvisoScartate(res);
+  if(avviso)setMsg(avviso,12000);
 }
 async function saveExpenseEdit(ev){
   ev.preventDefault();
   const f=Object.fromEntries(new FormData(ev.target));
-  const {error}=await updateResilient('travel_expenses',payloadSpesa(f),state.edit,DROP_SPESA);
-  if(error)return setMsg('Non si sono potute salvare le modifiche: '+motivoLeggibile(error),9000);
+  const res=await updateResilient('travel_expenses',payloadSpesa(f),state.edit,DROP_SPESA);
+  if(res.error)return setMsg('Non si sono potute salvare le modifiche: '+motivoLeggibile(res.error),9000);
   await reload();state.view='expenses';state.edit=null;render();
+  const avviso=avvisoScartate(res);
+  if(avviso)setMsg(avviso,12000);
 }
 async function duplicateExpense(idv){const e=data.travelExpenses.find(x=>x.id===idv);if(!e)return;const copy={expense_date:new Date().toISOString().slice(0,10),client_id:e.client_id,project_id:e.project_id,wbs_id:e.wbs_id||null,trip_id:e.trip_id||null,vehicle_id:e.vehicle_id||null,payment_method:e.payment_method||null,receipt_kept:!!e.receipt_kept,receipt_path:null,from_place:e.from_place||null,to_place:e.to_place||null,round_trip:!!e.round_trip,expense_category_id:e.expense_category_id,work_site:e.work_site,work_city:e.work_city,description:e.description,quantity:e.quantity,unit_rate:e.unit_rate,amount:e.amount,reimbursement_type:expType(e),reimbursable:expType(e)!=='own',notes:e.notes};const {error}=await insertResilient('travel_expenses',copy,DROP_SPESA);if(error)return setMsg(error.message,7000);await reload();state.view='expenses';render()}
-async function deleteExpense(idv){if(!confirm('Eliminare questa spesa di trasferta?'))return;const {error}=await sb.from('travel_expenses').delete().eq('id',idv);if(error)return setMsg(error.message,7000);await reload();state.view='timesheet';render()}
+// Eliminare la spesa deve portarsi via anche la ricevuta: un
+// documento fiscale irraggiungibile nel bucket non e' «cancellato», e
+// chi elimina la spesa si aspetta che se ne vada tutto.
+async function deleteExpense(idv){
+  const e=(data.travelExpenses||[]).find(x=>x.id===idv);
+  const conFile=!!(e&&e.receipt_path);
+  if(!confirm(conFile
+    ? 'Eliminare questa spesa di trasferta? Viene cancellata anche la ricevuta allegata.'
+    : 'Eliminare questa spesa di trasferta?'))return;
+  const {error}=await sb.from('travel_expenses').delete().eq('id',idv);
+  if(error)return setMsg(motivoLeggibile(error),7000);
+  if(conFile){
+    try{
+      const r=await sb.storage.from(BUCKET_RICEVUTE).remove([e.receipt_path]);
+      if(r&&r.error)throw r.error;
+    }catch(err){
+      await reload();state.view='timesheet';render();
+      return setMsg('Spesa eliminata, ma la ricevuta \u00e8 rimasta nel deposito: '+motivoStorage(err),10000);
+    }
+  }
+  await reload();state.view='timesheet';render();
+}
 
 function focusForm(){const f=document.querySelector('.app form.form');if(!f)return;const el=f.querySelector('input,select,textarea');if(!el)return;el.scrollIntoView({block:'center',behavior:'smooth'});setTimeout(()=>el.focus({preventScroll:true}),260)}
 function emptyState(text,ctaLabel,ctaAction){return `<div class="empty">${text}<button type="button" class="secondary emptyCta" onclick="${ctaAction}">${ctaLabel}</button></div>`}
@@ -4808,6 +4938,9 @@ Object.assign(window,{
   aggiornaCalcoloEAvviso,
   aggiornaAvvisoPolicy,
   aggiornaTracciabilita,
+  setMsgLeggero,
+  spesaAllEstero,
+  avvisoScartate,
   caricaRicevuta,
   apriRicevuta,
   togliRicevuta,

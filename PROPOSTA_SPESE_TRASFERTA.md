@@ -232,7 +232,7 @@ utente, upload, anteprima). Due strade:
 - **5a, piccolo** — solo `payment_method` + spunta «ricevuta conservata».
   Nessuna infrastruttura nuova, e già ti dà la lista di controllo.
 - **5b, completo** — bucket `ricevute`, foto dal telefono, miniatura sulla
-  riga, allegati scaricabili insieme all'Excel della trasferta.
+  riga.
 
 Consiglio di fare **5a subito e 5b dopo**, separati: 5b è l'unico pezzo di
 questa proposta che aggiunge un servizio nuovo, e voglio testarlo da solo.
@@ -389,3 +389,9 @@ scrivono prima e si sabotano dopo.
   c'è, ma per un forfettario che riaddebita analiticamente serve meno.
 - **Il multi-valuta**: Geneva è in franchi, ma oggi si scrive l'importo
   già in euro. Una conversione semplice si può aggiungere.
+- **Le ricevute scaricabili insieme all'Excel della trasferta.** La
+  prima stesura di questo documento le prometteva nello strato 5b.
+  Non sono state fatte: l'export legge solo i campi della spesa, non
+  `receipt_path`, quindi non esiste un modo di tirare giù il fascicolo
+  di una trasferta in un colpo solo. La promessa è stata tolta dalla
+  descrizione dello strato; la cosa resta da fare, e non è grande.

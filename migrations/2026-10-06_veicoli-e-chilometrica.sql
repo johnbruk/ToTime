@@ -58,17 +58,38 @@ alter table public.travel_expenses
 
 -- 3) Quali voci di spesa sono chilometriche. Senza questo l'app
 --    dovrebbe indovinarlo dall'unita' di misura, che e' fragile.
-alter table public.expense_categories
-  add column if not exists is_mileage boolean not null default false;
+--
+--    Il riconoscimento automatico gira SOLO la prima volta, cioe' solo
+--    se la colonna non c'era. Rilanciando la migrazione dopo aver
+--    corretto a mano una voce da «chilometrica» a «no», un UPDATE
+--    incondizionato gliela rimetterebbe su «si'»: la correzione
+--    dell'utente verrebbe sovrascritta da una supposizione.
+do $$
+declare c_esisteva boolean;
+begin
+  select exists (
+    select 1 from information_schema.columns
+     where table_schema='public' and table_name='expense_categories'
+       and column_name='is_mileage'
+  ) into c_esisteva;
 
--- 3b) Le voci che hanno «km» come unita' lo sono quasi certamente:
---     si parte da li', e in configurazione si corregge.
-update public.expense_categories
-   set is_mileage = true
- where is_mileage = false
-   and (lower(coalesce(unit_label,'')) in ('km','chilometri','kilometri')
+  if not c_esisteva then
+    alter table public.expense_categories
+      add column is_mileage boolean not null default false;
+
+    -- Le voci che hanno «km» come unita' lo sono quasi certamente:
+    -- si parte da li', e in configurazione si corregge. Una volta sola.
+    update public.expense_categories
+       set is_mileage = true
+     where lower(coalesce(unit_label,'')) in ('km','chilometri','kilometri')
         or lower(name) like '%chilometric%'
-        or lower(name) like '%rimborso km%');
+        or lower(name) like '%rimborso km%';
+
+    raise notice 'is_mileage creata e compilata dal riconoscimento automatico.';
+  else
+    raise notice 'is_mileage c''era gia'': il riconoscimento automatico NON gira, le correzioni a mano restano.';
+  end if;
+end $$;
 
 -- 4) Indici
 create index if not exists vehicles_user_idx on public.vehicles(user_id, active);
