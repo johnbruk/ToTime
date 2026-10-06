@@ -521,13 +521,18 @@ console.log('\n=== CAMBIANDO CLIENTE LA TARIFFA TOLTA RESTA TOLTA ===');
   await pg.close();
 }
 
-console.log('\n=== COMPLETANDO UNA RIGA VECCHIA, IL CONTO SE LA RIPRENDE ===');
+console.log('\n=== COMPLETANDO UNA RIGA VECCHIA, IL CONTO NON LE PORTA VIA LA CIFRA ===');
 {
-  // Il ripiego «a mano» serve finche' manca un pezzo. Ma non si
-  // spegneva mai: aggiungendo la tariffa mancante, l'importo restava
-  // quello di prima accanto a km e tariffa nuovi — una cifra che
-  // contraddice il suo stesso conto — e al giro dopo veniva pure
-  // bloccata in sola lettura, perche' ormai sembrava ricostruibile.
+  // Il ripiego «a mano» serve finche' manca un pezzo. Non si spegneva
+  // mai, e questo era un difetto: aggiungendo la tariffa mancante
+  // l'importo restava quello di prima accanto a km e tariffa nuovi, e
+  // al giro dopo veniva pure bloccato in sola lettura.
+  //
+  // Ma la prima correzione e' andata troppo oltre: riprendendosi la
+  // riga, il conto RISCRIVEVA l'importo. Su una riga di cui non si sa
+  // il perche' — e il perche' non e' registrato da nessuna parte —
+  // vuol dire cancellare una cifra che una persona vede. Ora i due
+  // numeri si dicono entrambi e sceglie lei.
   const pg=await apri();
   await pg.evaluate(()=>{
     window.__stores.travel_expenses=[{id:'mezza',expense_date:'2026-10-29',
@@ -538,23 +543,136 @@ console.log('\n=== COMPLETANDO UNA RIGA VECCHIA, IL CONTO SE LA RIPRENDE ===');
   await pg.waitForTimeout(700);
   await pg.evaluate(()=>window.editEntry('mezza','expense'));
   await pg.waitForTimeout(500);
-  ok((await campo(pg,'amount_a_mano')).checked,'si apre a mano, perch\u00e9 la tariffa manca');
-  ok(!(await campo(pg,'amount')).readonly,'e l\u2019importo si pu\u00f2 scrivere');
-  // si mette la tariffa che mancava
+  ok((await campo(pg,'amount_a_mano')).checked,'si apre a mano, perché la tariffa manca');
+  ok(!(await campo(pg,'amount')).readonly,'e l’importo si può scrivere');
+  // si mette una tariffa che NON torna con l'importo storico
   await scrivi(pg,'unit_rate','0.50');
-  ok(!(await campo(pg,'amount_a_mano')).checked,
-     'messa la tariffa, il ripiego si spegne da solo');
-  ok((await campo(pg,'amount')).readonly,'e l\u2019importo torna al conto');
-  ok(Math.abs(Number((await campo(pg,'amount')).val)-105)<0.005,
-     'che lo rifa\u2019: 210 km \u00d7 0,50 = 105,00, non piu\u2019 i 94,50 di prima',
+  ok(Math.abs(Number((await campo(pg,'amount')).val)-94.5)<0.005,
+     'messa la tariffa, i 94,50 registrati restano: non li riscrive nessuno',
      String((await campo(pg,'amount')).val));
-  // e salvando i tre numeri sono d'accordo fra loro
+  ok(!(await campo(pg,'amount')).readonly,
+     'e la casella resta scrivibile, così la cifra si può ancora correggere');
+  const t=await testo(pg);
+  ok(/210 km × 0,50 €\/km = 105,00/.test(t),
+     'l’app dice quanto farebbe il conto: 210 km × 0,50 €/km = 105,00 €');
+  ok(/94,50/.test(t)&&/importo scritto/.test(t),
+     'e dice che l’importo scritto è un altro: 94,50 €');
+  ok(/correggilo tu/i.test(t),'lasciando la correzione a chi sa quale dei due è giusto');
+  // chi scrive accetta il conto e batte la cifra giusta
+  await scrivi(pg,'amount','105');
   await pg.evaluate(()=>document.querySelector('#app form.form').requestSubmit());
   await pg.waitForTimeout(800);
   const e=await pg.evaluate(()=>window.__stores.travel_expenses.find(x=>x.id==='mezza'));
+  ok(e&&Math.abs(Number(e.amount)-105)<0.005,
+     'corretta a mano, si salva coi 105,00 scritti da lei',String(e&&e.amount));
   ok(e&&Math.abs(Number(e.amount)-Number(e.quantity)*Number(e.unit_rate))<0.005,
-     'e la riga salvata torna coi suoi conti: importo = km \u00d7 tariffa',
+     'e la riga torna coi suoi conti: importo = km × tariffa',
      JSON.stringify({q:e&&e.quantity,t:e&&e.unit_rate,a:e&&e.amount}));
+  await pg.close();
+}
+
+console.log('\n=== QUANDO IL CONTO CONFERMA LA CIFRA, LA RIGA TORNA CALCOLATA ===');
+{
+  // Il ripiego si spegne ancora: ma solo quando non c'e' niente da
+  // perdere, cioe' quando il conto rifarebbe al centesimo la cifra che
+  // c'e' gia'. Senza questo caso la correzione di sopra potrebbe
+  // essere semplicemente «non riprendersela mai», e non lo e'.
+  const pg=await apri();
+  await pg.evaluate(()=>{
+    window.__stores.travel_expenses=[{id:'torna',expense_date:'2026-10-29',
+      client_id:'k2',project_id:'omni',expense_category_id:'km',work_city:'Catania',
+      quantity:210,amount:94.5,reimbursement_type:'invoice'}];   // senza tariffa
+    return window.reload();
+  });
+  await pg.waitForTimeout(700);
+  await pg.evaluate(()=>window.editEntry('torna','expense'));
+  await pg.waitForTimeout(500);
+  ok((await campo(pg,'amount_a_mano')).checked,'si apre a mano, per ripiego');
+  // 210 x 0,45 fa esattamente i 94,50 registrati
+  await scrivi(pg,'unit_rate','0.45');
+  ok(!(await campo(pg,'amount_a_mano')).checked,
+     'la tariffa che conferma la cifra spegne il ripiego');
+  ok((await campo(pg,'amount')).readonly,'e la riga torna al conto');
+  ok(Math.abs(Number((await campo(pg,'amount')).val)-94.5)<0.005,
+     'con lo stesso importo di prima: 210 × 0,45 = 94,50, nessun centesimo perso',
+     String((await campo(pg,'amount')).val));
+  ok(/210 km × 0,45 €\/km = 94,50/.test(await testo(pg)),
+     'e il conto si legge, senza avvisi di discordanza');
+  ok(!/importo scritto/.test(await testo(pg)),'perché non ce n’è nessuna');
+  await pg.close();
+}
+
+console.log('\n=== SCRIVERE NELL’IMPORTO BASTA: NON SERVE TOCCARE LA SPUNTA ===');
+{
+  // La riga si apre con la spunta GIA' messa dall'app. Quindi per
+  // correggere la cifra non serve toccarla: si scrive e basta. Ma
+  // allora il ripiego risultava ancora «dell'app», e completare la
+  // tariffa dopo cancellava la correzione appena battuta.
+  const pg=await apri();
+  await pg.evaluate(()=>{
+    window.__stores.travel_expenses=[{id:'battuta',expense_date:'2026-10-29',
+      client_id:'k2',project_id:'omni',expense_category_id:'km',work_city:'Catania',
+      quantity:210,amount:94.5,reimbursement_type:'invoice'}];   // senza tariffa
+    return window.reload();
+  });
+  await pg.waitForTimeout(700);
+  await pg.evaluate(()=>window.editEntry('battuta','expense'));
+  await pg.waitForTimeout(500);
+  ok((await campo(pg,'amount_a_mano')).checked,'la spunta è già messa dall’app');
+  // si corregge la cifra SENZA toccare la spunta: il gesto naturale
+  await scrivi(pg,'amount','99');
+  ok((await campo(pg,'amount_a_mano')).checked,'si scrive l’importo e la spunta resta dov’era');
+  // e ora si completa la tariffa, che prima si riprendeva la riga
+  await scrivi(pg,'unit_rate','0.45');
+  ok(Math.abs(Number((await campo(pg,'amount')).val)-99)<0.005,
+     'i 99 battuti a mano restano, anche se 210 × 0,45 farebbe 94,50',
+     String((await campo(pg,'amount')).val));
+  ok(!(await campo(pg,'amount')).readonly,'e la casella non si blocca addosso a chi stava scrivendo');
+  await pg.evaluate(()=>document.querySelector('#app form.form').requestSubmit());
+  await pg.waitForTimeout(800);
+  ok(Math.abs(Number(await pg.evaluate(()=>window.__stores.travel_expenses.find(x=>x.id==='battuta').amount))-99)<0.005,
+     'e si salvano i 99');
+  await pg.close();
+}
+
+console.log('\n=== SCRITTO A MANO RESTA A MANO, ANCHE QUANDO IL CONTO DÀ RAGIONE ===');
+{
+  // Scrivere nella casella dice «questa cifra la decido io». Se poi i
+  // numeri danno ragione al conto per combinazione, il conto non deve
+  // prendersi la riga in silenzio: oggi la cifra non cambierebbe, ma
+  // da domani la ricalcola lui — e al primo km corretto quella scritta
+  // a mano sparisce. E' qui che si vede, perche' sulla discordanza c'e'
+  // gia' un'altra protezione.
+  const pg=await apri();
+  await pg.evaluate(()=>{
+    window.__stores.travel_expenses=[{id:'accordo',expense_date:'2026-10-29',
+      client_id:'k2',project_id:'omni',expense_category_id:'km',work_city:'Catania',
+      quantity:210,amount:94.5,reimbursement_type:'invoice'}];   // senza tariffa
+    return window.reload();
+  });
+  await pg.waitForTimeout(700);
+  await pg.evaluate(()=>window.editEntry('accordo','expense'));
+  await pg.waitForTimeout(500);
+  // il cliente ha rimborsato 105: si corregge la cifra, senza toccare
+  // la spunta — che l'app ha gia' messo da sola
+  await scrivi(pg,'amount','105');
+  // e si documenta la tariffa usata, che per combinazione ci torna:
+  // 210 x 0,50 fa esattamente 105
+  await scrivi(pg,'unit_rate','0.50');
+  ok((await campo(pg,'amount_a_mano')).checked,
+     'la cifra scritta a mano resta una scelta, anche se il conto ci torna');
+  ok(!(await campo(pg,'amount')).readonly,'e la casella non si blocca');
+  ok(Math.abs(Number((await campo(pg,'amount')).val)-105)<0.005,
+     'i 105 sono ancora lì',String((await campo(pg,'amount')).val));
+  // ed e' qui che conta: correggendo i km, i 105 scritti non si muovono
+  await scrivi(pg,'km_tratta','200');
+  ok(Math.abs(Number((await campo(pg,'amount')).val)-105)<0.005,
+     'e correggendo i km restano 105, non diventano i 100,00 del conto',
+     String((await campo(pg,'amount')).val));
+  await pg.evaluate(()=>document.querySelector('#app form.form').requestSubmit());
+  await pg.waitForTimeout(800);
+  ok(Math.abs(Number(await pg.evaluate(()=>window.__stores.travel_expenses.find(x=>x.id==='accordo').amount))-105)<0.005,
+     'e si salvano i 105 scritti da chi sapeva quanto gli è stato rimborsato');
   await pg.close();
 }
 

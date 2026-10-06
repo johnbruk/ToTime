@@ -1426,9 +1426,11 @@ function campiCosa(v={}){
   const aQ=aQuantitaTariffa(cat);
   const aMano=!aQ||importoNonRicostruibile(v);
   // Perche' e' a mano cambia tutto. Se lo e' per ripiego — la riga non
-  // si sa ricostruire — appena i dati che mancavano arrivano il conto
-  // deve riprendersela. Se invece l'ha deciso chi scrive, resta a mano
-  // e nessuno gliela porta via.
+  // si sa ricostruire — il conto puo' riprendersela appena i dati che
+  // mancavano arrivano, ma solo se non c'e' niente da perdere (vedi
+  // updateExpenseCalc): mai a spese di una cifra diversa da quella che
+  // rifarebbe. Se invece l'ha deciso chi scrive, resta a mano e nessuno
+  // gliela porta via — e scrivere nella casella basta a deciderlo.
   const manoAuto=aQ&&importoNonRicostruibile(v);
   const unita=(cat&&cat.unit_label)||'unit\u00e0';
   const tratta=km?kmTrattaDi(v):0;
@@ -1437,7 +1439,7 @@ function campiCosa(v={}){
     +campiPercorso(v,km)
     +`<div class="field" id="qtaField"${aQ&&!km?'':' hidden'}><label>Quantit\u00e0 <span id="qtaUnita">(${esc(unita)})</span></label><input name="quantity" type="number" step="0.01" value="${Number(v.quantity||(aQ&&!aMano?1:0))||''}" oninput="aggiornaCalcoloEAvviso(this.form)"></div>`
     +`<div class="field" id="rateField"${aQ?'':' hidden'}><label id="rateLbl">${km?'Tariffa \u20ac/km':'Tariffa unitaria'}</label><input name="unit_rate" type="number" step="0.0001" value="${Number(v.unit_rate||0)}" oninput="aggiornaCalcoloEAvviso(this.form)">${km?'<div class="small">La proponi tu: le tabelle ACI stanno su costikm.aci.it e cambiano a gennaio. Il veicolo la suggerisce, qui si corregge.</div>':''}</div>`
-    +`<div class="field"><label>Importo totale</label><input name="amount" type="number" step="0.01" value="${Number(v.amount||0)}"${aMano?'':' readonly'} oninput="aggiornaAvvisoPolicy(this.form)"><label class="manoLbl"><input type="checkbox" name="amount_a_mano" onchange="totaleAMano(this.form)"${aMano?' checked':''}> Lo scrivo a mano</label><input type="hidden" name="mano_auto" value="${manoAuto?'1':''}"><div class="small" id="calcNota">${aMano?NOTA_MANO:NOTA_CALCOLO}</div></div>`
+    +`<div class="field"><label>Importo totale</label><input name="amount" type="number" step="0.01" value="${Number(v.amount||0)}"${aMano?'':' readonly'} oninput="importoACambiato(this.form)"><label class="manoLbl"><input type="checkbox" name="amount_a_mano" onchange="totaleAMano(this.form)"${aMano?' checked':''}> Lo scrivo a mano</label><input type="hidden" name="mano_auto" value="${manoAuto?'1':''}"><div class="small" id="calcNota">${aMano?NOTA_MANO:NOTA_CALCOLO}</div></div>`
     +`<div class="field"><label>Descrizione</label><textarea name="description" placeholder="Es. Volo Milano\u2013Catania andata">${esc(v.description||'')}</textarea></div>`);
 }
 // I km a tratta: quello che una persona ha in testa. Il totale \u2014 che
@@ -1553,6 +1555,37 @@ function expenseEdit(){
 // e' stato corretto a mano. Prima lo riscriveva sempre, quindi una
 // correzione a mano veniva cancellata al tocco successivo su quantita'
 // o tariffa — senza dire niente.
+// Il conto scritto come lo si direbbe a voce: «210 km x 0,45 EUR/km
+// = 94,50 EUR». Serve in due posti — la nota del calcolo e l'avviso di
+// discordanza — e duplicarlo voleva dire due formattazioni diverse per
+// lo stesso numero.
+function testoConto(cat,quanti,tariffa){
+  const km=eVoceChilometrica(cat);
+  const unita=km?'km':(((cat&&cat.unit_label)||'').trim()||'');
+  return fmtNum(quanti,quanti%1?2:0)+(unita?' '+unita:'')+
+    ' \u00d7 '+fmtNum(tariffa,tariffa%1&&(tariffa*100)%1?4:2)+' \u20ac'+(km?'/km':'')+
+    ' = '+fmtEUR(quanti*tariffa);
+}
+// I numeri per rifare il conto adesso ci sono, ma non tornano con
+// l'importo che sta nella casella. Nessuno dei due viene buttato: si
+// dicono entrambi, e la correzione la fa chi sa qual e' quello giusto.
+function mostraDiscordanza(cat,quanti,tariffa,scritto){
+  const n=document.getElementById('calcNota');
+  if(!n)return;
+  n.textContent=testoConto(cat,quanti,tariffa)+
+    ', ma l\u2019importo scritto \u00e8 '+fmtEUR(scritto)+
+    '. Resta quello scritto: correggilo tu se il conto ha ragione.';
+}
+// Scrivere nella casella dell'importo E' una scelta, anche senza
+// toccare la spunta. Su una riga aperta col ripiego — importo
+// scrivibile e spunta gia' messa dall'app — correggere la cifra e poi
+// completare la tariffa significava vedersela cancellare dal calcolo,
+// perche' il ripiego risultava ancora «dell'app». Da qui in poi non lo
+// e' piu'.
+function importoACambiato(form){
+  if(form.mano_auto)form.mano_auto.value='';
+  aggiornaAvvisoPolicy(form);
+}
 function updateExpenseCalc(form,proposeType,proposeRate){
   const cat=expenseCategoryById(form.expense_category_id?.value);
   if(!cat)return;
@@ -1576,9 +1609,26 @@ function updateExpenseCalc(form,proposeType,proposeRate){
   if(form.mano_auto&&form.mano_auto.value==='1'&&
      Number(form.quantity&&form.quantity.value||0)>0&&
      Number(form.unit_rate&&form.unit_rate.value||0)>0){
-    form.mano_auto.value='';
-    if(form.amount_a_mano)form.amount_a_mano.checked=false;
-    if(form.amount)form.amount.readOnly=true;
+    // Ma non si riprende niente a spese della cifra che c'e'. Il
+    // ripiego nasce proprio sulle righe di cui non si sa il perche':
+    // riprendersele in silenzio vuol dire cancellare un importo che
+    // una persona vede — e che magari ha appena scritto a mano.
+    // Quindi: si torna al calcolo solo quando non c'e' nulla da
+    // perdere, cioe' la casella e' vuota o dice gia' al centesimo
+    // quello che il conto rifarebbe comunque.
+    const atteso=Number(form.quantity.value)*Number(form.unit_rate.value);
+    const scritto=Number(form.amount&&form.amount.value||0);
+    if(!scritto||Math.abs(atteso-scritto)<0.005){
+      form.mano_auto.value='';
+      if(form.amount_a_mano)form.amount_a_mano.checked=false;
+      if(form.amount)form.amount.readOnly=true;
+    }else{
+      // Discordano. Non si sceglie per conto di nessuno: l'importo
+      // scritto resta, e resta correggibile; l'app dice il conto e la
+      // differenza, e chi sa quale dei due e' giusto decide.
+      mostraDiscordanza(cat,Number(form.quantity.value),Number(form.unit_rate.value),scritto);
+      return;
+    }
   }
   if(form.amount_a_mano&&form.amount_a_mano.checked)return;
   if(!aQuantitaTariffa(cat))return;
@@ -1609,10 +1659,7 @@ function updateExpenseCalc(form,proposeType,proposeRate){
     return;
   }
   if(tariffa>0&&quanti>0){
-    const unita=eVoceChilometrica(cat)?'km':((cat.unit_label||'').trim()||'');
-    n.textContent=fmtNum(quanti,quanti%1?2:0)+(unita?' '+unita:'')+
-      ' \u00d7 '+fmtNum(tariffa,tariffa%1&&(tariffa*100)%1?4:2)+' \u20ac'+(eVoceChilometrica(cat)?'/km':'')+
-      ' = '+fmtEUR(quanti*tariffa);
+    n.textContent=testoConto(cat,quanti,tariffa);
     return;
   }
   n.textContent=NOTA_CALCOLO;
@@ -5019,7 +5066,7 @@ Object.assign(window,{
   trasfertaCambiata,
   clienteSpesaCambiato,
   voceSpesaCambiata,
-  totaleAMano,
+  totaleAMano,importoACambiato,
   veicoloCambiato,
   aggiornaCalcoloEAvviso,
   aggiornaAvvisoPolicy,

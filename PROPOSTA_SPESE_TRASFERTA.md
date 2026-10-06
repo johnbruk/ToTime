@@ -336,6 +336,7 @@ scaricando i file e confrontandoli byte per byte con quelli testati.
 | v1.31.3 | Le righe vecchie coi km non vengono più azzerate scegliendo il veicolo (P1 Codex) | — |
 | v1.31.4 | Stessa protezione per le righe importate senza tariffa (P1 Codex) | — |
 | v1.31.5 | Il ripiego «importo a mano» si spegne quando la riga si completa (Codex) | — |
+| v1.31.6 | L'app non riscrive un importo che una persona vede (2 P1 Codex) | — |
 
 ## Le quattro migrazioni da lanciare
 
@@ -394,14 +395,21 @@ Questi non li ha trovati la batteria. Vale la pena dirlo.
    tutta la pagina, quindi perfino il messaggio «Carico la ricevuta…»
    buttava via quello che stavi scrivendo. Ora i messaggi leggeri non
    rifanno la pagina.
-3. **Una mia correzione ha messo a rischio dati veri.** Il ripiego
-   introdotto al punto 1 azzerava a 0,00 le righe vecchie che avevano
-   l'importo ma non i km, appena si scegliesse un veicolo — e lasciava
-   il campo in sola lettura, quindi irreparabile. Segnalato da Codex su
-   tre giri successivi (righe senza km, righe senza tariffa, e il
-   ripiego che non si spegneva mai) e sistemato ogni volta con un caso
-   di test che parte da una riga vecchia vera. Nessun dato è stato
-   perso: il difetto è stato chiuso prima che tu ci lavorassi sopra.
+3. **Una mia correzione ha messo a rischio dati veri, per quattro giri
+   di seguito.** Il ripiego introdotto al punto 1 azzerava a 0,00 le
+   righe vecchie che avevano l'importo ma non i km, appena si scegliesse
+   un veicolo — e lasciava il campo in sola lettura, quindi
+   irreparabile. Codex l'ha segnalato quattro volte, ogni volta su una
+   strada diversa: righe senza km, righe senza tariffa, il ripiego che
+   non si spegneva mai, e infine — spegnendosi — il ripiego che
+   *riscriveva* l'importo, cancellando una cifra che una persona ha
+   davanti agli occhi.
+   La regola che mancava era una sola, e vale per tutta l'app:
+   **non si riscrive un importo che una persona vede e può modificare.**
+   Il conto si riprende una riga solo quando non c'è niente da perdere;
+   se i numeri discordano li dice entrambi e lascia decidere. Nessun
+   dato è stato perso: tutti i difetti sono stati chiusi prima che tu
+   ci lavorassi sopra.
 
 ## Cosa resta aperto
 
