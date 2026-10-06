@@ -317,6 +317,11 @@ function metricLine(hours,amount){return `${fmtNum(hours,1)} h <span class="dot"
 function amountLine(label,amount){return `${esc(label)} <span class="dot">·</span> ${fmtEUR(amount)}`}
 function dateIT(v){if(!v)return'';const s=String(v);return `${s.slice(8,10)}/${s.slice(5,7)}`}
 function viewLabel(v){return ({tripNew:'Nuova trasferta',tripEdit:'Modifica trasferta',home:'Dashboard',timesheet:'Timesheet',billing:'Fatturazione',billingDetail:'Dettaglio fattura',tax:'Profilo fiscale',taxPayments:'Pagamenti fiscali',taxPaymentEdit:'Pagamento fiscale',annualMonths:'Consuntivato annuale',annualInvoices:'Elenco fatture',settings:'Configurazione',clients:'Clienti',clientEdit:'Cliente',projects:'Progetti',projectEdit:'Progetto',activities:'Attività',activityEdit:'Attività',expenseCategories:'Voci spesa',vehicles:'Veicoli',vehicleEdit:'Veicolo',policyRimborsi:'Policy rimborsi',expenseCategoryEdit:'Voce spesa',invoiceTemplates:'Template fattura',invoiceTemplateEdit:'Template fattura',appearance:'Aspetto',exportTimesheet:'Export timesheet',dailyForm:'Consuntivo giornaliero',dailyEdit:'Consuntivo giornaliero',monthlyForm:'Compenso mensile',monthlyEdit:'Compenso mensile',manualForm:'Consuntivo manuale',manualEdit:'Consuntivo manuale',expenseForm:'Spesa trasferta',expenseEdit:'Spesa trasferta'})[v]||'schermata precedente'}
+// Fuori dal browser — i test di modulo girano in Node con un document
+// finto e ridotto — alcune funzioni del DOM non ci sono. Chiederle di
+// sicuro faceva esplodere l'avvio dell'app invece di proteggerlo.
+const cercaNodo=sel=>{try{return(typeof document!=='undefined'&&document.querySelector)?document.querySelector(sel):null}catch(e){return null}};
+const cercaId=id=>{try{return(typeof document!=='undefined'&&document.getElementById)?document.getElementById(id):null}catch(e){return null}};
 // La domanda sulle modifiche non salvate non la fa piu' il browser.
 //
 // Un confirm() dentro una web app aggiunta alla schermata home, su iOS,
@@ -342,15 +347,16 @@ function guardUnsavedChanges(azione){
   return false;
 }
 function chiediUscita(azione){
-  const app=document.getElementById('app');
-  const dove=app&&app.querySelector('.app');
+  const app=cercaId('app');
+  const dove=app&&app.querySelector&&app.querySelector('.app');
   // Senza la shell non c'e' dove infilarla: meglio lasciar passare che
   // bloccare qualcuno senza mostrargli niente.
   if(!dove){state.dirty=false;if(typeof azione==='function')azione();return}
   state.uscitaInSospeso=azione;
   // La scheda c'e' gia': si aggiorna la destinazione, non si impila
   // un'altra domanda identica.
-  if(document.getElementById('uscitaCard'))return;
+  if(cercaId('uscitaCard'))return;
+  if(typeof document.createElement!=='function'){state.dirty=false;state.uscitaInSospeso=null;if(typeof azione==='function')azione();return}
   const box=document.createElement('div');
   box.className='card uscitaCard';
   box.id='uscitaCard';
@@ -362,8 +368,8 @@ function chiediUscita(azione){
   box.scrollIntoView({block:'nearest'});
 }
 function togliSchedaUscita(){
-  const c=document.getElementById('uscitaCard');
-  if(c)c.remove();
+  const c=cercaId('uscitaCard');
+  if(c&&c.remove)c.remove();
   state.uscitaInSospeso=null;
 }
 function uscitaAnnullata(){togliSchedaUscita()}
@@ -397,10 +403,10 @@ function apriGruppo(main){
 // Il menu si riscrive da solo, al suo posto: la schermata sotto non si
 // tocca, cosi' un modulo mezzo compilato resta dov'e'.
 function ridisegnaMenu(){
-  const wrap=document.querySelector('.headerMenuWrap');
-  const pan=wrap&&wrap.querySelector('.topMenu');
+  const wrap=cercaNodo('.headerMenuWrap');
+  const pan=wrap&&wrap.querySelector&&wrap.querySelector('.topMenu');
   if(pan){pan.remove();wrap.insertAdjacentHTML('beforeend',menuDropdown())}
-  const side=document.querySelector('.sidebarNav');
+  const side=cercaNodo('.sidebarNav');
   if(side)side.innerHTML=navMenu();
 }
 function back(){if(!guardUnsavedChanges(()=>{state.dirty=false;back()}))return;const prev=state.history.pop()||{view:'home',edit:null,editType:null};state.view=prev.view||'home';state.edit=prev.edit||null;state.editType=prev.editType||null;state.parent=prev.parent||null;state.menuOpen=false;render()}
@@ -420,8 +426,8 @@ function back(){if(!guardUnsavedChanges(()=>{state.dirty=false;back()}))return;c
 function toggleMainMenu(){
   state.menuOpen=!state.menuOpen;
   if(state.menuOpen)state.gruppoAperto=null;   // riparte dalla sezione in cui si e'
-  const wrap=document.querySelector('.headerMenuWrap');
-  if(!wrap){render();return}   // schermate senza shell: si ridisegna
+  const wrap=cercaNodo('.headerMenuWrap');
+  if(!wrap||!wrap.querySelector){render();return}   // schermate senza shell: si ridisegna
   const gia=wrap.querySelector('.topMenu');
   if(gia)gia.remove();
   if(state.menuOpen)wrap.insertAdjacentHTML('beforeend',menuDropdown());
@@ -5289,17 +5295,27 @@ function segnalaGuaio(dettaglio){
   ultimoGuaio=d;
   setTimeout(()=>{if(ultimoGuaio===d)ultimoGuaio=''},8000);
   try{
-    const app=document.getElementById('app');
-    if(!app||!app.querySelector('.app'))return;   // senza shell non si tocca niente
+    const app=cercaId('app');
+    if(!app||!app.querySelector||!app.querySelector('.app'))return;   // senza shell non si tocca niente
     setMsgLeggero('Qualcosa non ha funzionato: '+d,9000);
   }catch(e){}
 }
-window.addEventListener('error',e=>{segnalaGuaio(e&&(e.message||e.error&&e.error.message))});
-window.addEventListener('unhandledrejection',e=>{
-  const r=e&&e.reason;
-  segnalaGuaio(r&&(r.message||r)||'operazione non riuscita');
-});
-document.addEventListener('input',e=>{if(e.target.closest?.('.form'))state.dirty=true});
+// Fuori dal browser (i test di modulo girano in Node, con un window
+// finto) questi agganci non esistono: chiederli di sicuro faceva
+// esplodere l'avvio invece di proteggerlo.
+if(typeof window!=='undefined'&&typeof window.addEventListener==='function'){
+  window.addEventListener('error',e=>{segnalaGuaio(e&&(e.message||e.error&&e.error.message))});
+  window.addEventListener('unhandledrejection',e=>{
+    const r=e&&e.reason;
+    segnalaGuaio(r&&(r.message||r)||'operazione non riuscita');
+  });
+}
+// Scegliere un file spara DUE eventi, input e change. L'esclusione
+// dei file c'era solo su change: allegare una ricevuta marcava il
+// modulo «da salvare» anche se il caricamento salva subito nel
+// database, e da li' in poi ogni spostamento chiedeva di perdere
+// dati che non esistevano.
+document.addEventListener('input',e=>{if(e.target.closest?.('.form')&&e.target.type!=='file')state.dirty=true});
 document.addEventListener('change',e=>{if(e.target.closest?.('.form')&&e.target.type!=='file')state.dirty=true});
 if('serviceWorker' in navigator){navigator.serviceWorker.register('./sw.js').catch(()=>{})}
 init();

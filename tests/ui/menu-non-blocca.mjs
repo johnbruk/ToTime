@@ -258,6 +258,39 @@ console.log('\n=== NIENTE SI BLOCCA NEMMENO SE IL BROWSER NON SA FARE AVVISI ===
   await pg.close();
 }
 
+console.log('\n=== ALLEGARE UNA RICEVUTA NON RENDE IL MODULO «DA SALVARE» ===');
+{
+  // Scegliere un file spara DUE eventi, input e change. L'esclusione dei
+  // file c'era solo su change: allegare una ricevuta marcava il modulo
+  // «da salvare» anche se il caricamento salva subito nel database, e da
+  // li' in poi ogni spostamento chiedeva di perdere dati che non
+  // esistevano. E' la bandierina falsa che intrappola: niente da
+  // salvare, e tutto bloccato.
+  const {pg}=await apri();
+  await pg.evaluate(()=>window.go('expenseForm'));
+  await pg.waitForTimeout(500);
+  await pg.evaluate(()=>{
+    const f=document.querySelector('#app form.form');
+    const inp=document.createElement('input');
+    inp.type='file'; inp.name='receipt_file';
+    f.appendChild(inp);
+    inp.dispatchEvent(new Event('input',{bubbles:true}));
+    inp.dispatchEvent(new Event('change',{bubbles:true}));
+  });
+  await pg.waitForTimeout(300);
+  await toccaMenu(pg);
+  await pg.evaluate(()=>{
+    const d=[...document.querySelectorAll('.topMenu button')].find(x=>/Dashboard/.test(x.textContent));
+    d.click();
+  });
+  await pg.waitForTimeout(600);
+  ok(!(await pg.evaluate(()=>!!document.getElementById('uscitaCard'))),
+     'scegliere un file non fa comparire la domanda: non c’è niente da perdere');
+  ok((await pg.evaluate(()=>document.documentElement.getAttribute('data-view')))==='home',
+     'e ci si sposta senza intoppi');
+  await pg.close();
+}
+
 console.log('\n=== UN GUASTO NON È MAI MUTO ===');
 {
   // La firma del guasto segnalato dal telefono: il menu aperto, i
