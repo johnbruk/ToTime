@@ -328,7 +328,27 @@ function go(v){navigateTo(v)}
 // cosi' le sottovoci si vedono subito, con un tocco invece di tre.
 function apriGruppo(v){navigateTo(v,{keepMenu:true})}
 function back(){if(!guardUnsavedChanges())return;const prev=state.history.pop()||{view:'home',edit:null,editType:null};state.view=prev.view||'home';state.edit=prev.edit||null;state.editType=prev.editType||null;state.parent=prev.parent||null;state.menuOpen=false;render()}
-function toggleMainMenu(){if(!guardUnsavedChanges())return;state.menuOpen=!state.menuOpen;render()}
+// Aprire il menu NON e' uscire dalla schermata: non si perde niente, e
+// non si deve chiedere niente. Ma render() ricostruisce tutto con
+// innerHTML, quindi aprirlo cancellava davvero il modulo mezzo
+// compilato — e per difendersi c'era una guardia che, rispondendo
+// «Annulla» (la risposta prudente), lasciava il menu chiuso. Al tocco
+// dopo richiedeva, e restava chiuso di nuovo: l'app sembrava bloccata
+// nel menu, senza un errore, e da li' non si raggiungeva piu' niente.
+// Su iOS, dove gli avvisi si possono bloccare, il confirm risponde
+// «no» da solo e il menu non si apriva mai.
+//
+// Il pannello si infila nel DOM e si toglie, come i messaggi leggeri:
+// la pagina non si ridisegna, il modulo resta intatto, e nessuno deve
+// scegliere fra guardare il menu e tenere quello che ha scritto.
+function toggleMainMenu(){
+  state.menuOpen=!state.menuOpen;
+  const wrap=document.querySelector('.headerMenuWrap');
+  if(!wrap){render();return}   // schermate senza shell: si ridisegna
+  const gia=wrap.querySelector('.topMenu');
+  if(gia)gia.remove();
+  if(state.menuOpen)wrap.insertAdjacentHTML('beforeend',menuDropdown());
+}
 const MENU=[
   {v:'home',ic:'⌂',l:'Dashboard'},
   // Il gruppo che si apre ogni giorno. «Nuovo consuntivo» punta diritto
