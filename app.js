@@ -1425,6 +1425,11 @@ function campiCosa(v={}){
   // riga importata non si poteva piu' rendere ricalcolabile.
   const aQ=aQuantitaTariffa(cat);
   const aMano=!aQ||importoNonRicostruibile(v);
+  // Perche' e' a mano cambia tutto. Se lo e' per ripiego — la riga non
+  // si sa ricostruire — appena i dati che mancavano arrivano il conto
+  // deve riprendersela. Se invece l'ha deciso chi scrive, resta a mano
+  // e nessuno gliela porta via.
+  const manoAuto=aQ&&importoNonRicostruibile(v);
   const unita=(cat&&cat.unit_label)||'unit\u00e0';
   const tratta=km?kmTrattaDi(v):0;
   return bloccoCampi('Cosa','La voce di spesa e quanto',
@@ -1432,7 +1437,7 @@ function campiCosa(v={}){
     +campiPercorso(v,km)
     +`<div class="field" id="qtaField"${aQ&&!km?'':' hidden'}><label>Quantit\u00e0 <span id="qtaUnita">(${esc(unita)})</span></label><input name="quantity" type="number" step="0.01" value="${Number(v.quantity||(aQ&&!aMano?1:0))||''}" oninput="aggiornaCalcoloEAvviso(this.form)"></div>`
     +`<div class="field" id="rateField"${aQ?'':' hidden'}><label id="rateLbl">${km?'Tariffa \u20ac/km':'Tariffa unitaria'}</label><input name="unit_rate" type="number" step="0.0001" value="${Number(v.unit_rate||0)}" oninput="aggiornaCalcoloEAvviso(this.form)">${km?'<div class="small">La proponi tu: le tabelle ACI stanno su costikm.aci.it e cambiano a gennaio. Il veicolo la suggerisce, qui si corregge.</div>':''}</div>`
-    +`<div class="field"><label>Importo totale</label><input name="amount" type="number" step="0.01" value="${Number(v.amount||0)}"${aMano?'':' readonly'} oninput="aggiornaAvvisoPolicy(this.form)"><label class="manoLbl"><input type="checkbox" name="amount_a_mano" onchange="totaleAMano(this.form)"${aMano?' checked':''}> Lo scrivo a mano</label><div class="small" id="calcNota">${aMano?NOTA_MANO:NOTA_CALCOLO}</div></div>`
+    +`<div class="field"><label>Importo totale</label><input name="amount" type="number" step="0.01" value="${Number(v.amount||0)}"${aMano?'':' readonly'} oninput="aggiornaAvvisoPolicy(this.form)"><label class="manoLbl"><input type="checkbox" name="amount_a_mano" onchange="totaleAMano(this.form)"${aMano?' checked':''}> Lo scrivo a mano</label><input type="hidden" name="mano_auto" value="${manoAuto?'1':''}"><div class="small" id="calcNota">${aMano?NOTA_MANO:NOTA_CALCOLO}</div></div>`
     +`<div class="field"><label>Descrizione</label><textarea name="description" placeholder="Es. Volo Milano\u2013Catania andata">${esc(v.description||'')}</textarea></div>`);
 }
 // I km a tratta: quello che una persona ha in testa. Il totale \u2014 che
@@ -1502,6 +1507,7 @@ function voceSpesaCambiata(form){
   if(u)u.textContent='('+((cat&&cat.unit_label)||'unit\u00e0')+')';
   const rl=document.getElementById('rateLbl');
   if(rl)rl.textContent=km?'Tariffa \u20ac/km':'Tariffa unitaria';
+  if(form.mano_auto)form.mano_auto.value='';
   if(form.amount_a_mano)form.amount_a_mano.checked=!aQ;
   if(form.amount)form.amount.readOnly=aQ;
   const n=document.getElementById('calcNota');
@@ -1512,6 +1518,9 @@ function voceSpesaCambiata(form){
   aggiornaTracciabilita(form);
 }
 function totaleAMano(form){
+  // Toccata a mano: da qui in poi comanda chi scrive, e il ripiego
+  // automatico non ha piu' voce.
+  if(form.mano_auto)form.mano_auto.value='';
   const aMano=!!(form.amount_a_mano&&form.amount_a_mano.checked);
   if(form.amount)form.amount.readOnly=!aMano;
   const n=document.getElementById('calcNota');
@@ -1558,6 +1567,18 @@ function updateExpenseCalc(form,proposeType,proposeRate){
   if(proposeRate&&aQuantitaTariffa(cat)&&form.unit_rate){
     if((!form.unit_rate.value||Number(form.unit_rate.value)===0)&&cat.default_unit_rate)
       form.unit_rate.value=Number(cat.default_unit_rate);
+  }
+  // Era a mano solo perche' mancava un pezzo: ora che ci sono entrambi,
+  // il conto torna a governarla. Senza questo, completare una riga
+  // vecchia la lasciava con l'importo di prima e i numeri nuovi — una
+  // cifra che contraddice i suoi stessi km x tariffa, e che al giro
+  // dopo veniva pure bloccata in sola lettura.
+  if(form.mano_auto&&form.mano_auto.value==='1'&&
+     Number(form.quantity&&form.quantity.value||0)>0&&
+     Number(form.unit_rate&&form.unit_rate.value||0)>0){
+    form.mano_auto.value='';
+    if(form.amount_a_mano)form.amount_a_mano.checked=false;
+    if(form.amount)form.amount.readOnly=true;
   }
   if(form.amount_a_mano&&form.amount_a_mano.checked)return;
   if(!aQuantitaTariffa(cat))return;
