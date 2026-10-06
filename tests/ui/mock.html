@@ -14,7 +14,7 @@ const STORES={
     {id:'e7',entry_date:'2026-07-20',client_id:'c2',project_id:null,activity_id:'a2',hours:6,daily_rate_snapshot:400,standard_hours_snapshot:8},
     {id:'e9',entry_date:'2026-07-30',client_id:'c1',project_id:'p2',activity_id:'a1',hours:4,status:'planned',tm_batch_id:'tm_x',daily_rate_snapshot:480,standard_hours_snapshot:8}
   ],
-  manual_entries:[],travel_expenses:[],monthly_compensations:[],
+  manual_entries:[],travel_expenses:[],trips:[],monthly_compensations:[],
   app_settings:[{id:'s1',setting_key:'ferie_2026',setting_value:'["2026-07-06","2026-07-07"]'}],
   billing_headers:[],invoice_templates:[],tax_settings:[],tax_payments:[],
   clients,projects,activities,expense_categories,user_profiles:profiles
@@ -24,6 +24,11 @@ function makeChain(table){
   let op='select',single=false,pl=null,inF=null,eqCol=null,eqVal=null;
   const rows=()=>(STORES[table]=STORES[table]||[]);
   const resolve=()=>{
+    // Una tabella che il database non ha ancora: e' quello che vede chi
+    // non ha lanciato la migrazione. Senza poterlo simulare, il ricadere
+    // dell'app sul comportamento di prima non si prova mai.
+    if((window.__tabelleMancanti||[]).includes(table))
+      return {data:null,error:{code:'PGRST205',message:'Could not find the table \'public.'+table+'\' in the schema cache'}};
     if(op==='insert'){const arr=Array.isArray(pl)?pl:[pl];
       // i vincoli veri del database, almeno quelli che l'app puo'
       // violare da sola: senza di loro il mock accetta tutto e i test
@@ -45,13 +50,22 @@ function makeChain(table){
         if(!window.__ins)window.__ins=[];window.__ins.push({__table:table,...r})});
       return {data:single?(scritte[0]||null):scritte,error:null};}
     if(op==='update'){const i=rows().findIndex(r=>r.id===eqVal);if(i>=0)rows()[i]={...rows()[i],...pl};return {data:null,error:null};}
-    if(op==='delete'){if(inF)STORES[table]=rows().filter(r=>!inF.vals.includes(r[inF.col]));else if(eqCol)STORES[table]=rows().filter(r=>String(r[eqCol])!==String(eqVal));return {data:null,error:null};}
+    if(op==='delete'){
+      // Il vincolo severo, che e' quello che l'app puo' violare: una
+      // trasferta ancora referenziata da una spesa non si cancella. Se
+      // qui si mettesse un ON DELETE SET NULL gentile, il test non
+      // proverebbe piu' che e' l'app a sganciare le spese.
+      if(table==='trips'&&(STORES.travel_expenses||[]).some(e=>String(e.trip_id)===String(eqVal)))
+        return {data:null,error:{message:'update or delete on table "trips" violates foreign key constraint "travel_expenses_trip_id_fkey" on table "travel_expenses"'}};
+      if(inF)STORES[table]=rows().filter(r=>!inF.vals.includes(r[inF.col]));
+      else if(eqCol)STORES[table]=rows().filter(r=>String(r[eqCol])!==String(eqVal));
+      return {data:null,error:null};}
     return {data:single?(rows()[0]||null):rows().slice(),error:null};
   };
   const h={select(){if(op==='select')op='select';return proxy},order(){return proxy},eq(c,v){eqCol=c;eqVal=v;return proxy},in(c,v){inF={col:c,vals:v};return proxy},gte(){return proxy},lte(){return proxy},ilike(){return proxy},is(){return proxy},limit(){return proxy},insert(v){op='insert';pl=v;return proxy},update(v){op='update';pl=v;return proxy},delete(){op='delete';return proxy},single(){single=true;return proxy},maybeSingle(){single=true;return proxy}};
   const proxy=new Proxy({},{get(t,k){if(k==='then'){const p=Promise.resolve(resolve());return p.then.bind(p);}return h[k]||(()=>proxy);}});
   return proxy;
 }
-window.__stores=STORES;window.__ins=[];
+window.__stores=STORES;window.__ins=[];window.__tabelleMancanti=[];
 window.supabase={createClient(){return {from(t){return makeChain(t);},auth:{async getSession(){return {data:{session:{user:{id:'u1'}}}};},onAuthStateChange(){return {data:{subscription:{unsubscribe(){}}}};}}};}};
 </script><script type="module" src="app.js"></script></body></html>
