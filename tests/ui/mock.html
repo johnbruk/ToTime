@@ -85,5 +85,38 @@ function makeChain(table){
   return proxy;
 }
 window.__stores=STORES;window.__ins=[];window.__tabelleMancanti=[];window.__colonneMancanti=[];window.__colonneMancantiVaghe=[];
-window.supabase={createClient(){return {from(t){return makeChain(t);},auth:{async getSession(){return {data:{session:{user:{id:'u1'}}}};},onAuthStateChange(){return {data:{subscription:{unsubscribe(){}}}};}}};}};
+// ─── Supabase Storage, il minimo che serve ────────────────────────
+// E' l'unico servizio nuovo di tutta la serie, e senza un finto qui
+// dentro il caricamento delle ricevute non si potrebbe provare: ne'
+// che il file finisca nella cartella dell'utente, ne' che l'app dica
+// qualcosa quando il bucket non c'e'.
+window.__storage=[];
+window.__storageRifiuta=false;
+function fintoStorage(bucket){
+  return {
+    async upload(path,file,opts){
+      if(window.__storageRifiuta)
+        return {data:null,error:{message:'Bucket not found'}};
+      if(window.__storage.some(x=>x.bucket===bucket&&x.path===path)&&!(opts&&opts.upsert))
+        return {data:null,error:{message:'The resource already exists'}};
+      window.__storage.push({bucket,path,name:file&&file.name,type:file&&file.type,size:file&&file.size});
+      return {data:{path},error:null};
+    },
+    async remove(paths){
+      if(window.__storageRifiuta)
+        return {data:null,error:{message:'Bucket not found'}};
+      const lista=Array.isArray(paths)?paths:[paths];
+      window.__storage=window.__storage.filter(x=>!(x.bucket===bucket&&lista.includes(x.path)));
+      return {data:lista.map(p=>({name:p})),error:null};
+    },
+    async createSignedUrl(path,secondi){
+      if(window.__storageRifiuta)
+        return {data:null,error:{message:'Bucket not found'}};
+      const c=window.__storage.find(x=>x.bucket===bucket&&x.path===path);
+      if(!c)return {data:null,error:{message:'Object not found'}};
+      return {data:{signedUrl:'https://finto.local/'+bucket+'/'+path+'?exp='+secondi},error:null};
+    }
+  };
+}
+window.supabase={createClient(){return {from(t){return makeChain(t);},storage:{from(b){return fintoStorage(b)}},auth:{async getSession(){return {data:{session:{user:{id:'u1'}}}};},onAuthStateChange(){return {data:{subscription:{unsubscribe(){}}}};}}};}};
 </script><script type="module" src="app.js"></script></body></html>
