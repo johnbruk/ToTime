@@ -342,6 +342,103 @@ console.log('\n=== E VALE ANCHE PER LE VOCI A QUANTIT\u00c0 NON CHILOMETRICHE ==
   await pg.close();
 }
 
+console.log('\n=== UNA SPESA VECCHIA NON SI DEVE AZZERARE ===');
+{
+  // IL GUASTO PIU' GRAVE: le chilometriche registrate prima hanno
+  // l'importo ma NON i km (la migrazione non le tocca, apposta).
+  // Aprendone una e scegliendo un veicolo, il conto faceva
+  // 0 km x tariffa = 0,00 e cancellava l'importo storico \u2014 e con la
+  // casella di sola lettura non si poteva nemmeno rimediare a mano.
+  const pg=await apri();
+  await pg.evaluate(()=>{
+    window.__stores.travel_expenses=[{id:'vecchia',expense_date:'2026-10-29',
+      client_id:'k2',project_id:'omni',expense_category_id:'km',work_city:'Catania',
+      amount:94.5,reimbursement_type:'invoice'}];   // ne' quantity ne' unit_rate
+    return window.reload();
+  });
+  await pg.waitForTimeout(700);
+  await pg.evaluate(()=>window.editEntry('vecchia','expense'));
+  await pg.waitForTimeout(500);
+  ok((await campo(pg,'amount')).val==='94.5','la spesa vecchia si apre col suo importo',String((await campo(pg,'amount')).val));
+  ok(!(await campo(pg,'amount')).readonly,
+     'e l\u2019importo resta scrivibile: il conto non lo sa rifare, quindi non lo blocca');
+  // Ora il gesto che la distruggeva: scegliere un veicolo
+  await scrivi(pg,'vehicle_id','v1');
+  await pg.waitForTimeout(300);
+  ok(Math.abs(Number((await campo(pg,'amount')).val)-94.5)<0.005,
+     'SCEGLIENDO UN VEICOLO l\u2019importo storico resta 94,50, non diventa 0,00',
+     String((await campo(pg,'amount')).val));
+  // e nemmeno scrivendo la tariffa a mano
+  await scrivi(pg,'unit_rate','0.45');
+  ok(Math.abs(Number((await campo(pg,'amount')).val)-94.5)<0.005,
+     'e nemmeno scrivendo la tariffa',String((await campo(pg,'amount')).val));
+  // ...finche' non si mettono i km, che e' quando il conto ha senso
+  await scrivi(pg,'km_tratta','105');
+  await spunta(pg,'round_trip');
+  ok(Math.abs(Number((await campo(pg,'amount')).val)-94.5)<0.005,
+     'mettendo i km il conto rifa' + ' lo stesso importo',String((await campo(pg,'amount')).val));
+  // e il salvataggio non perde niente
+  await pg.evaluate(()=>document.querySelector('#app form.form').requestSubmit());
+  await pg.waitForTimeout(800);
+  const e=await pg.evaluate(()=>window.__stores.travel_expenses.find(x=>x.id==='vecchia'));
+  ok(e&&Math.abs(Number(e.amount)-94.5)<0.005,'e salvando l\u2019importo \u00e8 ancora 94,50',String(e&&e.amount));
+  await pg.close();
+}
+
+console.log('\n=== TOGLIENDO LA TARIFFA, L\u2019IMPORTO NON RESTA APPESO ===');
+{
+  // L'importo restava quello del conto di prima mentre l'app diceva che
+  // la tariffa mancava: una cifra che non viene da nessun calcolo, e
+  // che si salvava cosi'.
+  const pg=await apri();
+  await alModulo(pg);
+  await scrivi(pg,'expense_category_id','km');
+  await scrivi(pg,'vehicle_id','v1');
+  await scrivi(pg,'km_tratta','105');
+  await spunta(pg,'round_trip');
+  ok(Math.abs(Number((await campo(pg,'amount')).val)-94.5)<0.005,'prima il conto c\u2019\u00e8',String((await campo(pg,'amount')).val));
+  await scrivi(pg,'unit_rate','0');
+  ok(!Number((await campo(pg,'amount')).val),
+     'tolta la tariffa, l\u2019importo non resta appeso al conto di prima',
+     String((await campo(pg,'amount')).val));
+  ok((await testo(pg)).toLowerCase().includes('manca la tariffa'),'e l\u2019app dice perch\u00e9');
+  await pg.close();
+}
+
+console.log('\n=== CANCELLANDO I KM L\u2019IMPORTO NON VA A ZERO DA SOLO ===');
+{
+  // Qui si isola la guardia sui km, che negli altri casi resta coperta
+  // dalla casella scrivibile: una riga che i km CE LI HA, quindi col
+  // totale di sola lettura e la spunta «lo scrivo a mano» giu'. Se si
+  // cancellano i km per riscriverli, l'app non deve scrivere uno zero
+  // che non ha calcolato \u2014 e salvarlo.
+  const pg=await apri();
+  await pg.evaluate(()=>{
+    window.__stores.travel_expenses=[{id:'conkm',expense_date:'2026-10-29',
+      client_id:'k2',project_id:'omni',expense_category_id:'km',work_city:'Catania',
+      quantity:210,unit_rate:0.45,amount:94.5,reimbursement_type:'invoice'}];
+    return window.reload();
+  });
+  await pg.waitForTimeout(700);
+  await pg.evaluate(()=>window.editEntry('conkm','expense'));
+  await pg.waitForTimeout(500);
+  ok((await campo(pg,'amount')).readonly,
+     'la riga coi km ha il totale di sola lettura: il conto lo sa rifare');
+  ok(Math.abs(Number((await campo(pg,'km_tratta')).val)-210)<0.005,
+     'e i km tornano tutti: senza «andata e ritorno», 210 \u00e8 una tratta sola',
+     String((await campo(pg,'km_tratta')).val));
+  // si cancellano i km, come farebbe chi li vuole riscrivere
+  await scrivi(pg,'km_tratta','');
+  ok(Math.abs(Number((await campo(pg,'amount')).val)-94.5)<0.005,
+     'cancellati i km, l\u2019importo NON diventa 0,00: l\u2019app non scrive cifre che non ha calcolato',
+     String((await campo(pg,'amount')).val));
+  // e riscrivendoli il conto riparte
+  await scrivi(pg,'km_tratta','50');
+  ok(Math.abs(Number((await campo(pg,'amount')).val)-22.5)<0.005,
+     'riscrivendoli il conto riparte: 50 km \u00d7 0,45 = 22,50',String((await campo(pg,'amount')).val));
+  await pg.close();
+}
+
 await b.close(); srv.close();
 console.log(`\n=== chilometrica: OK ${pass} · KO ${fail} ===`);
 process.exit(fail?1:0);

@@ -1401,10 +1401,17 @@ function clienteSpesaCambiato(form){
   }
   aggiornaCalcoloEAvviso(form,true);
 }
+// Una spesa registrata prima, con l'importo ma senza quantita': il
+// conto non la puo' ricostruire, quindi l'importo resta scrivibile a
+// mano. Bloccarlo in sola lettura significherebbe non poterlo piu'
+// correggere, su una riga che il calcolo non sa rifare.
+function importoNonRicostruibile(v){
+  return !!(v&&Number(v.amount||0)>0&&!(Number(v.quantity||0)>0));
+}
 function campiCosa(v={}){
   const cat=expenseCategoryById(v.expense_category_id);
   const km=eVoceChilometrica(cat);
-  const aQ=aQuantitaTariffa(cat);
+  const aQ=aQuantitaTariffa(cat)&&!importoNonRicostruibile(v);
   const unita=(cat&&cat.unit_label)||'unit\u00e0';
   const tratta=km?kmTrattaDi(v):0;
   return bloccoCampi('Cosa','La voce di spesa e quanto',
@@ -1531,7 +1538,11 @@ function updateExpenseCalc(form,proposeType){
     const proposed=clientPolicyType(form.client_id?.value,cat.id)||(cat.reimbursable===false?'own':'invoice');
     if(proposed)form.reimbursement_type.value=proposed;
   }
-  if(aQuantitaTariffa(cat)&&form.unit_rate){
+  // La tariffa si PROPONE quando si sceglie la voce, non a ogni tasto:
+  // riproporla sempre significa che svuotarla e' impossibile — la si
+  // cancella e ricompare, e non si riesce a dire «qui la tariffa non
+  // c'e'».
+  if(proposeType&&aQuantitaTariffa(cat)&&form.unit_rate){
     if((!form.unit_rate.value||Number(form.unit_rate.value)===0)&&cat.default_unit_rate)
       form.unit_rate.value=Number(cat.default_unit_rate);
   }
@@ -1540,7 +1551,18 @@ function updateExpenseCalc(form,proposeType){
   if(!form.unit_rate||!form.quantity||!form.amount)return;
   const tariffa=Number(form.unit_rate.value||0);
   const quanti=Number(form.quantity.value||0);
-  if(tariffa>0)form.amount.value=(quanti*tariffa).toFixed(2);
+  // Senza quantita' non si calcola NIENTE, e soprattutto non si scrive.
+  // Le spese chilometriche registrate prima hanno l'importo ma non i km
+  // (la migrazione non le ha toccate, apposta): aprirne una e scegliere
+  // un veicolo faceva 0 km x tariffa = 0,00 e cancellava l'importo
+  // storico — e con la casella di sola lettura non si poteva nemmeno
+  // rimediare a mano.
+  if(quanti>0){
+    // Tariffa tolta: l'importo va azzerato, altrimenti resta appeso al
+    // conto di prima mentre l'app dice che la tariffa manca, e si salva
+    // una cifra che non viene da nessun calcolo.
+    form.amount.value=tariffa>0?(quanti*tariffa).toFixed(2):'';
+  }
   // Il conto si deve LEGGERE, non solo avvenire: un numero in una
   // casella grigia non dice da dove viene, e se e' sbagliato non si
   // capisce dove. E la tariffa a zero lascerebbe uno zero muto.
