@@ -9,6 +9,7 @@ const DEFAULT_TABLES = [
   ['expense_categories', 'expenseCategories'],
   ['travel_expenses', 'travelExpenses'],
   ['trips', 'trips'],
+  ['vehicles', 'vehicles'],
   ['manual_entries', 'manualEntries'],
   ['invoice_templates', 'invoiceTemplates'],
   ['app_settings', 'appSettings'],
@@ -30,7 +31,10 @@ const OPTIONAL_TABLES = new Set([
   // Le trasferte: finche' la migrazione non e' stata lanciata la
   // tabella non esiste, e l'app deve funzionare comunque — la pagina
   // Spese ricade sull'elenco piatto di sempre.
-  'trips'
+  'trips',
+  // I veicoli: come le trasferte, senza la migrazione non esistono e
+  // la chilometrica ricade sul «metti km e tariffa a mano».
+  'vehicles'
 ]);
 
 function isMissingTable(error) {
@@ -47,6 +51,7 @@ function orderedQuery(sb, table) {
   if (table === 'timesheet_entries') return query.order('entry_date', { ascending: false });
   if (table === 'travel_expenses') return query.order('expense_date', { ascending: false });
   if (table === 'trips') return query.order('start_date', { ascending: false });
+  if (table === 'vehicles') return query.order('name', { ascending: true });
   if (table === 'manual_entries') return query.order('entry_date', { ascending: false });
   if (table === 'monthly_compensations') return query.order('year', { ascending: false }).order('month', { ascending: false });
   if (table === 'invoice_templates') return query.order('sort_order', { ascending: true });
@@ -102,6 +107,7 @@ export function createRepository(sb) {
     expenseCategories: tableApi(sb, 'expense_categories'),
     travelExpenses: tableApi(sb, 'travel_expenses'),
     trips: tableApi(sb, 'trips'),
+    vehicles: tableApi(sb, 'vehicles'),
     manualEntries: tableApi(sb, 'manual_entries'),
     invoiceTemplates: tableApi(sb, 'invoice_templates'),
     appSettings: tableApi(sb, 'app_settings'),

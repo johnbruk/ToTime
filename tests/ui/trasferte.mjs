@@ -83,7 +83,7 @@ console.log('\n=== LE DUE VISTE ===');
   ok(await contiene(pg,'Spese non ancora in una trasferta'),
      'le quattro spese slegate sono segnalate, non ignorate');
   // Due proposte: Catania e Geneva. Non una sola, non quattro.
-  const proposte=await pg.evaluate(()=>document.querySelectorAll('#app .proposte .row').length);
+  const proposte=await pg.evaluate(()=>document.querySelectorAll('#app .propHead').length);
   ok(proposte===2,'due proposte: Catania e Geneva',String(proposte));
   ok(await contiene(pg,'Catania'),'la proposta nomina Catania');
   ok(await contiene(pg,'Geneva'),'la proposta nomina Geneva');
@@ -124,7 +124,7 @@ console.log('\n=== CREARE LA TRASFERTA DA QUELLO CHE C’E’ GIA’ ===');
   ok(/Da riaddebitare\s*617,00/.test(t),'e dice quanto c’e’ da riaddebitare');
   ok(t.includes('3 spese'),'e quante spese contiene');
   // resta una proposta sola: Geneva
-  const proposte=await pg.evaluate(()=>document.querySelectorAll('#app .proposte .row').length);
+  const proposte=await pg.evaluate(()=>document.querySelectorAll('#app .propHead').length);
   ok(proposte===1,'resta la sola proposta di Geneva',String(proposte));
   await pg.close();
 }

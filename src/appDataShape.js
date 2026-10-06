@@ -9,6 +9,7 @@ export const APP_DATA_KEYS = [
   'expenseCategories',
   'travelExpenses',
   'trips',
+  'vehicles',
   'manualEntries',
   'invoiceTemplates',
   'appSettings',

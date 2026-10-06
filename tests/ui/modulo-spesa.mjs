@@ -34,7 +34,8 @@ const SEMI=`
   S.projects=[{id:'omni',client_id:'k2',name:'Omnichannel',active:true}];
   S.expense_categories=[
     {id:'volo',name:'Volo',active:true,reimbursable:true,calculation_type:'manual_amount'},
-    {id:'km',name:'Rimborso KM',active:true,reimbursable:true,calculation_type:'quantity_rate',unit_label:'km',default_unit_rate:0.45}];
+    {id:'notti',name:'Albergo',active:true,reimbursable:true,calculation_type:'quantity_rate',unit_label:'notte',default_unit_rate:85,is_mileage:false},
+    {id:'km',name:'Rimborso KM',active:true,reimbursable:true,calculation_type:'quantity_rate',unit_label:'km',default_unit_rate:0.45,is_mileage:true}];
   S.travel_expenses=[];
   S.trips=[{id:'tr1',client_id:'k2',project_id:'omni',destination_city:'Catania',destination_country:'IT',start_date:'2026-10-25',end_date:'2026-10-29',purpose:'Go-live',status:'to_recharge'}];
 `;
@@ -99,12 +100,13 @@ console.log('\n=== LA COPPIA QUANTITÀ × TARIFFA SI VEDE SOLO QUANDO SERVE ==='
   ok((await campo(pg,'quantity')).hidden,'su un volo resta nascosta: non vuol dire niente');
   ok(!(await campo(pg,'amount')).readonly,'e il totale si scrive a mano');
   ok((await testo(pg)).includes('Scrivi tu l’importo'),'e l’app lo dice');
-  // Rimborso KM: la coppia compare, con l'unita' giusta e la tariffa
-  // proposta dalla voce
-  await scrivi(pg,'expense_category_id','km');
-  ok(!(await campo(pg,'quantity')).hidden,'sulla chilometrica compare');
-  ok((await testo(pg)).toLowerCase().includes('(km)'),'con l’unità della voce, km');
-  ok(Number((await campo(pg,'unit_rate')).val)===0.45,'e la tariffa proposta dalla voce, 0,45',
+  // Albergo, a notti: la coppia compare, con l'unita' giusta e la
+  // tariffa proposta dalla voce. La chilometrica ha un blocco suo e un
+  // file di test suo, chilometrica.mjs: qui serve il caso generico.
+  await scrivi(pg,'expense_category_id','notti');
+  ok(!(await campo(pg,'quantity')).hidden,'su una voce a quantità × tariffa compare');
+  ok((await testo(pg)).toLowerCase().includes('(notte)'),'con l’unità della voce, notte');
+  ok(Number((await campo(pg,'unit_rate')).val)===85,'e la tariffa proposta dalla voce, 85',
      String((await campo(pg,'unit_rate')).val));
   // E tornando al volo si richiude: il campo non deve restare appeso
   await scrivi(pg,'expense_category_id','volo');
@@ -116,23 +118,23 @@ console.log('\n=== UNA FONTE DI VERITÀ SOLA PER IL TOTALE ===');
 {
   const pg=await apri();
   await vaiAlModulo(pg);
-  await scrivi(pg,'expense_category_id','km');
+  await scrivi(pg,'expense_category_id','notti');
   ok((await campo(pg,'amount')).readonly,
      'a quantità × tariffa, il totale non si scrive: lo calcola l’app');
   ok((await testo(pg)).includes('Lo calcola l’app'),'e l’app lo dice');
-  await scrivi(pg,'quantity','210');
+  await scrivi(pg,'quantity','3');
   const tot=Number((await campo(pg,'amount')).val);
-  ok(Math.abs(tot-94.5)<0.005,'210 km × 0,45 = 94,50',String(tot));
-  await scrivi(pg,'unit_rate','0.50');
+  ok(Math.abs(tot-255)<0.005,'3 notti × 85 = 255,00',String(tot));
+  await scrivi(pg,'unit_rate','90');
   const tot2=Number((await campo(pg,'amount')).val);
-  ok(Math.abs(tot2-105)<0.005,'e cambiando tariffa si ricalcola: 105,00',String(tot2));
+  ok(Math.abs(tot2-270)<0.005,'e cambiando tariffa si ricalcola: 270,00',String(tot2));
   // Ma deve restare flessibile: spuntando «Lo scrivo a mano» si corregge
   ok(!!(await campo(pg,'amount_a_mano')),'c’è la spunta «Lo scrivo a mano»');
   await pg.evaluate(()=>{const c=document.querySelector('#app [name=amount_a_mano]');c.checked=true;c.dispatchEvent(new Event('change',{bubbles:true}))});
   await pg.waitForTimeout(250);
   ok(!(await campo(pg,'amount')).readonly,'spuntata, il totale si corregge a mano');
   await scrivi(pg,'amount','100');
-  await scrivi(pg,'quantity','999');
+  await scrivi(pg,'quantity','9');
   ok(Number((await campo(pg,'amount')).val)===100,
      'e cambiando la quantità il totale corretto a mano NON viene sovrascritto',
      String((await campo(pg,'amount')).val));
@@ -211,20 +213,20 @@ console.log('\n=== MODIFICARE UNA SPESA ESISTENTE ===');
   const pg=await apri();
   await pg.evaluate(`
     window.__stores.travel_expenses=[{id:'sx',expense_date:'2026-10-25',client_id:'k2',project_id:'omni',
-      expense_category_id:'km',work_city:'Catania',quantity:210,unit_rate:0.45,amount:94.5,
-      reimbursement_type:'invoice',description:'Catania → Modica',trip_id:'tr1'}];
+      expense_category_id:'notti',work_city:'Catania',quantity:3,unit_rate:85,amount:255,
+      reimbursement_type:'invoice',description:'Albergo in centro',trip_id:'tr1'}];
   `);
   await pg.evaluate(()=>window.reload());
   await pg.waitForTimeout(600);
   await pg.evaluate(()=>window.editEntry('sx','expense'));
   await pg.waitForTimeout(500);
   ok((await testo(pg)).includes('Modifica spesa'),'si apre la modifica');
-  ok((await campo(pg,'amount')).val==='94.5','col totale di prima',String((await campo(pg,'amount')).val));
-  ok(!(await campo(pg,'quantity')).hidden,'la coppia quantità × tariffa è aperta, perché la voce lo chiede');
-  ok((await campo(pg,'quantity')).val==='210','con i 210 km',String((await campo(pg,'quantity')).val));
+  ok((await campo(pg,'amount')).val==='255','col totale di prima',String((await campo(pg,'amount')).val));
+  ok(!(await campo(pg,'quantity')).hidden,'la casella quantità è aperta, perché la voce lo chiede');
+  ok((await campo(pg,'quantity')).val==='3','con le tre notti',String((await campo(pg,'quantity')).val));
   ok((await campo(pg,'reimbursement_type')).val==='invoice','e il tipo rimborso di prima');
   ok((await campo(pg,'trip_id')).val==='tr1','e la trasferta di prima');
-  ok((await campo(pg,'description')).val.includes('Modica'),'e la descrizione di prima');
+  ok((await campo(pg,'description')).val.includes('centro'),'e la descrizione di prima');
   await pg.close();
 }
 
