@@ -236,6 +236,59 @@ console.log('\n=== UNA SPESA A MIO CARICO, INVECE, L’UTILE LO ABBASSA ===');
   await pg.close();
 }
 
+console.log('\n=== LA SOGLIA DEGLI 85.000 SI MISURA SUI RICAVI, NON SUL LAVORO ===');
+{
+  // Il rischio piu' serio della separazione. La proiezione che accende
+  // l'allarme del limite forfettario leggeva «consuntivato»: riducendolo
+  // al solo lavoro, i rimborsi che restano imponibili sparivano dal
+  // conto. Con 80.000 di compensi e 10.000 di rimborsi tassabili l'app
+  // avrebbe detto «sotto il limite» mentre il limite e' superato — e
+  // uscire dal forfettario senza accorgersene costa molto piu' di una
+  // schermata sbagliata.
+  const pg=await apri();
+  const r=await pg.evaluate(()=>{
+    const S=window.__stores;
+    S.timesheet_entries=[];
+    // 80.000 di lavoro, spalmati sui primi 10 mesi come compensi mensili
+    S.monthly_compensations=Array.from({length:10},(_,i)=>(
+      {id:'m'+i,year:2026,month:i+1,client_id:'k2',amount:8000}));
+    // e 10.000 di rimborsi riaddebitati, che restano imponibili
+    S.travel_expenses=Array.from({length:10},(_,i)=>(
+      {id:'r'+i,expense_date:'2026-'+String(i+1).padStart(2,'0')+'-15',client_id:'k2',
+       project_id:'omni',expense_category_id:'volo',work_city:'Catania',
+       amount:1000,reimbursement_type:'invoice'}));
+    return window.reload().then(()=>{
+      const t=window.annualTotals(2026);
+      return {cons:t.consuntivato,fatt:t.fatturabile,imp:t.imponibile};
+    });
+  });
+  await pg.waitForTimeout(500);
+  ok(Math.abs(r.cons-80000)<0.5,'il consuntivato è 80.000: il lavoro',String(r.cons));
+  ok(Math.abs(r.fatt-90000)<0.5,'il fatturabile è 90.000: lavoro + rimborsi',String(r.fatt));
+  ok(Math.abs(r.imp-90000)<0.5,
+     'e l’IMPONIBILE è 90.000, non 80.000: è lui che vede la soglia',String(r.imp));
+  ok(r.imp>85000,'cioè SOPRA gli 85.000, che è la verità',String(r.imp));
+  await pg.close();
+}
+
+console.log('\n=== E IL GRAFICO DEL MESE DICE LO STESSO NUMERO DEL RIEPILOGO ===');
+{
+  // Il riepilogo diceva «1.000,00 consuntivato» e la curva accanto
+  // finiva a 1.250: lo stesso mese con due totali, uno dei quali
+  // contraddiceva la separazione appena fatta.
+  const pg=await apri();
+  await pg.evaluate(()=>window.go('timesheet'));
+  await pg.waitForTimeout(500);
+  const fine=await pg.evaluate(()=>{
+    const s=window.monthSeries?window.monthSeries():null;
+    return s?s[s.length-1]:null;
+  });
+  ok(fine!==null,'la serie del mese si legge',String(fine));
+  ok(fine!==null&&Math.abs(fine-1000)<0.005,
+     'e finisce a 1.000, come il riepilogo: non a 1.250',String(fine));
+  await pg.close();
+}
+
 await b.close(); srv.close();
 console.log(`\n=== consuntivato senza rimborsi: OK ${pass} · KO ${fail} ===`);
 process.exit(fail?1:0);
