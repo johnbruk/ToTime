@@ -133,6 +133,109 @@ console.log('\n=== LA SPESA A MIO CARICO NON ENTRA NÉ NELL’UNO NÉ NELL’ALT
   await pg.close();
 }
 
+console.log('\n=== UN RIMBORSO NON E’ GUADAGNO: L’UTILE NON SI MUOVE ===');
+{
+  // E' il punto vero. Un rimborso entra in fattura, quindi sta nei
+  // ricavi — ma l'uscita che lo compensa non stava da nessuna parte:
+  // fra i costi ci sono solo le spese a proprio carico. Cosi' ogni
+  // rimborso gonfiava l'utile netto previsto di tutto il suo importo,
+  // facendo sembrare guadagno dei soldi solo transitati.
+  //
+  // Si misura confrontando due anni identici tranne che per un
+  // rimborso: l'utile deve essere lo stesso.
+  const pg=await apri();
+  const senza=await pg.evaluate(()=>{
+    window.__stores.travel_expenses=[];
+    return window.reload().then(()=>window.forecastCalc?window.forecastCalc():null);
+  });
+  await pg.waitForTimeout(400);
+  const con=await pg.evaluate(()=>{
+    window.__stores.travel_expenses=[{id:'s1',expense_date:'2026-10-06',client_id:'k2',project_id:'omni',
+      expense_category_id:'volo',work_city:'Catania',amount:250,reimbursement_type:'invoice'}];
+    return window.reload().then(()=>window.forecastCalc?window.forecastCalc():null);
+  });
+  await pg.waitForTimeout(400);
+  if(senza&&con){
+    ok(Math.abs(con.ricavi-senza.ricavi-250)<0.005,
+       'coi 250 in fattura i ricavi salgono di 250, com’è giusto',
+       `${senza.ricavi} → ${con.ricavi}`);
+    // Il giro di denaro in se' e' neutro: entra 250 e ne escono 250.
+    // Quello che resta sono SOLO le imposte, perche' con la scelta
+    // prudente — quella attiva per default — i rimborsi fanno
+    // imponibile. Prima, invece, l'utile SALIVA di tutti i 250, come
+    // se quei soldi fossero guadagno.
+    const persi=senza.utileNetto-con.utileNetto;
+    const tasseInPiu=con.oneri-senza.oneri;
+    ok(Math.abs(persi-tasseInPiu)<0.005,
+       'l\u2019utile scende SOLO di quanto crescono le imposte: il giro di denaro non \u00e8 n\u00e9 guadagno n\u00e9 perdita',
+       `utile \u2212${persi.toFixed(2)} \u00b7 imposte +${tasseInPiu.toFixed(2)}`);
+    ok(persi<250&&persi>0,'e NON di 250: i soldi solo transitati non sono guadagno',persi.toFixed(2));
+    ok(Math.abs(con.rimborsi-250)<0.005,'e i 250 sono contati come rimborso',String(con.rimborsi));
+    ok(Math.abs(con.consuntivato-senza.consuntivato)<0.005,
+       'e nemmeno il consuntivato si muove: il lavoro è lo stesso',
+       `${senza.consuntivato} → ${con.consuntivato}`);
+  } else { ok(false,'forecastCalc non è raggiungibile dal test'); }
+  await pg.close();
+}
+
+console.log('\n=== CON LA REGOLA 2025 NON COSTA NEMMENO LE IMPOSTE ===');
+{
+  // L'altra meta' della correzione: la previsione deve seguire la stessa
+  // scelta fiscale del cruscotto imposte. Prima non la guardava, quindi
+  // l'app diceva due cose diverse sullo stesso anno.
+  //
+  // Serve un rimborso che regga davvero i requisiti: analitico (non
+  // chilometrico), con ricevuta, pagato in modo tracciabile, e di un
+  // mese gia' incassato.
+  const pg=await apri();
+  const r=await pg.evaluate(()=>{
+    const S=window.__stores;
+    S.app_settings=[...(S.app_settings||[]).filter(x=>x.setting_key!=='rimborsi_fuori_reddito'),
+                    {id:'rfr',setting_key:'rimborsi_fuori_reddito',setting_value:'si'}];
+    S.travel_expenses=[{id:'s1',expense_date:'2026-10-06',client_id:'k2',project_id:'omni',
+      expense_category_id:'volo',work_city:'Catania',amount:250,reimbursement_type:'invoice',
+      payment_method:'carta',receipt_kept:true}];
+    S.billing_headers=[{id:'b1',year:2026,month:10,client_id:'k2',status:'collected',
+      total_amount:1250,invoice_total_amount:1250,collected_amount:1250}];
+    return window.reload().then(()=>({f:window.forecastCalc(),sc:window.scomposizioneRimborsi(2026)}));
+  });
+  await pg.waitForTimeout(400);
+  ok(Math.abs(r.sc.analitici-250)<0.005,
+     'i 250 reggono i requisiti: analitici, con ricevuta, tracciabili, incassati',String(r.sc.analitici));
+  ok(Math.abs(r.f.fuoriReddito-250)<0.005,
+     'e la previsione li toglie dalla base imponibile',String(r.f.fuoriReddito));
+  ok(Math.abs(r.f.baseImponibile-(r.f.ricavi-250))<0.005,
+     'la base imponibile e’ i ricavi meno i 250',`${r.f.ricavi} − 250 = ${r.f.baseImponibile}`);
+  await pg.close();
+}
+
+console.log('\n=== UNA SPESA A MIO CARICO, INVECE, L’UTILE LO ABBASSA ===');
+{
+  // La controprova: se l'utile non si muovesse MAI, la correzione
+  // sarebbe «non contare niente». Una spesa tenuta per se' e' un costo
+  // vero e deve pesare.
+  const pg=await apri();
+  const senza=await pg.evaluate(()=>{
+    window.__stores.travel_expenses=[];
+    return window.reload().then(()=>window.forecastCalc?window.forecastCalc():null);
+  });
+  await pg.waitForTimeout(400);
+  const con=await pg.evaluate(()=>{
+    window.__stores.travel_expenses=[{id:'s2',expense_date:'2026-10-07',client_id:'k2',project_id:'omni',
+      expense_category_id:'volo',work_city:'Catania',amount:40,reimbursement_type:'own'}];
+    return window.reload().then(()=>window.forecastCalc?window.forecastCalc():null);
+  });
+  await pg.waitForTimeout(400);
+  if(senza&&con){
+    ok(Math.abs(con.ricavi-senza.ricavi)<0.005,'i ricavi non cambiano: non la fatturo a nessuno',
+       `${senza.ricavi} → ${con.ricavi}`);
+    ok(Math.abs((senza.utileNetto-con.utileNetto)-40)<0.005,
+       'e l’utile scende di 40: quella è una spesa vera, di tasca mia',
+       `${senza.utileNetto} → ${con.utileNetto}`);
+  } else { ok(false,'forecastCalc non è raggiungibile dal test'); }
+  await pg.close();
+}
+
 await b.close(); srv.close();
 console.log(`\n=== consuntivato senza rimborsi: OK ${pass} · KO ${fail} ===`);
 process.exit(fail?1:0);
