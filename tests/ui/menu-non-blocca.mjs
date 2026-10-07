@@ -34,6 +34,22 @@ const ok=(c,l,x='')=>{c?pass++:fail++;console.log((c?'  OK  ':'  KO  ')+l+(x?'  
 
 const menuAperto=pg=>pg.evaluate(()=>!!document.querySelector('.topMenu'));
 const testoApp=pg=>pg.evaluate(()=>document.getElementById('app').innerText.replace(/\s+/g,' '));
+// Esistere non basta: una scheda sotto il menu a tutto schermo c'e' nel
+// DOM e non si puo' toccare. Qui si chiede al browser CHI riceve il
+// tocco nel punto dove sta il pulsante.
+const schedaToccabile=pg=>pg.evaluate(()=>{
+  const c=document.getElementById('uscitaCard');
+  if(!c)return {c_e:false};
+  const b=[...c.querySelectorAll('button')];
+  const esiti=b.map(x=>{
+    const r=x.getBoundingClientRect();
+    if(!r.width||!r.height)return false;
+    const sopra=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
+    return sopra===x||x.contains(sopra);
+  });
+  return {c_e:true,quanti:b.length,tutti:esiti.length>0&&esiti.every(Boolean),
+          etichette:b.map(x=>x.textContent.trim())};
+});
 const valore=(pg,n)=>pg.evaluate(x=>{const el=document.querySelector(`#app [name="${x}"]`);return el?el.value:null},n);
 // si tocca il pulsante vero, come un dito: non si chiama la funzione
 const toccaMenu=async pg=>{
@@ -215,6 +231,39 @@ console.log('\n=== CAMBIARE SCHERMATA LO CHIEDE, MA CON UNA SCHEDA DELL’APP ==
   await pg.close();
 }
 
+console.log('\n=== LA DOMANDA SI VEDE E SI PUÒ TOCCARE, NON SOLO ESISTERE ===');
+{
+  // Il menu a tutto schermo sta a z-index 50. La scheda, inserita nella
+  // pagina sotto, ci finiva sotto: c'era nel DOM ma non si vedeva e i
+  // suoi pulsanti non si toccavano. Il tocco sembrava non fare niente e
+  // il menu restava aperto — cioe' esattamente il guasto che la scheda
+  // doveva curare. Un test che controlla solo se la scheda ESISTE passa
+  // lo stesso: per questo qui si chiede chi riceve il tocco.
+  const {pg}=await apri();
+  await alModuloScritto(pg,'45');
+  await toccaMenu(pg);
+  ok(await menuAperto(pg),'il menu è aperto a tutto schermo');
+  await pg.evaluate(()=>{
+    const d=[...document.querySelectorAll('.topMenu button')].find(x=>/Dashboard/.test(x.textContent));
+    d.click();
+  });
+  await pg.waitForTimeout(500);
+  const t=await schedaToccabile(pg);
+  ok(t.c_e,'la domanda compare');
+  ok(t.quanti===2,'con i suoi due pulsanti',JSON.stringify(t.etichette));
+  ok(t.tutti,'ed è il pulsante a ricevere il tocco, non il menu sopra di lui');
+  ok(await menuAperto(pg),'il menu resta aperto: chiudendolo si porterebbe via il gruppo appena aperto');
+  ok(await pg.evaluate(()=>!!document.querySelector('.topMenu #uscitaCard')),
+     'e la domanda sta DENTRO il menu, dove si sta guardando');
+  // la prova vera: un dito ci arriva?
+  let premuto=true;
+  try{ await pg.locator('#uscitaCard button').first().tap({timeout:3000}); }
+  catch(e){ premuto=false }
+  ok(premuto,'e «Resta qui» si preme davvero, con un tocco vero');
+  ok((await valore(pg,'amount'))==='45','restando, i 45 sono ancora lì',String(await valore(pg,'amount')));
+  await pg.close();
+}
+
 console.log('\n=== «ESCI» PORTA DAVVERO DOVE VOLEVO ANDARE ===');
 {
   // Non basta che la scheda compaia: la destinazione che avevo scelto
@@ -317,6 +366,28 @@ console.log('\n=== UN GUASTO NON È MAI MUTO ===');
     {promise:Promise.reject(new Error('x')).catch(()=>{}),reason:new Error('la rete non ha risposto')}))});
   await pg.waitForTimeout(400);
   ok(/rete non ha risposto/.test(await testoApp(pg)),'e vale anche per una promessa rifiutata');
+  await pg.close();
+}
+
+console.log('\n=== IL MESSAGGIO D’ERRORE SE NE VA, ANCHE SE INTANTO HO CAMBIATO SCHERMATA ===');
+{
+  // Il messaggio si toglieva dal nodo in cui era COMPARSO. Cambiando
+  // schermata, render() stacca quel nodo e ne disegna uno nuovo, che
+  // ripesca lo stesso testo: alla scadenza veniva ripulito il nodo
+  // staccato, e il messaggio visibile restava appeso fino al ridisegno
+  // dopo — un errore vecchio sopra una schermata nuova.
+  const {pg}=await apri();
+  await pg.evaluate(()=>window.dispatchEvent(new ErrorEvent('error',{message:'guasto passeggero'})));
+  await pg.waitForTimeout(400);
+  ok(/guasto passeggero/.test(await testoApp(pg)),'il messaggio compare');
+  await pg.evaluate(()=>window.go('home'));
+  await pg.waitForTimeout(400);
+  ok(/guasto passeggero/.test(await testoApp(pg)),
+     'e lo si rivede anche sulla schermata nuova: non si perde cambiando pagina');
+  await pg.waitForTimeout(9600);   // la scadenza e' a 9 secondi
+  ok(!/guasto passeggero/.test(await testoApp(pg)),
+     'ma alla scadenza se ne va dalla schermata in cui si sta, non da quella di prima',
+     (await testoApp(pg)).slice(0,70));
   await pg.close();
 }
 
