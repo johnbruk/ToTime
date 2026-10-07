@@ -706,6 +706,41 @@ console.log('\n=== MA UNA SCELTA DI CHI SCRIVE NON SI TOCCA ===');
   await pg.close();
 }
 
+console.log('\n=== RIAPRENDOLA, LA CIFRA SCELTA È ANCORA UNA SCELTA ===');
+{
+  // Salvata una riga in cui l'importo NON torna con km x tariffa, al
+  // riaprirla c'erano sia i km sia la tariffa: sembrava ricostruibile,
+  // l'importo diventava di sola lettura, e alla prima correzione dei km
+  // la cifra scelta spariva. Il perche' non e' registrato in nessuna
+  // colonna — ma non serve: un importo diverso da quantita' x tariffa
+  // non puo' venire da un calcolo, quindi la scelta si DEDUCE.
+  const pg=await apri();
+  await pg.evaluate(()=>{
+    window.__stores.travel_expenses=[{id:'riapri',expense_date:'2026-10-29',
+      client_id:'k2',project_id:'omni',expense_category_id:'km',work_city:'Catania',
+      quantity:210,unit_rate:0.50,amount:94.5,reimbursement_type:'invoice'}];  // 210x0,50=105, ma e' 94,50
+    return window.reload();
+  });
+  await pg.waitForTimeout(700);
+  await pg.evaluate(()=>window.editEntry('riapri','expense'));
+  await pg.waitForTimeout(500);
+  ok((await campo(pg,'amount_a_mano')).checked,
+     'riaperta, risulta ancora scritta a mano: 94,50 non può venire da 210 × 0,50');
+  ok(!(await campo(pg,'amount')).readonly,'e la casella si può ancora correggere');
+  ok(Math.abs(Number((await campo(pg,'amount')).val)-94.5)<0.005,
+     'coi suoi 94,50',String((await campo(pg,'amount')).val));
+  // ed e' qui che si vedeva il danno: correggendo i km, la cifra spariva
+  await scrivi(pg,'km_tratta','200');
+  ok(Math.abs(Number((await campo(pg,'amount')).val)-94.5)<0.005,
+     'e correggendo i km resta 94,50, non diventa i 100,00 del conto',
+     String((await campo(pg,'amount')).val));
+  await pg.evaluate(()=>document.querySelector('#app form.form').requestSubmit());
+  await pg.waitForTimeout(800);
+  ok(Math.abs(Number(await pg.evaluate(()=>window.__stores.travel_expenses.find(x=>x.id==='riapri').amount))-94.5)<0.005,
+     'e si risalva intera');
+  await pg.close();
+}
+
 await b.close(); srv.close();
 console.log(`\n=== chilometrica: OK ${pass} · KO ${fail} ===`);
 process.exit(fail?1:0);

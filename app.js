@@ -84,7 +84,13 @@ function setMsgLeggero(msg,timeout=6000){
   setTimeout(()=>{
     if(state.message!==msg)return;
     state.message='';
-    const x=dove.querySelector(':scope > .toast');
+    // Si cerca il messaggio DOVE SI TROVA ADESSO, non dove stava quando
+    // e' comparso: se nel frattempo si e' cambiata schermata, quel nodo
+    // e' staccato e il messaggio visibile — disegnato nella pagina nuova
+    // — restava appeso fino al ridisegno dopo.
+    const ora=document.getElementById('app');
+    const qui=(ora&&ora.querySelector('.app'))||dove;
+    const x=qui.querySelector(':scope > .toast');
     if(x)x.remove();
   },timeout);
 }
@@ -348,7 +354,15 @@ function guardUnsavedChanges(azione){
 }
 function chiediUscita(azione){
   const app=cercaId('app');
-  const dove=app&&app.querySelector&&app.querySelector('.app');
+  // Il menu a tutto schermo copre la pagina. Mettendo la scheda nella
+  // pagina sotto, finisce SOTTO: c'e' nel DOM, ma non si vede e i suoi
+  // pulsanti non si toccano. Il tocco sembra non fare niente e il menu
+  // resta aperto — cioe' esattamente il guasto che questa scheda
+  // doveva curare. Quindi la domanda si mette dove si sta guardando.
+  // Chiudere il menu invece no: porterebbe via il gruppo appena
+  // aperto, e si tornerebbe a non vedere dove si stava andando.
+  const menu=state.menuOpen?cercaNodo('.topMenu'):null;
+  const dove=menu||(app&&app.querySelector&&app.querySelector('.app'));
   // Senza la shell non c'e' dove infilarla: meglio lasciar passare che
   // bloccare qualcuno senza mostrargli niente.
   if(!dove){state.dirty=false;if(typeof azione==='function')azione();return}
@@ -429,6 +443,10 @@ function toggleMainMenu(){
   const wrap=cercaNodo('.headerMenuWrap');
   if(!wrap||!wrap.querySelector){render();return}   // schermate senza shell: si ridisegna
   const gia=wrap.querySelector('.topMenu');
+  // La domanda puo' stare dentro il pannello: togliendolo se ne
+  // andrebbe con lui, lasciando una destinazione in attesa che nessuno
+  // puo' piu' confermare.
+  if(gia&&gia.querySelector&&gia.querySelector('#uscitaCard'))togliSchedaUscita();
   if(gia)gia.remove();
   if(state.menuOpen)wrap.insertAdjacentHTML('beforeend',menuDropdown());
 }
@@ -1519,7 +1537,16 @@ function clienteSpesaCambiato(form){
 // ingredienti, l'importo resta a mano.
 function importoNonRicostruibile(v){
   if(!(Number(v&&v.amount||0)>0))return false;
-  return !(Number(v.quantity||0)>0)||!(Number(v.unit_rate||0)>0);
+  const q=Number(v.quantity||0), t=Number(v.unit_rate||0);
+  if(!(q>0)||!(t>0))return true;
+  // E poi c'e' il caso che non si vede dai pezzi mancanti: la riga ha
+  // tutto, ma l'importo NON e' quantita' x tariffa. Una cifra cosi' non
+  // puo' venire da un calcolo: l'ha scelta una persona. Riaprendo la
+  // riga, senza questo, sembrava ricostruibile — l'importo diventava di
+  // sola lettura e alla prima correzione di km o tariffa spariva.
+  // Cosi' la scelta si deduce dai dati gia' salvati, senza doverla
+  // registrare in una colonna nuova.
+  return Math.abs(q*t-Number(v.amount))>=0.005;
 }
 function campiCosa(v={}){
   const cat=expenseCategoryById(v.expense_category_id);
