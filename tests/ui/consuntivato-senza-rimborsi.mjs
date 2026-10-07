@@ -289,6 +289,48 @@ console.log('\n=== E IL GRAFICO DEL MESE DICE LO STESSO NUMERO DEL RIEPILOGO ===
   await pg.close();
 }
 
+console.log('\n=== LA REGOLA 2025 NON VALE PER IL 2024 ===');
+{
+  // La norma parte dal 1 gennaio 2025. Senza guardia sull'anno,
+  // attivando la scelta si toglievano dall'imponibile anche i rimborsi
+  // del 2024 — un anno in cui erano compenso e basta — e le imposte di
+  // quell'anno si sarebbero stimate per difetto.
+  const pg=await apri();
+  const r=await pg.evaluate(()=>{
+    const S=window.__stores;
+    S.app_settings=[{id:'rfr',setting_key:'rimborsi_fuori_reddito',setting_value:'si'}];
+    S.timesheet_entries=[];
+    S.monthly_compensations=[
+      {id:'m24',year:2024,month:10,client_id:'k2',amount:1000},
+      {id:'m25',year:2025,month:10,client_id:'k2',amount:1000}];
+    // due rimborsi identici, uno per anno, entrambi coi requisiti a posto
+    S.travel_expenses=[
+      {id:'r24',expense_date:'2024-10-06',client_id:'k2',project_id:'omni',
+       expense_category_id:'volo',work_city:'Catania',amount:250,
+       reimbursement_type:'invoice',payment_method:'carta',receipt_kept:true},
+      {id:'r25',expense_date:'2025-10-06',client_id:'k2',project_id:'omni',
+       expense_category_id:'volo',work_city:'Catania',amount:250,
+       reimbursement_type:'invoice',payment_method:'carta',receipt_kept:true}];
+    S.billing_headers=[
+      {id:'b24',year:2024,month:10,client_id:'k2',status:'collected',
+       total_amount:1250,invoice_total_amount:1250,collected_amount:1250},
+      {id:'b25',year:2025,month:10,client_id:'k2',status:'collected',
+       total_amount:1250,invoice_total_amount:1250,collected_amount:1250}];
+    return window.reload().then(()=>({
+      a24:window.annualTotals(2024),a25:window.annualTotals(2025)}));
+  });
+  await pg.waitForTimeout(500);
+  ok(Math.abs(r.a25.rimborsiAnalitici-250)<0.5,
+     'nel 2025 i 250 reggono la regola',String(r.a25.rimborsiAnalitici));
+  ok(Math.abs(r.a25.imponibile-1000)<0.5,
+     'e l’imponibile 2025 scende a 1.000',String(r.a25.imponibile));
+  ok(Math.abs(r.a24.rimborsiAnalitici-0)<0.5,
+     'nel 2024 invece no: la regola non c’era',String(r.a24.rimborsiAnalitici));
+  ok(Math.abs(r.a24.imponibile-1250)<0.5,
+     'e l’imponibile 2024 resta 1.250, rimborso compreso',String(r.a24.imponibile));
+  await pg.close();
+}
+
 await b.close(); srv.close();
 console.log(`\n=== consuntivato senza rimborsi: OK ${pass} · KO ${fail} ===`);
 process.exit(fail?1:0);
