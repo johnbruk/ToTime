@@ -911,3 +911,9 @@ table.griglia.numeriRiga td.riga .n{font-variant-numeric:tabular-nums}
 .uscitaCard b{font-size:15px}
 .uscitaBottoni{display:grid;gap:10px;margin-top:13px}
 @media(min-width:560px){.uscitaBottoni{grid-template-columns:1fr 1fr}}
+
+/* I rimborsi delle spese di trasferta sono una partita a parte: non
+   sono compenso, quindi non stanno nel consuntivato. Si dicono accanto,
+   smorzati, perche' siano leggibili senza farsi scambiare per ricavo. */
+.rimborsiAparte{color:var(--muted);font-weight:600}
+.rimborsiAparte .tag{margin-top:0}
