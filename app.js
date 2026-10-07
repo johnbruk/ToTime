@@ -1546,7 +1546,13 @@ function importoNonRicostruibile(v){
   // sola lettura e alla prima correzione di km o tariffa spariva.
   // Cosi' la scelta si deduce dai dati gia' salvati, senza doverla
   // registrare in una colonna nuova.
-  return Math.abs(q*t-Number(v.amount))>=0.005;
+  // Il confronto va fatto con lo STESSO tondo con cui l'importo e'
+  // stato scritto: updateExpenseCalc salva (q x t).toFixed(2). Sul
+  // mezzo centesimo esatto — 1 x 0,125 salvato come 0,13 — il prodotto
+  // grezzo dista 0,005000000000000004 dal salvato, cioe' appena sopra
+  // la soglia: una riga calcolata dall'app risultava scritta a mano, si
+  // spuntava da sola e smetteva di ricalcolarsi.
+  return Math.abs(Number((q*t).toFixed(2))-Number(v.amount))>=0.005;
 }
 function campiCosa(v={}){
   const cat=expenseCategoryById(v.expense_category_id);

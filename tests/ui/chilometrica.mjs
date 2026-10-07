@@ -741,6 +741,35 @@ console.log('\n=== RIAPRENDOLA, LA CIFRA SCELTA È ANCORA UNA SCELTA ===');
   await pg.close();
 }
 
+console.log('\n=== UNA RIGA CALCOLATA DALL’APP NON DIVENTA «SCRITTA A MANO» ===');
+{
+  // La scelta a mano si deduce dal fatto che l'importo non torna con
+  // quantita' x tariffa. Ma il confronto va fatto con lo STESSO tondo
+  // con cui l'importo e' stato scritto: l'app salva (q x t).toFixed(2).
+  // Sul mezzo centesimo esatto — 1 x 0,125 salvato come 0,13 — il
+  // prodotto grezzo dista 0,005000000000000004 dal salvato, appena
+  // sopra la soglia. Cosi' una riga calcolata dall'app si spuntava da
+  // sola come scritta a mano e smetteva di ricalcolarsi.
+  const pg=await apri();
+  await pg.evaluate(()=>{
+    window.__stores.travel_expenses=[{id:'tondo',expense_date:'2026-10-29',
+      client_id:'k2',project_id:'omni',expense_category_id:'km',work_city:'Catania',
+      quantity:1,unit_rate:0.125,amount:0.13,reimbursement_type:'invoice'}];
+    return window.reload();
+  });
+  await pg.waitForTimeout(700);
+  await pg.evaluate(()=>window.editEntry('tondo','expense'));
+  await pg.waitForTimeout(500);
+  ok(!(await campo(pg,'amount_a_mano')).checked,
+     '0,13 è proprio quello che l’app scriverebbe per 1 × 0,125: resta calcolata');
+  ok((await campo(pg,'amount')).readonly,'e l’importo resta in mano al conto');
+  // e il conto deve ancora funzionare
+  await scrivi(pg,'quantity','4');
+  ok(Math.abs(Number((await campo(pg,'amount')).val)-0.5)<0.005,
+     'cambiando la quantità ricalcola: 4 × 0,125 = 0,50',String((await campo(pg,'amount')).val));
+  await pg.close();
+}
+
 await b.close(); srv.close();
 console.log(`\n=== chilometrica: OK ${pass} · KO ${fail} ===`);
 process.exit(fail?1:0);
