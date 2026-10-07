@@ -548,11 +548,11 @@ function manualRowsForYear(year=currentYear()){return data.manualEntries.filter(
 function expenseRowsForYear(year=currentYear()){return data.travelExpenses.filter(e=>String(e.expense_date||'').startsWith(String(year)+'-'))}
 function monthIndexFromDate(d){return Math.max(0,Math.min(11,Number(String(d||'').slice(5,7))-1))}
 function annualMonthData(year=currentYear()){
-  const arr=Array.from({length:12},(_,i)=>({month:i+1,label:monthNames[i].slice(0,3),compensi:0,pianificato:0,rimborsiFattura:0,rimborsiFuori:0,consuntivato:0,fatturabile:0,imponibile:0,fatturato:0,fatturatoBase:0,incassato:0,costi:0,pieDiLista:0,spese:0}));
+  const arr=Array.from({length:12},(_,i)=>({month:i+1,label:monthNames[i].slice(0,3),compensi:0,pianificato:0,rimborsiFattura:0,rimborsiAnalitici:0,consuntivato:0,fatturabile:0,imponibile:0,fatturato:0,fatturatoBase:0,incassato:0,costi:0,pieDiLista:0,spese:0}));
   rowsForYear(year).forEach(e=>{const amt=dailyAmount(e);const i=monthIndexFromDate(e.entry_date);if(isPlanned(e))arr[i].pianificato+=amt;else arr[i].compensi+=amt;});
   monthlyRowsForYear(year).forEach(e=>arr[Number(e.month||1)-1].compensi+=Number(e.amount||0));
   manualRowsForYear(year).forEach(e=>{const v=Number(e.amount||0);const i=monthIndexFromDate(e.entry_date);if(isPlanned(e))arr[i].pianificato+=v;else arr[i].compensi+=v;});
-  expenseRowsForYear(year).forEach(e=>{const i=monthIndexFromDate(e.expense_date);const t=expType(e),v=Number(e.amount||0);arr[i].spese+=v;if(t==='invoice'){arr[i].rimborsiFattura+=v;if(spesaFuoriReddito(e,year))arr[i].rimborsiFuori+=v}else if(t==='own')arr[i].costi+=v;else arr[i].pieDiLista+=v});
+  expenseRowsForYear(year).forEach(e=>{const i=monthIndexFromDate(e.expense_date);const t=expType(e),v=Number(e.amount||0);arr[i].spese+=v;if(t==='invoice'){arr[i].rimborsiFattura+=v;if(spesaFuoriReddito(e,year))arr[i].rimborsiAnalitici+=v}else if(t==='own')arr[i].costi+=v;else arr[i].pieDiLista+=v});
   // Il consuntivato e' il LAVORO: quanto si e' prodotto. I rimborsi
   // delle spese di trasferta sono soldi anticipati e riaddebitati —
   // una partita a parte, non lavoro fatto. Sommarli gonfiava il
@@ -571,13 +571,19 @@ function annualMonthData(year=currentYear()){
   // consuntivato: alimentando la proiezione col solo lavoro, 80.000 di
   // compensi piu' 10.000 di rimborsi imponibili risultavano sotto il
   // limite mentre lo superano.
+  // rimborsiAnalitici = quelli che REGGONO i requisiti 2025: un fatto
+  // sui dati, vero a prescindere dalla scelta. Non si chiama
+  // «rimborsiFuori» perche' annualTaxCalc usa gia' quel nome per quelli
+  // EFFETTIVAMENTE esclusi, cioe' solo se la scelta e' attiva — e lo
+  // spread di totalsY glielo sovrascriveva, facendogli dire 600 dove
+  // doveva dire 0.
   const fuori=rimborsiFuoriReddito();
   arr.forEach(m=>{m.consuntivato=m.compensi;m.fatturabile=m.compensi+m.rimborsiFattura;
-    m.imponibile=m.fatturabile-(fuori?m.rimborsiFuori:0)});
+    m.imponibile=m.fatturabile-(fuori?m.rimborsiAnalitici:0)});
   data.billingHeaders.filter(h=>Number(h.year)===Number(year)).forEach(h=>{const i=Number(h.month||1)-1;const inv=Number(h.invoice_total_amount||h.total_amount||0);if(['invoice_issued','collected'].includes(h.status)){arr[i].fatturato+=inv;arr[i].fatturatoBase+=Number(h.total_amount||0)}if(h.status==='collected')arr[i].incassato+=Number(h.collected_amount||inv||0)});
   return arr;
 }
-function annualTotals(year=currentYear()){const a=annualMonthData(year);const t=a.reduce((t,m)=>{t.compensi+=m.compensi;t.pianificato+=(m.pianificato||0);t.rimborsiFattura+=m.rimborsiFattura;t.rimborsiFuori+=(m.rimborsiFuori||0);t.consuntivato+=m.consuntivato;t.fatturabile+=(m.fatturabile||0);t.imponibile+=(m.imponibile||0);t.fatturato+=m.fatturato;t.fatturatoBase+=(m.fatturatoBase||0);t.incassato+=m.incassato;t.costi+=(m.costi||0);t.pieDiLista+=(m.pieDiLista||0);t.spese+=(m.spese||0);return t},{compensi:0,pianificato:0,rimborsiFattura:0,rimborsiFuori:0,consuntivato:0,fatturabile:0,imponibile:0,fatturato:0,fatturatoBase:0,incassato:0,costi:0,pieDiLista:0,spese:0,daIncassare:0});t.daIncassare=Math.max(0,t.fatturato-t.incassato);
+function annualTotals(year=currentYear()){const a=annualMonthData(year);const t=a.reduce((t,m)=>{t.compensi+=m.compensi;t.pianificato+=(m.pianificato||0);t.rimborsiFattura+=m.rimborsiFattura;t.rimborsiAnalitici+=(m.rimborsiAnalitici||0);t.consuntivato+=m.consuntivato;t.fatturabile+=(m.fatturabile||0);t.imponibile+=(m.imponibile||0);t.fatturato+=m.fatturato;t.fatturatoBase+=(m.fatturatoBase||0);t.incassato+=m.incassato;t.costi+=(m.costi||0);t.pieDiLista+=(m.pieDiLista||0);t.spese+=(m.spese||0);return t},{compensi:0,pianificato:0,rimborsiFattura:0,rimborsiAnalitici:0,consuntivato:0,fatturabile:0,imponibile:0,fatturato:0,fatturatoBase:0,incassato:0,costi:0,pieDiLista:0,spese:0,daIncassare:0});t.daIncassare=Math.max(0,t.fatturato-t.incassato);
   // Si confronta col FATTURABILE, non col consuntivato: la base delle
   // fatture emesse comprende i rimborsi, quindi togliendoli da una
   // parte sola «da fatturare» risulterebbe piu' basso del vero.
@@ -3019,7 +3025,7 @@ function forecastCalc(year=currentYear()){
   // E la base imponibile segue la scelta fiscale gia' fatta in
   // configurazione, la stessa che usa il cruscotto imposte. Senza
   // questo l'app diceva due cose diverse sullo stesso anno.
-  const fuoriReddito=rimborsiFuoriReddito()?(at.rimborsiFuori||0):0;
+  const fuoriReddito=rimborsiFuoriReddito()?(at.rimborsiAnalitici||0):0;
   const baseImponibile=Math.max(0,(at.imponibile||0)+pianificato);
   const forfait=baseImponibile*coeff;const inps=forfait*gsRate;const imposta=Math.max(0,forfait-inps)*taxRate;
   const oneri=inps+imposta;const utileNetto=ricavi-costi-rimborsi-oneri;
