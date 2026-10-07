@@ -317,18 +317,121 @@ function metricLine(hours,amount){return `${fmtNum(hours,1)} h <span class="dot"
 function amountLine(label,amount){return `${esc(label)} <span class="dot">·</span> ${fmtEUR(amount)}`}
 function dateIT(v){if(!v)return'';const s=String(v);return `${s.slice(8,10)}/${s.slice(5,7)}`}
 function viewLabel(v){return ({tripNew:'Nuova trasferta',tripEdit:'Modifica trasferta',home:'Dashboard',timesheet:'Timesheet',billing:'Fatturazione',billingDetail:'Dettaglio fattura',tax:'Profilo fiscale',taxPayments:'Pagamenti fiscali',taxPaymentEdit:'Pagamento fiscale',annualMonths:'Consuntivato annuale',annualInvoices:'Elenco fatture',settings:'Configurazione',clients:'Clienti',clientEdit:'Cliente',projects:'Progetti',projectEdit:'Progetto',activities:'Attività',activityEdit:'Attività',expenseCategories:'Voci spesa',vehicles:'Veicoli',vehicleEdit:'Veicolo',policyRimborsi:'Policy rimborsi',expenseCategoryEdit:'Voce spesa',invoiceTemplates:'Template fattura',invoiceTemplateEdit:'Template fattura',appearance:'Aspetto',exportTimesheet:'Export timesheet',dailyForm:'Consuntivo giornaliero',dailyEdit:'Consuntivo giornaliero',monthlyForm:'Compenso mensile',monthlyEdit:'Compenso mensile',manualForm:'Consuntivo manuale',manualEdit:'Consuntivo manuale',expenseForm:'Spesa trasferta',expenseEdit:'Spesa trasferta'})[v]||'schermata precedente'}
-function guardUnsavedChanges(){if(!state.dirty)return true;const leave=confirm('Hai modifiche non salvate. Vuoi uscire da questa schermata e perdere i dati inseriti?');if(leave){state.dirty=false;return true}return false}
+// Fuori dal browser — i test di modulo girano in Node con un document
+// finto e ridotto — alcune funzioni del DOM non ci sono. Chiederle di
+// sicuro faceva esplodere l'avvio dell'app invece di proteggerlo.
+const cercaNodo=sel=>{try{return(typeof document!=='undefined'&&document.querySelector)?document.querySelector(sel):null}catch(e){return null}};
+const cercaId=id=>{try{return(typeof document!=='undefined'&&document.getElementById)?document.getElementById(id):null}catch(e){return null}};
+// La domanda sulle modifiche non salvate non la fa piu' il browser.
+//
+// Un confirm() dentro una web app aggiunta alla schermata home, su iOS,
+// puo' restare appeso o rispondere «no» da solo quando gli avvisi sono
+// bloccati. E qui «no» significa: non navigare. Il guasto che ne
+// veniva: toccando «Spese» il gruppo non si apriva — le sue voci
+// compaiono solo quando la vista e' cambiata — e il menu restava
+// aperto su niente, senza un errore. Sembrava tutto bloccato, e in
+// pratica lo era: nessuna delle vie d'uscita passava.
+//
+// Ora la domanda e' una scheda dell'app: due pulsanti sempre visibili,
+// che nessuna impostazione del browser puo' togliere. E si infila nel
+// DOM senza ridisegnare, come il menu e i messaggi leggeri: se si
+// risponde «resta qui», il modulo e' ancora quello di prima, parola per
+// parola. Con render() si sarebbe perso proprio quello che si voleva
+// salvare.
+function guardUnsavedChanges(azione){
+  if(!state.dirty)return true;
+  // L'ULTIMA richiesta e' quella che conta. Tenendo la prima, chi
+  // toccava «Spese» e poi «Nuova spesa» finiva sull'elenco invece che
+  // sul modulo: accettava una cosa e gliene arrivava un'altra.
+  chiediUscita(azione||null);
+  return false;
+}
+function chiediUscita(azione){
+  const app=cercaId('app');
+  const dove=app&&app.querySelector&&app.querySelector('.app');
+  // Senza la shell non c'e' dove infilarla: meglio lasciar passare che
+  // bloccare qualcuno senza mostrargli niente.
+  if(!dove){state.dirty=false;if(typeof azione==='function')azione();return}
+  state.uscitaInSospeso=azione;
+  // La scheda c'e' gia': si aggiorna la destinazione, non si impila
+  // un'altra domanda identica.
+  if(cercaId('uscitaCard'))return;
+  if(typeof document.createElement!=='function'){state.dirty=false;state.uscitaInSospeso=null;if(typeof azione==='function')azione();return}
+  const box=document.createElement('div');
+  box.className='card uscitaCard';
+  box.id='uscitaCard';
+  box.innerHTML='<b>Hai modifiche non salvate</b>'
+    +'<div class="desc" style="margin-top:6px">Se esci da questa schermata, quello che hai scritto e non hai ancora salvato va perso.</div>'
+    +'<div class="uscitaBottoni"><button type="button" onclick="uscitaAnnullata()">Resta qui</button>'
+    +'<button type="button" class="primary" onclick="uscitaConfermata()">Esci e perdi i dati</button></div>';
+  dove.insertBefore(box,dove.firstChild);
+  box.scrollIntoView({block:'nearest'});
+}
+function togliSchedaUscita(){
+  const c=cercaId('uscitaCard');
+  if(c&&c.remove)c.remove();
+  state.uscitaInSospeso=null;
+}
+function uscitaAnnullata(){togliSchedaUscita()}
+function uscitaConfermata(){
+  const azione=state.uscitaInSospeso;
+  togliSchedaUscita();
+  state.dirty=false;
+  if(typeof azione==='function')azione();
+}
 function pushHistory(){const last=state.history[state.history.length-1];const cur={view:state.view,edit:state.edit,editType:state.editType,parent:state.parent};if(!last||last.view!==cur.view||last.edit!==cur.edit||last.editType!==cur.editType)state.history.push(cur);if(state.history.length>30)state.history.shift()}
 // `parent` e' il livello sopra: il cliente di un progetto nuovo, il
 // progetto di una commessa nuova. Senza di lui quelle due maschere non
 // sanno sotto cosa stanno creando e ricadono sull'elenco, in silenzio.
-function navigateTo(v,{edit=null,editType=null,track=true,resetEdit=true,prefill=null,parent=null,keepMenu=false}={}){if(!guardUnsavedChanges())return;if(track&&state.view!==v)pushHistory();state.view=v;state.edit=resetEdit?edit:state.edit;state.editType=resetEdit?editType:state.editType;state.prefill=prefill;state.parent=parent;if(!keepMenu)state.menuOpen=false;clearSel();render()}
+function navigateTo(v,{edit=null,editType=null,track=true,resetEdit=true,prefill=null,parent=null,keepMenu=false,forza=false}={}){if(!forza&&!guardUnsavedChanges(()=>navigateTo(v,{edit,editType,track,resetEdit,prefill,parent,keepMenu,forza:true})))return;if(track&&state.view!==v)pushHistory();state.view=v;state.edit=resetEdit?edit:state.edit;state.editType=resetEdit?editType:state.editType;state.prefill=prefill;state.parent=parent;state.gruppoAperto=null;if(!keepMenu)state.menuOpen=false;clearSel();render()}
 function go(v){navigateTo(v)}
 // Le intestazioni del menu aprono la sezione senza chiudere il menu:
 // cosi' le sottovoci si vedono subito, con un tocco invece di tre.
-function apriGruppo(v){navigateTo(v,{keepMenu:true})}
-function back(){if(!guardUnsavedChanges())return;const prev=state.history.pop()||{view:'home',edit:null,editType:null};state.view=prev.view||'home';state.edit=prev.edit||null;state.editType=prev.editType||null;state.parent=prev.parent||null;state.menuOpen=false;render()}
-function toggleMainMenu(){if(!guardUnsavedChanges())return;state.menuOpen=!state.menuOpen;render()}
+// Aprire un gruppo del menu non costa niente: si fa sempre, subito,
+// senza chiedere niente e senza ridisegnare la pagina. La pagina della
+// sezione — l'elenco delle spese, per dire — e' invece un cambio di
+// schermata vero, e quello si chiede. Prima le due cose erano una sola:
+// toccando «Spese» con un modulo aperto, il cambio veniva fermato e il
+// gruppo non si apriva nemmeno. Il menu restava aperto su niente, e da
+// li' non si raggiungeva piu' nulla.
+function apriGruppo(main){
+  const m=MENU.find(x=>x.main===main);
+  state.gruppoAperto=m?m.l:null;
+  ridisegnaMenu();
+  navigateTo(main,{keepMenu:true});
+}
+// Il menu si riscrive da solo, al suo posto: la schermata sotto non si
+// tocca, cosi' un modulo mezzo compilato resta dov'e'.
+function ridisegnaMenu(){
+  const wrap=cercaNodo('.headerMenuWrap');
+  const pan=wrap&&wrap.querySelector&&wrap.querySelector('.topMenu');
+  if(pan){pan.remove();wrap.insertAdjacentHTML('beforeend',menuDropdown())}
+  const side=cercaNodo('.sidebarNav');
+  if(side)side.innerHTML=navMenu();
+}
+function back(){if(!guardUnsavedChanges(()=>{state.dirty=false;back()}))return;const prev=state.history.pop()||{view:'home',edit:null,editType:null};state.view=prev.view||'home';state.edit=prev.edit||null;state.editType=prev.editType||null;state.parent=prev.parent||null;state.menuOpen=false;render()}
+// Aprire il menu NON e' uscire dalla schermata: non si perde niente, e
+// non si deve chiedere niente. Ma render() ricostruisce tutto con
+// innerHTML, quindi aprirlo cancellava davvero il modulo mezzo
+// compilato — e per difendersi c'era una guardia che, rispondendo
+// «Annulla» (la risposta prudente), lasciava il menu chiuso. Al tocco
+// dopo richiedeva, e restava chiuso di nuovo: l'app sembrava bloccata
+// nel menu, senza un errore, e da li' non si raggiungeva piu' niente.
+// Su iOS, dove gli avvisi si possono bloccare, il confirm risponde
+// «no» da solo e il menu non si apriva mai.
+//
+// Il pannello si infila nel DOM e si toglie, come i messaggi leggeri:
+// la pagina non si ridisegna, il modulo resta intatto, e nessuno deve
+// scegliere fra guardare il menu e tenere quello che ha scritto.
+function toggleMainMenu(){
+  state.menuOpen=!state.menuOpen;
+  if(state.menuOpen)state.gruppoAperto=null;   // riparte dalla sezione in cui si e'
+  const wrap=cercaNodo('.headerMenuWrap');
+  if(!wrap||!wrap.querySelector){render();return}   // schermate senza shell: si ridisegna
+  const gia=wrap.querySelector('.topMenu');
+  if(gia)gia.remove();
+  if(state.menuOpen)wrap.insertAdjacentHTML('beforeend',menuDropdown());
+}
 const MENU=[
   {v:'home',ic:'⌂',l:'Dashboard'},
   // Il gruppo che si apre ogni giorno. «Nuovo consuntivo» punta diritto
@@ -379,7 +482,11 @@ const NAV_CHILDREN={
   settings:['settings','clients','clientEdit','clientDetail','engagements','engagementDetail','engagementNew','engagementEdit','projects','projectEdit','projectDetail','projectNew','wbsEdit','activities','activityEdit','expenseCategories','expenseCategoryEdit','invoiceTemplates','invoiceTemplateEdit','appearance','account','exportTimesheet']
 };
 function navSectionLabel(view){for(const m of MENU){const key=m.main||m.v;const kids=NAV_CHILDREN[key]||[key];if(kids.includes(view))return m.l;}return null;}
-function navMenu(){const cur=navSectionLabel(state.view);return MENU.map(m=>{
+// Quale gruppo e' aperto e su quale pagina si e' sono due cose
+// distinte. Tenerle insieme voleva dire che per aprire un gruppo si
+// doveva cambiare pagina — e se il cambio veniva fermato, il gruppo
+// non si apriva nemmeno.
+function navMenu(){const cur=state.gruppoAperto||navSectionLabel(state.view);return MENU.map(m=>{
   if(!m.sub)return `<button class="${cur===m.l?'active':''}" onclick="go('${m.v}')"><span>${m.ic}</span><b>${m.l}</b></button>`;
   const open=cur===m.l;
   const parent=`<button class="navParentBtn ${open?'active':''}" onclick="apriGruppo('${m.main}')"><span>${m.ic}</span><b>${m.l}</b><i class="navChev">${open?'▾':'▸'}</i></button>`;
@@ -1426,9 +1533,11 @@ function campiCosa(v={}){
   const aQ=aQuantitaTariffa(cat);
   const aMano=!aQ||importoNonRicostruibile(v);
   // Perche' e' a mano cambia tutto. Se lo e' per ripiego — la riga non
-  // si sa ricostruire — appena i dati che mancavano arrivano il conto
-  // deve riprendersela. Se invece l'ha deciso chi scrive, resta a mano
-  // e nessuno gliela porta via.
+  // si sa ricostruire — il conto puo' riprendersela appena i dati che
+  // mancavano arrivano, ma solo se non c'e' niente da perdere (vedi
+  // updateExpenseCalc): mai a spese di una cifra diversa da quella che
+  // rifarebbe. Se invece l'ha deciso chi scrive, resta a mano e nessuno
+  // gliela porta via — e scrivere nella casella basta a deciderlo.
   const manoAuto=aQ&&importoNonRicostruibile(v);
   const unita=(cat&&cat.unit_label)||'unit\u00e0';
   const tratta=km?kmTrattaDi(v):0;
@@ -1437,7 +1546,7 @@ function campiCosa(v={}){
     +campiPercorso(v,km)
     +`<div class="field" id="qtaField"${aQ&&!km?'':' hidden'}><label>Quantit\u00e0 <span id="qtaUnita">(${esc(unita)})</span></label><input name="quantity" type="number" step="0.01" value="${Number(v.quantity||(aQ&&!aMano?1:0))||''}" oninput="aggiornaCalcoloEAvviso(this.form)"></div>`
     +`<div class="field" id="rateField"${aQ?'':' hidden'}><label id="rateLbl">${km?'Tariffa \u20ac/km':'Tariffa unitaria'}</label><input name="unit_rate" type="number" step="0.0001" value="${Number(v.unit_rate||0)}" oninput="aggiornaCalcoloEAvviso(this.form)">${km?'<div class="small">La proponi tu: le tabelle ACI stanno su costikm.aci.it e cambiano a gennaio. Il veicolo la suggerisce, qui si corregge.</div>':''}</div>`
-    +`<div class="field"><label>Importo totale</label><input name="amount" type="number" step="0.01" value="${Number(v.amount||0)}"${aMano?'':' readonly'} oninput="aggiornaAvvisoPolicy(this.form)"><label class="manoLbl"><input type="checkbox" name="amount_a_mano" onchange="totaleAMano(this.form)"${aMano?' checked':''}> Lo scrivo a mano</label><input type="hidden" name="mano_auto" value="${manoAuto?'1':''}"><div class="small" id="calcNota">${aMano?NOTA_MANO:NOTA_CALCOLO}</div></div>`
+    +`<div class="field"><label>Importo totale</label><input name="amount" type="number" step="0.01" value="${Number(v.amount||0)}"${aMano?'':' readonly'} oninput="importoACambiato(this.form)"><label class="manoLbl"><input type="checkbox" name="amount_a_mano" onchange="totaleAMano(this.form)"${aMano?' checked':''}> Lo scrivo a mano</label><input type="hidden" name="mano_auto" value="${manoAuto?'1':''}"><div class="small" id="calcNota">${aMano?NOTA_MANO:NOTA_CALCOLO}</div></div>`
     +`<div class="field"><label>Descrizione</label><textarea name="description" placeholder="Es. Volo Milano\u2013Catania andata">${esc(v.description||'')}</textarea></div>`);
 }
 // I km a tratta: quello che una persona ha in testa. Il totale \u2014 che
@@ -1553,6 +1662,37 @@ function expenseEdit(){
 // e' stato corretto a mano. Prima lo riscriveva sempre, quindi una
 // correzione a mano veniva cancellata al tocco successivo su quantita'
 // o tariffa — senza dire niente.
+// Il conto scritto come lo si direbbe a voce: «210 km x 0,45 EUR/km
+// = 94,50 EUR». Serve in due posti — la nota del calcolo e l'avviso di
+// discordanza — e duplicarlo voleva dire due formattazioni diverse per
+// lo stesso numero.
+function testoConto(cat,quanti,tariffa){
+  const km=eVoceChilometrica(cat);
+  const unita=km?'km':(((cat&&cat.unit_label)||'').trim()||'');
+  return fmtNum(quanti,quanti%1?2:0)+(unita?' '+unita:'')+
+    ' \u00d7 '+fmtNum(tariffa,tariffa%1&&(tariffa*100)%1?4:2)+' \u20ac'+(km?'/km':'')+
+    ' = '+fmtEUR(quanti*tariffa);
+}
+// I numeri per rifare il conto adesso ci sono, ma non tornano con
+// l'importo che sta nella casella. Nessuno dei due viene buttato: si
+// dicono entrambi, e la correzione la fa chi sa qual e' quello giusto.
+function mostraDiscordanza(cat,quanti,tariffa,scritto){
+  const n=document.getElementById('calcNota');
+  if(!n)return;
+  n.textContent=testoConto(cat,quanti,tariffa)+
+    ', ma l\u2019importo scritto \u00e8 '+fmtEUR(scritto)+
+    '. Resta quello scritto: correggilo tu se il conto ha ragione.';
+}
+// Scrivere nella casella dell'importo E' una scelta, anche senza
+// toccare la spunta. Su una riga aperta col ripiego — importo
+// scrivibile e spunta gia' messa dall'app — correggere la cifra e poi
+// completare la tariffa significava vedersela cancellare dal calcolo,
+// perche' il ripiego risultava ancora «dell'app». Da qui in poi non lo
+// e' piu'.
+function importoACambiato(form){
+  if(form.mano_auto)form.mano_auto.value='';
+  aggiornaAvvisoPolicy(form);
+}
 function updateExpenseCalc(form,proposeType,proposeRate){
   const cat=expenseCategoryById(form.expense_category_id?.value);
   if(!cat)return;
@@ -1576,9 +1716,26 @@ function updateExpenseCalc(form,proposeType,proposeRate){
   if(form.mano_auto&&form.mano_auto.value==='1'&&
      Number(form.quantity&&form.quantity.value||0)>0&&
      Number(form.unit_rate&&form.unit_rate.value||0)>0){
-    form.mano_auto.value='';
-    if(form.amount_a_mano)form.amount_a_mano.checked=false;
-    if(form.amount)form.amount.readOnly=true;
+    // Ma non si riprende niente a spese della cifra che c'e'. Il
+    // ripiego nasce proprio sulle righe di cui non si sa il perche':
+    // riprendersele in silenzio vuol dire cancellare un importo che
+    // una persona vede — e che magari ha appena scritto a mano.
+    // Quindi: si torna al calcolo solo quando non c'e' nulla da
+    // perdere, cioe' la casella e' vuota o dice gia' al centesimo
+    // quello che il conto rifarebbe comunque.
+    const atteso=Number(form.quantity.value)*Number(form.unit_rate.value);
+    const scritto=Number(form.amount&&form.amount.value||0);
+    if(!scritto||Math.abs(atteso-scritto)<0.005){
+      form.mano_auto.value='';
+      if(form.amount_a_mano)form.amount_a_mano.checked=false;
+      if(form.amount)form.amount.readOnly=true;
+    }else{
+      // Discordano. Non si sceglie per conto di nessuno: l'importo
+      // scritto resta, e resta correggibile; l'app dice il conto e la
+      // differenza, e chi sa quale dei due e' giusto decide.
+      mostraDiscordanza(cat,Number(form.quantity.value),Number(form.unit_rate.value),scritto);
+      return;
+    }
   }
   if(form.amount_a_mano&&form.amount_a_mano.checked)return;
   if(!aQuantitaTariffa(cat))return;
@@ -1609,10 +1766,7 @@ function updateExpenseCalc(form,proposeType,proposeRate){
     return;
   }
   if(tariffa>0&&quanti>0){
-    const unita=eVoceChilometrica(cat)?'km':((cat.unit_label||'').trim()||'');
-    n.textContent=fmtNum(quanti,quanti%1?2:0)+(unita?' '+unita:'')+
-      ' \u00d7 '+fmtNum(tariffa,tariffa%1&&(tariffa*100)%1?4:2)+' \u20ac'+(eVoceChilometrica(cat)?'/km':'')+
-      ' = '+fmtEUR(quanti*tariffa);
+    n.textContent=testoConto(cat,quanti,tariffa);
     return;
   }
   n.textContent=NOTA_CALCOLO;
@@ -5019,7 +5173,8 @@ Object.assign(window,{
   trasfertaCambiata,
   clienteSpesaCambiato,
   voceSpesaCambiata,
-  totaleAMano,
+  totaleAMano,importoACambiato,
+  uscitaAnnullata,uscitaConfermata,
   veicoloCambiato,
   aggiornaCalcoloEAvviso,
   aggiornaAvvisoPolicy,
@@ -5121,7 +5276,46 @@ Object.assign(window,{
   exportData,
   render
 });
-document.addEventListener('input',e=>{if(e.target.closest?.('.form'))state.dirty=true});
+// Un guasto non deve mai essere muto.
+//
+// render() ha una rete di sicurezza che mostra l'errore quando una
+// pagina non si disegna. Ma un gestore che va in errore PRIMA di
+// arrivare a render() — toccare una voce di menu, premere un pulsante
+// — non lascia niente a schermo: nessun messaggio, nessun cambio di
+// pagina, e chi sta usando l'app vede solo che non risponde. E' la
+// firma del guasto segnalato dal telefono: il menu aperto, i tocchi
+// che non fanno nulla, e nessuno che dica cosa sta succedendo.
+//
+// Il messaggio non ridisegna la pagina: un modulo mezzo compilato non
+// si perde proprio mentre si cerca di capire cosa non va.
+let ultimoGuaio='';
+function segnalaGuaio(dettaglio){
+  const d=String(dettaglio||'').slice(0,200);
+  if(!d||d===ultimoGuaio)return;   // lo stesso errore a ripetizione si dice una volta
+  ultimoGuaio=d;
+  setTimeout(()=>{if(ultimoGuaio===d)ultimoGuaio=''},8000);
+  try{
+    const app=cercaId('app');
+    if(!app||!app.querySelector||!app.querySelector('.app'))return;   // senza shell non si tocca niente
+    setMsgLeggero('Qualcosa non ha funzionato: '+d,9000);
+  }catch(e){}
+}
+// Fuori dal browser (i test di modulo girano in Node, con un window
+// finto) questi agganci non esistono: chiederli di sicuro faceva
+// esplodere l'avvio invece di proteggerlo.
+if(typeof window!=='undefined'&&typeof window.addEventListener==='function'){
+  window.addEventListener('error',e=>{segnalaGuaio(e&&(e.message||e.error&&e.error.message))});
+  window.addEventListener('unhandledrejection',e=>{
+    const r=e&&e.reason;
+    segnalaGuaio(r&&(r.message||r)||'operazione non riuscita');
+  });
+}
+// Scegliere un file spara DUE eventi, input e change. L'esclusione
+// dei file c'era solo su change: allegare una ricevuta marcava il
+// modulo «da salvare» anche se il caricamento salva subito nel
+// database, e da li' in poi ogni spostamento chiedeva di perdere
+// dati che non esistevano.
+document.addEventListener('input',e=>{if(e.target.closest?.('.form')&&e.target.type!=='file')state.dirty=true});
 document.addEventListener('change',e=>{if(e.target.closest?.('.form')&&e.target.type!=='file')state.dirty=true});
 if('serviceWorker' in navigator){navigator.serviceWorker.register('./sw.js').catch(()=>{})}
 init();
