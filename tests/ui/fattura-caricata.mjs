@@ -25,6 +25,7 @@ const port=srv.address().port;
 const b=await chromium.launch(process.env.CHROME?{executablePath:process.env.CHROME}:{});
 let pass=0,fail=0;
 const ok=(c,l,x='')=>{c?pass++:fail++;console.log((c?'  OK  ':'  KO  ')+l+(x?'  → '+x:''))};
+const testo=pg=>pg.evaluate(()=>document.getElementById('app').innerText.replace(/\s+/g,' '));
 const XML=fs.readFileSync(path.join(ROOT,'tests/ui/fixtures/fattura-esempio.xml'),'utf8');
 
 // Il consuntivo che l'app ha: 1 giorno a febbraio e 5,5 a marzo, a
@@ -150,6 +151,54 @@ console.log('\n=== UN FILE CHE NON È UNA FATTURA NON PASSA ===');
   const r=await confronta(pg,'<xml>niente</xml>');
   ok(r.esiti.length===1&&r.esiti[0].liv==='blocco','si ferma, con un solo blocco');
   ok(/FatturaElettronicaBody/.test(r.esiti[0].dettaglio),'dicendo cosa manca',r.esiti[0].dettaglio);
+  await pg.close();
+}
+
+console.log('\n=== DALLA DASHBOARD FINO AL CONFRONTO A SCHERMO ===');
+{
+  // La regola: una funzione nuova non e' finita finche' non c'e' un
+  // percorso che la raggiunge partendo dalla Dashboard, con tocchi veri.
+  const pg=await apri();
+  await pg.evaluate(()=>{
+    const bt=[...document.querySelectorAll('button')].find(x=>/☰/.test(x.textContent));
+    bt.click();
+  });
+  await pg.waitForTimeout(400);
+  await pg.evaluate(()=>{
+    const f=[...document.querySelectorAll('.topMenu button')].find(x=>/Fatturazione/.test(x.textContent));
+    if(!f)throw new Error('voce Fatturazione non trovata nel menu');
+    f.click();
+  });
+  await pg.waitForTimeout(500);
+  ok((await pg.evaluate(()=>document.documentElement.getAttribute('data-view')))==='billing',
+     'dal menu si arriva alla Fatturazione');
+  const c=await pg.evaluate(()=>{
+    const b=[...document.querySelectorAll('#app button')].find(x=>/Carica fattura emessa/.test(x.textContent));
+    if(!b)return false; b.click(); return true;
+  });
+  ok(c,'e li’ c’è il pulsante per caricare la fattura');
+  await pg.waitForTimeout(500);
+  ok((await pg.evaluate(()=>document.documentElement.getAttribute('data-view')))==='fatturaCarica',
+     'che porta alla schermata di caricamento');
+  const t0=await testo(pg);
+  ok(/Non viene salvato niente/i.test(t0),'la quale dice subito che non salva niente');
+  // si sceglie il file, con un vero input[type=file]
+  const tmp=path.join(ROOT,'tests/ui/fixtures/fattura-esempio.xml');
+  await pg.setInputFiles('#app input[type=file]',tmp);
+  await pg.waitForTimeout(900);
+  const t=await testo(pg);
+  ok(/1\/2026/.test(t),'letta la fattura, compare il suo numero');
+  ok(/Cliente Esempio/.test(t),'e il cliente riconosciuto dalla P.IVA');
+  ok(/2\.990,00/.test(t)&&/119,60/.test(t)&&/3\.109,60/.test(t),
+     'con imponibile, rivalsa e totale');
+  ok(/Febbraio 2026/.test(t)&&/Marzo 2026/.test(t),'le due righe coi loro mesi');
+  ok(/31\/05\/2026/.test(t),'e la scadenza');
+  ok(/Il confronto coi tuoi dati/.test(t),'poi il confronto');
+  ok(/piu’ mesi/.test(t),'che segnala i due mesi coperti');
+  ok(/Niente è stato salvato/.test(t),'e ripete in fondo che non ha salvato niente');
+  // e davvero non ha scritto nulla
+  const scritture=await pg.evaluate(()=>(window.__ins||[]).length);
+  ok(scritture===0,'nessuna scrittura sul database, verificata',String(scritture));
   await pg.close();
 }
 

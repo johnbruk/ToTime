@@ -322,7 +322,7 @@ function fmtDays(hours){return fmtNum(Number(hours||0)/8,2)}
 function metricLine(hours,amount){return `${fmtNum(hours,1)} h <span class="dot">·</span> ${fmtDays(hours)} gg/u <span class="dot">·</span> ${fmtEUR(amount)}`}
 function amountLine(label,amount){return `${esc(label)} <span class="dot">·</span> ${fmtEUR(amount)}`}
 function dateIT(v){if(!v)return'';const s=String(v);return `${s.slice(8,10)}/${s.slice(5,7)}`}
-function viewLabel(v){return ({tripNew:'Nuova trasferta',tripEdit:'Modifica trasferta',home:'Dashboard',timesheet:'Timesheet',billing:'Fatturazione',billingDetail:'Dettaglio fattura',tax:'Profilo fiscale',taxPayments:'Pagamenti fiscali',taxPaymentEdit:'Pagamento fiscale',annualMonths:'Consuntivato annuale',annualInvoices:'Elenco fatture',settings:'Configurazione',clients:'Clienti',clientEdit:'Cliente',projects:'Progetti',projectEdit:'Progetto',activities:'Attività',activityEdit:'Attività',expenseCategories:'Voci spesa',vehicles:'Veicoli',vehicleEdit:'Veicolo',policyRimborsi:'Policy rimborsi',expenseCategoryEdit:'Voce spesa',invoiceTemplates:'Template fattura',invoiceTemplateEdit:'Template fattura',appearance:'Aspetto',exportTimesheet:'Export timesheet',dailyForm:'Consuntivo giornaliero',dailyEdit:'Consuntivo giornaliero',monthlyForm:'Compenso mensile',monthlyEdit:'Compenso mensile',manualForm:'Consuntivo manuale',manualEdit:'Consuntivo manuale',expenseForm:'Spesa trasferta',expenseEdit:'Spesa trasferta'})[v]||'schermata precedente'}
+function viewLabel(v){return ({tripNew:'Nuova trasferta',tripEdit:'Modifica trasferta',home:'Dashboard',timesheet:'Timesheet',billing:'Fatturazione',billingDetail:'Dettaglio fattura',fatturaCarica:'Carica fattura emessa',tax:'Profilo fiscale',taxPayments:'Pagamenti fiscali',taxPaymentEdit:'Pagamento fiscale',annualMonths:'Consuntivato annuale',annualInvoices:'Elenco fatture',settings:'Configurazione',clients:'Clienti',clientEdit:'Cliente',projects:'Progetti',projectEdit:'Progetto',activities:'Attività',activityEdit:'Attività',expenseCategories:'Voci spesa',vehicles:'Veicoli',vehicleEdit:'Veicolo',policyRimborsi:'Policy rimborsi',expenseCategoryEdit:'Voce spesa',invoiceTemplates:'Template fattura',invoiceTemplateEdit:'Template fattura',appearance:'Aspetto',exportTimesheet:'Export timesheet',dailyForm:'Consuntivo giornaliero',dailyEdit:'Consuntivo giornaliero',monthlyForm:'Compenso mensile',monthlyEdit:'Compenso mensile',manualForm:'Consuntivo manuale',manualEdit:'Consuntivo manuale',expenseForm:'Spesa trasferta',expenseEdit:'Spesa trasferta'})[v]||'schermata precedente'}
 // Fuori dal browser — i test di modulo girano in Node con un document
 // finto e ridotto — alcune funzioni del DOM non ci sono. Chiederle di
 // sicuro faceva esplodere l'avvio dell'app invece di proteggerlo.
@@ -738,6 +738,59 @@ function confrontaFattura(f){
       `${fmtEUR(f.bolloImporto)} di imposta di bollo assolta in modo virtuale e non addebitata al cliente.`);
 
   return {esiti,cliente,mesi:unici};
+}
+// La schermata che fa vedere cosa si e' capito, PRIMA di toccare
+// qualunque dato salvato. Qui non si scrive niente: si carica il file,
+// si legge, si confronta, e si guarda. L'allineamento viene dopo, con
+// la sua conferma.
+const LIV={blocco:{t:'Da guardare',c:'orange'},scostamento:{t:'Non torna',c:'orange'},nota:{t:'Nota',c:'gray'}};
+function fatturaCarica(){
+  const r=state.fatturaLetta;
+  return appShell(`<h1>Carica la fattura emessa</h1>
+<p class="sub">Si legge l’XML della fattura elettronica e lo si confronta coi tuoi consuntivi. <b>Non viene salvato niente</b>: questa schermata guarda e basta.</p>
+<div class="card"><div class="field"><label>File della fattura (.xml)</label>
+<input type="file" accept=".xml,text/xml,application/xml" onchange="fatturaFileScelto(this)"></div>
+<div class="desc">Il file resta nel browser: non viene caricato da nessuna parte e non tocca il database.</div></div>
+${r?schedaFatturaLetta(r):''}
+<button type="button" class="secondary" onclick="go('billing')">Torna alla fatturazione</button>`);
+}
+function schedaFatturaLetta(r){
+  const f=r.f;
+  if(f.errore)return `<div class="card"><b>Non si riesce a leggere il file</b><div class="desc" style="margin-top:6px">${esc(f.errore)}</div></div>`;
+  const righe=f.righe.map(l=>`<div class="row"><div></div><div><div class="title">${esc(l.descrizione||'(senza descrizione)')}</div><div class="desc">${l.mese?esc(monthLabel(l.mese)):'<b>mese non riconosciuto</b>'}${l.giorni!==null?' · '+fmtNum(l.giorni,2)+' gg':''} · ${fmtNum(l.quantita,2)} × ${fmtEUR(l.prezzoUnitario)}</div></div><div class="value">${fmtEUR(l.importo)}</div></div>`).join('');
+  const esiti=r.esiti.length
+    ? r.esiti.map(e=>{const L=LIV[e.liv]||LIV.nota;return `<div class="row"><div></div><div><div class="title">${esc(e.titolo)}</div><div class="desc">${esc(e.dettaglio)}</div><span class="tag ${L.c}">${L.t}</span></div><div class="value"></div></div>`}).join('')
+    : '<div class="empty">Tutto torna: nessuno scostamento.</div>';
+  const gravi=r.esiti.filter(e=>e.liv!=='nota').length;
+  return `<div class="card"><b>Fattura ${esc(f.numero||'senza numero')} · ${esc(fmtDMY(f.data)||f.data||'')}</b>
+<div class="desc" style="margin-top:4px">${esc(f.clienteNome||'')}${f.clientePiva?' · P.IVA '+esc(f.clientePiva):''}${r.cliente?' → <b>'+esc(clientName(r.cliente.id))+'</b>':''}</div>
+<div class="kpiGrid three" style="margin-top:14px">
+<div><span>Imponibile</span><strong>${fmtEUR(f.imponibile)}</strong></div>
+<div><span>Rivalsa ${fmtNum(f.rivalsaAliquota,0)}%</span><strong>${fmtEUR(f.rivalsaImporto)}</strong></div>
+<div><span>Totale</span><strong>${fmtEUR(f.totale)}</strong></div></div>
+<div class="metricLine" style="margin-top:12px">${f.scadenza?'Da saldare entro il '+esc(fmtDMY(f.scadenza)):'Senza scadenza indicata'}${f.bolloImporto>0?' <span class="dot">·</span> bollo '+fmtEUR(f.bolloImporto)+(f.bolloVirtuale?' virtuale':''):''}</div></div>
+<h2>Le righe</h2><div class="list">${righe||'<div class="empty">Nessuna riga.</div>'}</div>
+<h2>Il confronto coi tuoi dati</h2>
+<p class="sub">${gravi?'<b>'+gravi+'</b> cosa'+(gravi>1?'e':'')+' da guardare.':'Niente da segnalare.'}</p>
+<div class="list">${esiti}</div>
+<div class="card"><b>Niente è stato salvato</b><div class="desc" style="margin-top:6px">Questa schermata legge e confronta soltanto. L’allineamento dei dati alla fattura arriverà come passo a parte, con una conferma esplicita.</div></div>`;
+}
+function fatturaFileScelto(input){
+  const file=input&&input.files&&input.files[0];
+  if(!file)return;
+  const reader=new FileReader();
+  reader.onload=()=>{
+    try{
+      const f=leggiFatturaXML(String(reader.result||'').replace(/^﻿/,''));
+      const r=confrontaFattura(f);
+      state.fatturaLetta={f,esiti:r.esiti,cliente:r.cliente,mesi:r.mesi,nome:file.name};
+      render();
+    }catch(e){
+      setMsgLeggero('Non si è potuto leggere il file: '+(e&&e.message||e),9000);
+    }
+  };
+  reader.onerror=()=>setMsgLeggero('Non si è potuto aprire il file.',7000);
+  reader.readAsText(file);
 }
 function renderTemplate(tpl,row){
   const fallback={daily_rate_8h:'Consulenza - [Mese Anno] - Cliente/Progetto: [Progetto] | Giorni: [Giorni]',monthly_flat:'Consulenza - [Mese Anno] - Cliente/Progetto: [Progetto]',manual_entry:'Prestazione professionale - [Mese Anno] - Cliente/Progetto: [Progetto]',travel_expenses:'Spese di trasferta - [Mese Anno] - Cliente/Progetto: [Progetto]'}[row.type]||'[Mese Anno] - [Progetto]';
@@ -2700,7 +2753,7 @@ function annualSummaryCard(){const y=currentYear();const at=annualTotals(y);retu
 function billingGroupsByClient(){const lines=groupSummary();const by={};lines.forEach(l=>{if(!by[l.client_id])by[l.client_id]={client_id:l.client_id,lines:[],baseTotal:0,total:0,hours:0,pAmount:0,pHours:0};by[l.client_id].lines.push(l);by[l.client_id].baseTotal+=Number(l.amount||0);by[l.client_id].hours+=Number(l.hours||0);by[l.client_id].pAmount+=Number(l.pAmount||0);by[l.client_id].pHours+=Number(l.pHours||0)});Object.values(by).forEach(g=>{const header=headerForClient(g.client_id)||{};g.calc=billingCalc(g,header);g.total=g.calc.total});return Object.values(by).sort((a,b)=>clientName(a.client_id).localeCompare(clientName(b.client_id)))}
 function billingMonthlyView(){const {year,month}=periodParts();const md=annualMonthData(year);const m=md[month-1]||{};const fat=m.fatturato||0;const inc=m.incassato||0;const daInc=Math.max(0,fat-inc);const daFat=Math.max(0,(m.fatturabile||0)-(m.fatturatoBase||0));return `<div class="card"><b>Vista mensile · ${monthLabel(state.month)}</b><div class="kpiGrid" style="margin-top:14px"><div><span>Fatturato mese</span><strong>${fmtEUR(fat)}</strong></div><div><span>Incassato mese</span><strong>${fmtEUR(inc)}</strong></div></div><div class="metricLine" style="margin-top:12px">Da fatturare ${fmtEUR(daFat)} <span class="dot">·</span> Da incassare ${fmtEUR(daInc)}</div></div>`}
 function billingAnnualView(){const year=currentYear();const at=annualTotals(year);return `<div class="card"><b>Vista annuale · ${year}</b><div class="kpiGrid" style="margin-top:14px"><div><span>Fatturato anno</span><strong>${fmtEUR(at.fatturato)}</strong></div><div><span>Incassato anno</span><strong>${fmtEUR(at.incassato)}</strong></div></div><div class="metricLine" style="margin-top:12px">Da fatturare ${fmtEUR(at.daFatturare)} <span class="dot">·</span> Da incassare ${fmtEUR(at.daIncassare)}</div><div class="grid" style="margin-top:12px"><button class="secondary" onclick="openAnnualInvoices('issued')">Fatture emesse ›</button><button class="secondary" onclick="openAnnualInvoices('collected')">Incassi ›</button></div></div>`}
-function billing(){const groups=billingGroupsByClient();const total=groups.reduce((s,g)=>s+g.total,0);return appShell(`<h1>Fatturazione e incassi</h1>${monthSelector()}<div class="rigaPian"><label><input type="checkbox" ${fatturaPianificato()?'checked':''} onchange="cambiaFatturaPianificato(this.checked)"> Fattura anche il pianificato</label></div><div class="card"><b>Totale fatturazione mese</b><div class="amount" style="margin-top:8px">${fmtEUR(total)}</div><div class="sub">Include eventuale rivalsa INPS 4% e marca da bollo se attive.</div></div><div class="list">${groups.map(g=>{const st=headerStatus(g.client_id);return `<div class="row" onclick="openBillingClient('${g.client_id}')"><div></div><div><div class="title">${esc(clientName(g.client_id))}</div><div class="metricLine">${metricLine(g.hours,g.total)}</div><div class="desc">Base ${fmtEUR(g.calc.subtotal)} · Rivalsa ${fmtEUR(g.calc.inpsAmount)} · Bollo ${fmtEUR(g.calc.stampAmount)}</div><span class="tag ${statusClass(st)}">${statusLabel(st)}</span></div><div class="value">›</div></div>`}).join('')||emptyState('Nessuna riga fatturabile in questo mese.','+ Registra un consuntivo','newEntryChoice()')}</div><h2>Riepilogo</h2>${previsioneRicaviCard()}${billingMonthlyView()}${billingAnnualView()}${forfettarioBarCard()}
+function billing(){const groups=billingGroupsByClient();const total=groups.reduce((s,g)=>s+g.total,0);return appShell(`<h1>Fatturazione e incassi</h1>${monthSelector()}<div class="rigaPian"><label><input type="checkbox" ${fatturaPianificato()?'checked':''} onchange="cambiaFatturaPianificato(this.checked)"> Fattura anche il pianificato</label></div><div class="miniActions"><button type="button" class="miniBtn" onclick="go('fatturaCarica')" title="Carica l’XML di una fattura già emessa e confrontalo coi consuntivi">⤒ Carica fattura emessa</button></div><div class="card"><b>Totale fatturazione mese</b><div class="amount" style="margin-top:8px">${fmtEUR(total)}</div><div class="sub">Include eventuale rivalsa INPS 4% e marca da bollo se attive.</div></div><div class="list">${groups.map(g=>{const st=headerStatus(g.client_id);return `<div class="row" onclick="openBillingClient('${g.client_id}')"><div></div><div><div class="title">${esc(clientName(g.client_id))}</div><div class="metricLine">${metricLine(g.hours,g.total)}</div><div class="desc">Base ${fmtEUR(g.calc.subtotal)} · Rivalsa ${fmtEUR(g.calc.inpsAmount)} · Bollo ${fmtEUR(g.calc.stampAmount)}</div><span class="tag ${statusClass(st)}">${statusLabel(st)}</span></div><div class="value">›</div></div>`}).join('')||emptyState('Nessuna riga fatturabile in questo mese.','+ Registra un consuntivo','newEntryChoice()')}</div><h2>Riepilogo</h2>${previsioneRicaviCard()}${billingMonthlyView()}${billingAnnualView()}${forfettarioBarCard()}
     <div class="list"><div class="row" onclick="go('reportEconomico')"><div></div>
       <div><div class="title">Report economico</div>
       <div class="desc">Ricavi, costi e margine, mese per mese.</div></div><div class="chev">›</div></div></div>`)}
@@ -5255,7 +5308,7 @@ function render(){
       <button type="button" class="primary" onclick="go('home')">Torna alla dashboard</button>`;
   }
 }
-function renderInterno(){document.documentElement.setAttribute('data-view',state.view||'home');if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,reportWbs,reportEconomico,fatturazioneCommessa,engagements,engagementNew,engagementEdit,engagementDetail,projectNew,projectDetail,clientDetail,wbsEdit,importaConsuntivi,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,tripNew,tripEdit,timesheet,griglia,pivot,billing,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,vehicles,vehicleEdit,policyRimborsi,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,balance,taxSettings,tasseFuture,fatturatoDetail,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
+function renderInterno(){document.documentElement.setAttribute('data-view',state.view||'home');if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,reportWbs,reportEconomico,fatturazioneCommessa,engagements,engagementNew,engagementEdit,engagementDetail,projectNew,projectDetail,clientDetail,wbsEdit,importaConsuntivi,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,tripNew,tripEdit,timesheet,griglia,pivot,billing,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,vehicles,vehicleEdit,policyRimborsi,fatturaCarica,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,balance,taxSettings,tasseFuture,fatturatoDetail,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
 
 Object.assign(window,{
   setRep,
@@ -5469,6 +5522,7 @@ Object.assign(window,{
   scomposizioneRimborsi,
   forecastCalc,
   leggiFatturaXML,confrontaFattura,clientePerPiva,giorniConsuntivati,
+  fatturaCarica,fatturaFileScelto,
   annualTaxCalc,
   cambiaClientePolicy,
   savePolicy,
