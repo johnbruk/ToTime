@@ -35,6 +35,9 @@ console.log('\n--- 0. il codice cliente si scrive davvero ---');
 // non lo scriveva. Senza codice cliente non si crea nessun progetto,
 // perche' il codice del progetto deriva da quello.
 await pg.evaluate(()=>window.go('clients'));await pg.waitForTimeout(350);
+// La pagina si apre sulla LISTA: il modulo si chiede con un tocco, cosi'
+// chi viene a guardare i clienti non trova cinque campi vuoti in cima.
+await pg.evaluate(()=>window.apriNuovoCliente());await pg.waitForTimeout(300);
 await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
   f.name.value='Cliente di prova';f.code.value='prv';f.requestSubmit()});
 await pg.waitForTimeout(900);

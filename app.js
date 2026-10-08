@@ -1612,6 +1612,21 @@ function guardDay(iso){if(!iso)return true;const a=assenzaDel(iso);const fe=!!a;
   if(fe)return confirm('Il '+fmtDMY(iso)+' è segnato come '+eti+'.\n\nVuoi inserire comunque il consuntivo?');
   if(ho)return confirm('Il '+fmtDMY(iso)+' è '+ho+' (giorno festivo).\n\nVuoi inserire comunque il consuntivo?');
   return true}
+// L'ultimo cliente su cui hai registrato: e' quasi sempre quello giusto
+// anche adesso. Il primo in ordine alfabetico non lo e' mai, se non per
+// caso. Si guarda la data del consuntivo, non l'ordine di inserimento:
+// chi recupera una settimana arretrata sta lavorando su quei giorni.
+function clientePiuRecente(lista){
+  if(!lista||!lista.length)return '';
+  const ammessi=new Set(lista.map(c=>c.id));
+  let best=null;
+  (data.entries||[]).forEach(e=>{
+    if(!ammessi.has(e.client_id))return;
+    const d=String(e.entry_date||'');
+    if(!best||d>best.d)best={d,id:e.client_id};
+  });
+  return (best&&best.id)||lista[0].id;
+}
 function dailyClients(){return sortEntities('clients',data.clients.filter(c=>c.compensation_type==='daily_rate_8h'&&c.active))}
 function monthlyClients(){return data.clients.filter(c=>c.compensation_type==='monthly_flat'&&c.active)}
 
@@ -1812,7 +1827,9 @@ function tmPreviewHtml(r){const nc=r.conflicts?r.conflicts.length:0;if(!r.days.l
 function updateTMPreview(form){const el=form.querySelector('#tmPreview');if(!el)return;el.innerHTML=tmPreviewHtml(tmComputeVals(form.client_id.value,form.start_date.value,form.end_date.value,form.hours.value,form.exclude_holidays.value==='1',form.skip_conflicts.value==='1',form.cadence.value,form.weekday.value));const wd=form.querySelector('.weekdayField');if(wd)wd.style.display=form.cadence.value==='weekly_fixed'?'':'none';const lb=form.querySelector('.hoursLabel');if(lb)lb.textContent=form.cadence.value==='daily'?'Ore al giorno':'Ore a settimana';}
 function tmForm(){const clients=dailyClients();const selected=clients[0]?.id||'';const today=new Date().toISOString().slice(0,10);const initial=tmPreviewHtml(tmComputeVals(selected,today,today,4,true,true));return appShell(`<h1>Impegno continuativo</h1><p class="sub">Genera i consuntivi su tutti i giorni lavorativi tra due date, con un impegno orario fisso. Tariffa oraria = tariffa giornaliera / 8h.</p>${clients.length?`<form class="form" onsubmit="saveTM(event)" oninput="updateTMPreview(this)"><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form);updateTMPreview(this.form)">${clients.map(c=>`<option value="${c.id}"${c.id===selected?' selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div id="hierBlock">${hierAvailable(selected)?hierFields(selected,'')+'<input type="hidden" name="project_id" value="">':campiSenzaGerarchia(selected)}</div><div class="grid"><div class="field"><label>Data inizio</label><input name="start_date" type="date" value="${today}"></div><div class="field"><label>Data fine</label><input name="end_date" type="date" value="${today}"></div></div><div class="field"><label>Cadenza</label><select name="cadence" onchange="updateTMPreview(this.form)">${TM_CADENCE.map(c=>`<option value="${c[0]}">${c[1]}</option>`).join('')}</select></div><div class="field weekdayField" style="display:none"><label>Giorno della settimana</label><select name="weekday" onchange="updateTMPreview(this.form)">${WEEKDAYS.map(w=>`<option value="${w[0]}" ${w[0]==='4'?'selected':''}>${w[1]}</option>`).join('')}</select></div><div class="field"><label class="hoursLabel">Ore al giorno</label><input name="hours" type="number" step="0.25" min="0.25" value="4"></div><div class="field"><label>Giorni</label><select name="exclude_holidays"><option value="1">Lun-Ven · esclude le festività italiane</option><option value="0">Lun-Ven · include le festività</option></select></div><div class="field"><label>Giorni già consuntivati</label><select name="skip_conflicts"><option value="1">Salta i giorni con consuntivo esistente</option><option value="0">Genera comunque (duplica)</option></select></div><div class="field"><label>Sede</label><select name="work_site">${sediOptions()}</select></div><div class="field"><label>Descrizione</label><input name="description" value="Time &amp; Material"></div><div class="field"><label>Note</label><textarea name="notes" placeholder="Note interne opzionali"></textarea></div><div class="card" id="tmPreview" style="margin:6px 0">${initial}</div><div class="actions"><button class="primary">Genera consuntivi</button><button type="button" class="secondary" onclick="go('home')">Annulla</button></div></form>`:`<div class="card">Crea prima un cliente con tariffa giornaliera in Configurazione.</div>`}`);}
 async function saveTM(ev){ev.preventDefault();const f=ev.target;const c=clientById(f.client_id.value);const r=tmComputeVals(f.client_id.value,f.start_date.value,f.end_date.value,f.hours.value,f.exclude_holidays.value==='1',f.skip_conflicts.value==='1',f.cadence.value,f.weekday.value);if(r.hours<=0)return setMsg('Inserisci le ore al giorno.',6000);if(!r.days.length)return setMsg('Nessun giorno da generare (verifica intervallo e giorni già consuntivati).',6000);if(r.days.length>366&&!confirm('Stai per generare '+r.days.length+' consuntivi. Procedere?'))return;const tISO=todayISO();const batch='tm_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);const site=norm(f.work_site.value);const desc=norm(f.description.value)||null;const notes=norm(f.notes.value)||null;const lin=(f.wbs_id&&f.wbs_id.value)?wbsLineage(f.wbs_id.value):null;
-  if(hierAvailable(f.client_id.value)&&!(f.wbs_id&&f.wbs_id.value))return setMsg('Scegli su cosa registrare: progetto e commessa.',6000);
+  {const v=n=>(f[n]&&f[n].value)||'';
+   const manca=cosaMancaNellaCatena(v('client_id'),v('hier_project_id'),v('engagement_id'),v('wbs_id'));
+   if(manca)return setMsg(manca,6000);}
   const rows=r.days.map(iso=>({entry_date:iso,client_id:f.client_id.value,project_id:(lin?lin.project.id:(f.project_id?f.project_id.value:''))||null,wbs_id:(f.wbs_id&&f.wbs_id.value)||null,activity_id:(lin&&lin.wbs.activity_id?lin.wbs.activity_id:(f.activity_id?f.activity_id.value:''))||null,work_location:site||null,work_site:site||null,work_city:null,description:desc,notes:notes,hours:r.hours,status:(iso>tISO?'planned':'actual'),tm_batch_id:batch,daily_rate_snapshot:Number(c?.daily_rate||0),standard_hours_snapshot:Number(c?.standard_hours||8)}));setMsg('Generazione di '+rows.length+' consuntivi in corso...',6000);render();const res=await insertManyResilient('timesheet_entries',rows);if(res.error)return setMsg(res.error.message,8000);await reload();state.month=r.days[0].slice(0,7);state.view='timesheet';setMsg(rows.length+' consuntivi Time & Material generati.',4500);render();}
 function tmBatches(){const map={};(data.entries||[]).filter(isTM).forEach(e=>{const k=e.tm_batch_id||['nb',e.client_id,e.project_id||'',e.activity_id||'',e.hours,e.description||''].join('|');if(!map[k])map[k]={key:k,client_id:e.client_id,project_id:e.project_id,activity_id:e.activity_id,hours:Number(e.hours||0),desc:e.description,ids:[],dates:[],hoursSum:0};const b=map[k];b.ids.push(e.id);b.dates.push(String(e.entry_date));b.hoursSum+=Number(e.hours||0);});return Object.values(map).map(b=>{b.dates.sort();b.start=b.dates[0];b.end=b.dates[b.dates.length-1];b.days=b.ids.length;b.planned=b.dates.filter(d=>d>todayISO()).length;return b;}).sort((a,b)=>String(b.start).localeCompare(a.start));}
 function tmManage(){const batches=tmBatches();return appShell(`<h1>Incarichi continuativi</h1><p class="sub">Un incarico genera in un colpo solo i consuntivi dei giorni lavorativi di un periodo. Da qui li crei, e puoi eliminare un intero periodo senza toccare i singoli giorni.</p>${batches.length?`<div class="list">${batches.map((b,i)=>`<div class="row"><div></div><div><div class="title">${esc(clientName(b.client_id))}${b.project_id?' / '+esc(projectName(b.project_id)):''}${b.planned?' <span class="tag blue">'+b.planned+' pianif.</span>':''}</div><div class="desc">${esc(activityName(b.activity_id)||'')}${b.desc?' · '+esc(b.desc):''}</div><div class="desc">Dal ${fmtDMY(b.start)} al ${fmtDMY(b.end)} · ${b.days} giorni · ${fmtNum(b.hoursSum,1)} h totali · ${fmtNum(b.hours,2)} h/giorno</div><button class="secondary danger" style="margin-top:10px" onclick="deleteTMBatch(${i})">Elimina intero periodo</button></div><div class="value"></div></div>`).join('')}</div>`:emptyState('Nessun incarico continuativo generato.','+ Crea un incarico continuativo',"go('tmForm')")}<div class="actions"><button class="primary" onclick="go('tmForm')">+ Nuovo incarico continuativo</button><button type="button" class="secondary" onclick="go('timesheet')">Torna al timesheet</button></div>`);}
@@ -1854,14 +1871,14 @@ async function dopoIlSalvataggio(f){
   setMsg('Salvato. Ora '+fmtDMY(iso)+'.',4000);
 }
 function prefillDate(){const v=state.editType;return (typeof v==='string'&&v.length===10&&v.charAt(4)==='-')?v:new Date().toISOString().slice(0,10)}
-function dailyForm(){const clients=dailyClients();const pre=state.prefill||{};const selected=(pre.client_id&&clients.some(c=>c.id===pre.client_id))?pre.client_id:(clients[0]?.id||'');return appShell(`<h1>Consuntivo giornaliero</h1><p class="sub">Ore effettivamente lavorate, valorizzate secondo tariffa (tariffa oraria = tariffa giornaliera / 8h).</p>${clients.length?`<form class="form" onsubmit="saveDaily(event)"><div class="field"><label>Data</label><input name="entry_date" type="date" required value="${pre.dataVuota?'':prefillDate()}">${pre.dataVuota?'<div class="small">Copia di un consuntivo esistente: scegli la data.</div>':''}</div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)">${clients.map(c=>`<option value="${c.id}"${c.id===selected?' selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div id="hierBlock">${hierAvailable(selected)?hierFields(selected,pre.wbs_id||'',pre.activity_id||'')+'<input type="hidden" name="project_id" value="'+esc(pre.project_id||'')+'">':campiSenzaGerarchia(selected,pre.project_id||'',pre.activity_id||'')}</div><details class="moreFields"><summary>Altri dettagli (sede, luogo, descrizione)</summary><div class="field"><label>Sede</label><select name="work_site">${sediOptions(pre.work_site||SEDE_DEFAULT)}</select></div><div class="field"><label>Luogo/Città</label><input name="work_city" value="${esc(pre.work_city||'')}" placeholder="Es. Verona, Milano, Canicattì"></div><div class="field"><label>Descrizione</label><textarea name="description">${esc(pre.description||'')}</textarea></div></details><div class="field"><label>Ore consuntivate</label><input name="hours" type="number" step="0.25" value="${pre.hours!=null?esc(String(pre.hours)):'8'}"></div><div class="field"><label>Note</label><textarea name="notes" placeholder="Note interne opzionali"></textarea></div><div class="actions"><button class="primary" data-busy="Salvataggio…">Salva</button><button type="button" class="secondary" onclick="salvaEVai(this,1)">Salva e vai al giorno dopo ›</button><button type="button" class="secondary" onclick="go('home')">Annulla</button></div></form>
+function dailyForm(){const clients=dailyClients();const pre=state.prefill||{};const selected=(pre.client_id&&clients.some(c=>c.id===pre.client_id))?pre.client_id:clientePiuRecente(clients);return appShell(`<h1>Consuntivo giornaliero</h1><p class="sub">Ore effettivamente lavorate, valorizzate secondo tariffa (tariffa oraria = tariffa giornaliera / 8h).</p>${clients.length?`<form class="form" onsubmit="saveDaily(event)"><div class="field"><label>Data</label><input name="entry_date" type="date" required value="${pre.dataVuota?'':prefillDate()}">${pre.dataVuota?'<div class="small">Copia di un consuntivo esistente: scegli la data.</div>':''}</div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)">${clients.map(c=>`<option value="${c.id}"${c.id===selected?' selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div id="hierBlock">${hierAvailable(selected)?hierFields(selected,pre.wbs_id||'',pre.activity_id||'')+'<input type="hidden" name="project_id" value="'+esc(pre.project_id||'')+'">':campiSenzaGerarchia(selected,pre.project_id||'',pre.activity_id||'')}</div><div class="field"><label>Sede</label><select name="work_site">${sediOptions(pre.work_site||SEDE_DEFAULT)}</select></div><div class="field"><label>Luogo/Città</label><input name="work_city" value="${esc(pre.work_city||'')}" placeholder="Es. Verona, Milano, Canicattì"></div><div class="field"><label>Descrizione</label><textarea name="description">${esc(pre.description||'')}</textarea></div><div class="field"><label>Ore consuntivate</label><input name="hours" type="number" step="0.25" value="${pre.hours!=null?esc(String(pre.hours)):'8'}"></div><div class="field"><label>Note</label><textarea name="notes" placeholder="Note interne opzionali"></textarea></div><div class="actions"><button class="primary" data-busy="Salvataggio…">Salva</button><button type="button" class="secondary" onclick="salvaEVai(this,1)">Salva e vai al giorno dopo ›</button><button type="button" class="secondary" onclick="go('home')">Annulla</button></div></form>
       <div class="altriCompensi"><b>Ti serve un altro tipo di compenso?</b>
         <button type="button" onclick="goForDay('manualForm')">Compenso una tantum ›</button>
         <button type="button" onclick="goForDay('monthlyForm')">Compenso mensile ›</button>
       </div>`:`<div class="card">Crea prima un cliente con tariffa giornaliera in Configurazione.</div>`}`)}
-async function saveDaily(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));if(!guardDay(f.entry_date))return;const c=clientById(f.client_id);const lin=f.wbs_id?wbsLineage(f.wbs_id):null;if(hierAvailable(f.client_id)&&!f.wbs_id)return setMsg('Scegli su quale attività della commessa registrare le ore.',5000);const payload={entry_date:f.entry_date,client_id:f.client_id,project_id:(lin?lin.project.id:f.project_id)||null,activity_id:(lin&&lin.wbs.activity_id?lin.wbs.activity_id:f.activity_id)||null,wbs_id:f.wbs_id||null,work_location:[norm(f.work_site),norm(f.work_city)].filter(Boolean).join(' - ')||null,work_site:norm(f.work_site)||null,work_city:norm(f.work_city)||null,description:f.description||null,notes:f.notes||null,hours:Number(f.hours||0),daily_rate_snapshot:Number(c?.daily_rate||0),standard_hours_snapshot:Number(c?.standard_hours||8)};const {error}=await insertResilient('timesheet_entries',payload);if(error)return setMsg(motivoLeggibile(error),7000);await reload();await dopoIlSalvataggio(f)}
+async function saveDaily(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));if(!guardDay(f.entry_date))return;const c=clientById(f.client_id);const lin=f.wbs_id?wbsLineage(f.wbs_id):null;{const manca=cosaMancaNellaCatena(f.client_id,f.hier_project_id,f.engagement_id,f.wbs_id);if(manca)return setMsg(manca,6000);}const payload={entry_date:f.entry_date,client_id:f.client_id,project_id:(lin?lin.project.id:f.project_id)||null,activity_id:(lin&&lin.wbs.activity_id?lin.wbs.activity_id:f.activity_id)||null,wbs_id:f.wbs_id||null,work_location:[norm(f.work_site),norm(f.work_city)].filter(Boolean).join(' - ')||null,work_site:norm(f.work_site)||null,work_city:norm(f.work_city)||null,description:f.description||null,notes:f.notes||null,hours:Number(f.hours||0),daily_rate_snapshot:Number(c?.daily_rate||0),standard_hours_snapshot:Number(c?.standard_hours||8)};const {error}=await insertResilient('timesheet_entries',payload);if(error)return setMsg(motivoLeggibile(error),7000);await reload();await dopoIlSalvataggio(f)}
 function dailyEdit(){const e=data.entries.find(x=>x.id===state.edit);if(!e)return timesheet();const clients=dailyClients();return appShell(`<h1>Modifica consuntivo</h1><form class="form" onsubmit="saveDailyEdit(event)"><div class="field"><label>Data</label><input name="entry_date" type="date" value="${esc(e.entry_date)}"></div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)">${clients.map(c=>`<option value="${c.id}" ${c.id===e.client_id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div id="hierBlock">${hierAvailable(e.client_id)?hierFields(e.client_id,e.wbs_id||'')+'<input type="hidden" name="project_id" value="'+(e.project_id||'')+'">':campiSenzaGerarchia(e.client_id,e.project_id||'',e.activity_id||'')}</div><div class="field"><label>Sede</label><select name="work_site">${sediOptions(e.work_site==null?SEDE_DEFAULT:e.work_site)}</select></div><div class="field"><label>Luogo/Città</label><input name="work_city" value="${esc(e.work_city||'')}" placeholder="Es. Verona, Milano, Canicattì"></div><div class="field"><label>Descrizione</label><textarea name="description">${esc(e.description||'')}</textarea></div><div class="field"><label>Ore consuntivate</label><input name="hours" type="number" step="0.25" value="${Number(e.hours||0)}"></div><div class="field"><label>Note</label><textarea name="notes">${esc(e.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary" onclick="salvaEVai(this,1)">Salva e vai al giorno dopo ›</button><button type="button" class="secondary" onclick="salvaEVai(this,-1)">‹ Salva e vai al giorno prima</button><button type="button" class="secondary" onclick="duplicateDaily('${e.id}')">Duplica</button><button type="button" class="secondary danger" onclick="deleteDaily('${e.id}')">Elimina</button><button type="button" class="secondary" onclick="go('timesheet')">Annulla</button></div></form>`)}
-async function saveDailyEdit(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));if(!guardDay(f.entry_date))return;const c=clientById(f.client_id);const lin=f.wbs_id?wbsLineage(f.wbs_id):null;if(hierAvailable(f.client_id)&&!f.wbs_id)return setMsg('Scegli su quale attività della commessa registrare le ore.',5000);const payload={entry_date:f.entry_date,client_id:f.client_id,project_id:(lin?lin.project.id:f.project_id)||null,activity_id:(lin&&lin.wbs.activity_id?lin.wbs.activity_id:f.activity_id)||null,wbs_id:f.wbs_id||null,work_location:[norm(f.work_site),norm(f.work_city)].filter(Boolean).join(' - ')||null,work_site:norm(f.work_site)||null,work_city:norm(f.work_city)||null,description:f.description||null,notes:f.notes||null,hours:Number(f.hours||0),daily_rate_snapshot:Number(c?.daily_rate||0),standard_hours_snapshot:Number(c?.standard_hours||8)};const {error}=await updateResilient('timesheet_entries',payload,state.edit);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.edit=null;await dopoIlSalvataggio(f)}
+async function saveDailyEdit(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));if(!guardDay(f.entry_date))return;const c=clientById(f.client_id);const lin=f.wbs_id?wbsLineage(f.wbs_id):null;{const manca=cosaMancaNellaCatena(f.client_id,f.hier_project_id,f.engagement_id,f.wbs_id);if(manca)return setMsg(manca,6000);}const payload={entry_date:f.entry_date,client_id:f.client_id,project_id:(lin?lin.project.id:f.project_id)||null,activity_id:(lin&&lin.wbs.activity_id?lin.wbs.activity_id:f.activity_id)||null,wbs_id:f.wbs_id||null,work_location:[norm(f.work_site),norm(f.work_city)].filter(Boolean).join(' - ')||null,work_site:norm(f.work_site)||null,work_city:norm(f.work_city)||null,description:f.description||null,notes:f.notes||null,hours:Number(f.hours||0),daily_rate_snapshot:Number(c?.daily_rate||0),standard_hours_snapshot:Number(c?.standard_hours||8)};const {error}=await updateResilient('timesheet_entries',payload,state.edit);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.edit=null;await dopoIlSalvataggio(f)}
 // Duplicare non scrive piu' di nascosto su oggi: apre il modulo gia'
 // pieno con la data vuota, cosi' la data la si sceglie apposta. Prima
 // scriveva dritto nel database e, non portandosi dietro la voce su cui
@@ -1884,13 +1901,13 @@ async function saveMonthlyEdit(ev){ev.preventDefault();const f=Object.fromEntrie
 async function duplicateMonthly(idv){const m=data.monthly.find(x=>x.id===idv);if(!m)return;const {year,month}=periodParts();const copy={year,month,client_id:m.client_id,project_id:m.project_id,description:m.description,notes:m.notes,amount:m.amount};const {error}=await insertResilient('monthly_compensations',copy);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='timesheet';render()}
 async function deleteMonthly(idv){if(!confirm('Eliminare questo compenso mensile?'))return;const {error}=await sb.from('monthly_compensations').delete().eq('id',idv);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='timesheet';render()}
 
-function manualForm(){const clients=activeClients();const selected=clients[0]?.id||'';return appShell(`<h1>Compenso una tantum</h1>${clients.length?`<form class="form" onsubmit="saveManual(event)"><div class="field"><label>Data</label><input name="entry_date" type="date" value="${prefillDate()}"></div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)">${clients.map(c=>`<option value="${c.id}"${c.id===selected?' selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div id="hierBlock">${hierAvailable(selected)?hierFields(selected,'')+'<input type="hidden" name="project_id" value="">':campiSenzaGerarchia(selected)}</div><details class="moreFields"><summary>Altri dettagli (sede, luogo, descrizione)</summary><div class="field"><label>Sede</label><select name="work_site">${sediOptions()}</select></div><div class="field"><label>Luogo/Città</label><input name="work_city"></div><div class="field"><label>Descrizione</label><textarea name="description"></textarea></div></details><div class="field"><label>Importo manuale</label><input name="amount" type="number" step="0.01" value="0"></div><div class="field"><label>Note</label><textarea name="notes"></textarea></div><div class="actions"><button class="primary" data-busy="Salvataggio…">Salva</button><button type="button" class="secondary" onclick="go('home')">Annulla</button></div></form>`:`<div class="card">Crea prima un cliente in Configurazione.</div>`}`)}
+function manualForm(){const clients=activeClients();const selected=clients[0]?.id||'';return appShell(`<h1>Compenso una tantum</h1>${clients.length?`<form class="form" onsubmit="saveManual(event)"><div class="field"><label>Data</label><input name="entry_date" type="date" value="${prefillDate()}"></div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)">${clients.map(c=>`<option value="${c.id}"${c.id===selected?' selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div id="hierBlock">${hierAvailable(selected)?hierFields(selected,'')+'<input type="hidden" name="project_id" value="">':campiSenzaGerarchia(selected)}</div><div class="field"><label>Sede</label><select name="work_site">${sediOptions()}</select></div><div class="field"><label>Luogo/Città</label><input name="work_city"></div><div class="field"><label>Descrizione</label><textarea name="description"></textarea></div><div class="field"><label>Importo manuale</label><input name="amount" type="number" step="0.01" value="0"></div><div class="field"><label>Note</label><textarea name="notes"></textarea></div><div class="actions"><button class="primary" data-busy="Salvataggio…">Salva</button><button type="button" class="secondary" onclick="go('home')">Annulla</button></div></form>`:`<div class="card">Crea prima un cliente in Configurazione.</div>`}`)}
 async function saveManual(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));if(!guardDay(f.entry_date))return;const lin=f.wbs_id?wbsLineage(f.wbs_id):null;
-  if(hierAvailable(f.client_id)&&!f.wbs_id)return setMsg('Scegli su cosa registrare: progetto e commessa.',5000);
+  {const manca=cosaMancaNellaCatena(f.client_id,f.hier_project_id,f.engagement_id,f.wbs_id);if(manca)return setMsg(manca,6000);}
   const payload={entry_date:f.entry_date,client_id:f.client_id,project_id:(lin?lin.project.id:f.project_id)||null,wbs_id:f.wbs_id||null,activity_id:(lin&&lin.wbs.activity_id?lin.wbs.activity_id:f.activity_id)||null,work_site:norm(f.work_site)||null,work_city:norm(f.work_city)||null,description:f.description||null,amount:Number(f.amount||0),notes:f.notes||null};const {error}=await insertResilient('manual_entries',payload,['wbs_id']);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='timesheet';render()}
 function manualEdit(){const e=data.manualEntries.find(x=>x.id===state.edit);if(!e)return timesheet();const clients=activeClients();return appShell(`<h1>Modifica compenso una tantum</h1><form class="form" onsubmit="saveManualEdit(event)"><div class="field"><label>Data</label><input name="entry_date" type="date" value="${esc(e.entry_date)}"></div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)">${clients.map(c=>`<option value="${c.id}" ${c.id===e.client_id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div id="hierBlock">${hierAvailable(e.client_id)?hierFields(e.client_id,e.wbs_id||'')+'<input type="hidden" name="project_id" value="'+(e.project_id||'')+'">':campiSenzaGerarchia(e.client_id,e.project_id||'',e.activity_id||'')}</div><div class="field"><label>Sede</label><select name="work_site">${sediOptions(e.work_site==null?SEDE_DEFAULT:e.work_site)}</select></div><div class="field"><label>Luogo/Città</label><input name="work_city" value="${esc(e.work_city||'')}"></div><div class="field"><label>Descrizione</label><textarea name="description">${esc(e.description||'')}</textarea></div><div class="field"><label>Importo manuale</label><input name="amount" type="number" step="0.01" value="${Number(e.amount||0)}"></div><div class="field"><label>Note</label><textarea name="notes">${esc(e.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary" onclick="duplicateManual('${e.id}')">Duplica</button><button type="button" class="secondary danger" onclick="deleteManual('${e.id}')">Elimina</button><button type="button" class="secondary" onclick="go('timesheet')">Annulla</button></div></form>`)}
 async function saveManualEdit(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));if(!guardDay(f.entry_date))return;const lin=f.wbs_id?wbsLineage(f.wbs_id):null;
-  if(hierAvailable(f.client_id)&&!f.wbs_id)return setMsg('Scegli su cosa registrare: progetto e commessa.',5000);
+  {const manca=cosaMancaNellaCatena(f.client_id,f.hier_project_id,f.engagement_id,f.wbs_id);if(manca)return setMsg(manca,6000);}
   const payload={entry_date:f.entry_date,client_id:f.client_id,project_id:(lin?lin.project.id:f.project_id)||null,wbs_id:f.wbs_id||null,activity_id:(lin&&lin.wbs.activity_id?lin.wbs.activity_id:f.activity_id)||null,work_site:norm(f.work_site)||null,work_city:norm(f.work_city)||null,description:f.description||null,amount:Number(f.amount||0),notes:f.notes||null};const {error}=await updateResilient('manual_entries',payload,state.edit,['wbs_id']);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='timesheet';state.edit=null;render()}
 async function duplicateManual(idv){const e=data.manualEntries.find(x=>x.id===idv);if(!e)return;const copy={entry_date:new Date().toISOString().slice(0,10),client_id:e.client_id,project_id:e.project_id,activity_id:e.activity_id,wbs_id:e.wbs_id||null,work_site:e.work_site,work_city:e.work_city,description:e.description,amount:e.amount,notes:e.notes};const {error}=await insertResilient('manual_entries',copy,['wbs_id']);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='timesheet';render()}
 async function deleteManual(idv){if(!confirm('Eliminare questo consuntivo manuale?'))return;const {error}=await sb.from('manual_entries').delete().eq('id',idv);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='timesheet';render()}
@@ -2688,7 +2705,13 @@ function gruppiCliente(righe){
   const mappa=new Map();
   righe.forEach(r=>{const k=r.client_id||'';if(!mappa.has(k))mappa.set(k,[]);mappa.get(k).push(r)});
   return [...mappa.entries()]
-    .map(([client_id,voci])=>({client_id,voci,ore:voci.reduce((n,r)=>n+oreDiRiga(r),0)}))
+    .map(([client_id,tutte])=>{
+      const voci=tutte.filter(r=>r.kind!=='expense');
+      const spese=tutte.filter(r=>r.kind==='expense');
+      return {client_id,voci,spese,
+        ore:voci.reduce((n,r)=>n+oreDiRiga(r),0),
+        speseTot:spese.reduce((n,r)=>n+Number(r.amount||0),0)};
+    })
     .sort((a,b)=>String(clientName(a.client_id)).localeCompare(String(clientName(b.client_id)),'it',{sensitivity:'base'}));
 }
 // Un cliente con ventidue voci occupa uno schermo e mezzo, e per
@@ -2721,8 +2744,14 @@ async function apriChiudiCliente(id){
 }
 function elencoCliente(g,cercando){
   const std=Number(clientById(g.client_id)?.standard_hours||8)||8;
+  // Il conteggio parla del LAVORO. Prima diceva «7 voci · 8,0 h»
+  // contando anche le spese: sette righe per un giorno solo di lavoro,
+  // e il numero non tornava con niente.
   const conto=g.voci.length===1?'1 voce':g.voci.length+' voci';
   const ore=g.ore>0?` <span class="dot">·</span> ${fmtNum(g.ore,1)} h <span class="dot">·</span> ${fmtNum(g.ore/std,2)} gg/u`:'';
+  const contoSpese=g.spese.length
+    ? ` <span class="dot">·</span> ${g.spese.length} ${g.spese.length===1?'spesa':'spese'} ${fmtEUR(g.speseTot)}`
+    : '';
   const nome=esc(clientName(g.client_id));
   // Cercando, i gruppi si aprono tutti: chi cerca vuole vedere quello
   // che ha trovato, non sapere che da qualche parte, dentro un gruppo
@@ -2740,8 +2769,10 @@ function elencoCliente(g,cercando){
       <button type="button" class="cliToggle" aria-expanded="${chiuso?'false':'true'}"
         title="${chiuso?'Apri':'Chiudi'} ${nome}" onclick="apriChiudiCliente('${g.client_id}')">
         <span class="cliChev" aria-hidden="true">${chiuso?'▸':'▾'}</span>
-        <b>${nome}</b><span class="cliConto">${conto}${ore}</span></button>${azioni}</div>
-    ${chiuso?'':`<div class="list">${g.voci.map(r=>timesheetRow(r)).join('')}</div>`}</div>`;
+        <b>${nome}</b><span class="cliConto">${conto}${ore}${contoSpese}</span></button>${azioni}</div>
+    ${chiuso?'':`${g.voci.length?`<div class="list">${g.voci.map(r=>timesheetRow(r)).join('')}</div>`:''}
+      ${g.spese.length?`<div class="cliSpese">Spese di trasferta <span class="cliSpeseTot">${fmtEUR(g.speseTot)}</span></div>
+        <div class="list">${g.spese.map(r=>timesheetRow(r)).join('')}</div>`:''}`}</div>`;
 }
 function elencoMensile(filtrate,tutte){
   const cercando=!!normCerca(state.cerca);
@@ -3143,6 +3174,18 @@ function billingGroupsByClient(){const lines=groupSummary();const by={};lines.fo
 // rivalsa piu' 4.754,25 da fatturare senza non fanno la previsione.
 // E la differenza fra le due basi sta scritta in pagina, invece di
 // essere lasciata indovinare.
+// O il mese o l'anno, non tutti e due insieme.
+//
+// In alto si sceglieva un mese — «Febbraio 2026» — e sotto «La
+// cassa» e la soglia parlavano dell'anno intero, senza cambiare.
+// Due periodi nella stessa schermata, e niente che lo dicesse: i
+// numeri sembravano non rispondere al selettore.
+function billingVista(){return settingValue('billing_vista')==='anno'?'anno':'mese'}
+async function setBillingVista(v){
+  const r=await saveSetting('billing_vista',v);
+  if(r.error)return setMsg(motivoLeggibile(r.error),7000);
+  await reload();render();
+}
 function billingMeseCard(groups,total){
   const base=groups.reduce((s,g)=>s+Number(g.calc.subtotal||0),0);
   const riv=groups.reduce((s,g)=>s+Number(g.calc.inpsAmount||0),0);
@@ -3189,12 +3232,19 @@ ${f.pianificato>0?riga('+ Pianificato','giorni già a calendario, non ancora lav
 ${f.pianificato>0?riga('= Previsione ricavi '+year,'se tutto il pianificato si realizza',f.ricavi,true):''}
 </div></div>`;
 }
-function billing(){const groups=billingGroupsByClient();const total=groups.reduce((s,g)=>s+g.total,0);return appShell(`<h1>Fatturazione e incassi</h1>${monthSelector()}
+function billing(){const groups=billingGroupsByClient();const total=groups.reduce((s,g)=>s+g.total,0);
+  const vista=billingVista();
+  const tabs=`<div class="tabs"><button type="button" class="${vista==='mese'?'active':''}" onclick="setBillingVista('mese')">Il mese</button><button type="button" class="${vista==='anno'?'active':''}" onclick="setBillingVista('anno')">L’anno</button></div>`;
+  if(vista==='anno')return appShell(`<h1>Fatturazione e incassi</h1>${tabs}
+<h2>La cassa</h2>${billingCassaCard()}${forfettarioBarCard()}
+<h2>Maturato e previsione</h2>${billingAnnoCard()}
+    <div class="list"><div class="row" onclick="go('reportEconomico')"><div></div>
+      <div><div class="title">Report economico</div>
+      <div class="desc">Ricavi, costi e margine, mese per mese.</div></div><div class="chev">›</div></div></div>`);
+  return appShell(`<h1>Fatturazione e incassi</h1>${tabs}${monthSelector()}
 ${billingMeseCard(groups,total)}
 <div class="list">${groups.map(g=>{const st=headerStatus(g.client_id);return `<div class="row" onclick="openBillingClient('${g.client_id}')"><div></div><div><div class="title">${esc(clientName(g.client_id))}</div><div class="metricLine">${metricLine(g.hours,g.total)}</div><div class="desc">Base ${fmtEUR(g.calc.subtotal)} · Rivalsa ${fmtEUR(g.calc.inpsAmount)} · Bollo ${fmtEUR(g.calc.stampAmount)}</div><span class="tag ${statusClass(st)}">${statusLabel(st)}</span></div><div class="value">›</div></div>`}).join('')||emptyState('Nessuna riga fatturabile in questo mese.','+ Registra un consuntivo','newEntryChoice()')}</div>
 <div class="miniActions"><button type="button" class="miniBtn" onclick="go('fatturaCarica')" title="Carica l’XML di una fattura già emessa e confrontalo coi consuntivi">⤒ Carica fattura emessa</button></div>
-<h2>La cassa</h2>${billingCassaCard()}${forfettarioBarCard()}
-<h2>L’anno</h2>${billingAnnoCard()}
     <div class="list"><div class="row" onclick="go('reportEconomico')"><div></div>
       <div><div class="title">Report economico</div>
       <div class="desc">Ricavi, costi e margine, mese per mese.</div></div><div class="chev">›</div></div></div>`)}
@@ -4008,7 +4058,13 @@ function appearance(){return appShell(`<div class="screenTitle">Aspetto / Tema</
 function exportTimesheetViewOptions(){const clients=activeClients();const selected=clients[0]?.id||'';return `<div class="field"><label>Mese</label><input name="month" type="month" value="${state.month}"></div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)"><option value="">Tutti i clienti (solo per archivio)</option>${clients.map(c=>`<option value="${c.id}"${c.id===selected?' selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Cliente/Progetto</label><select name="project_id"><option value="">Tutti i progetti</option>${projectOptions(selected)}</select></div><div class="field"><label>Includi importi</label><select name="include_amount"><option value="false">No, solo dettaglio operativo</option><option value="true">Sì, includi importi</option></select></div>`}
 function exportTimesheet(){return appShell(`<div class="screenTitle">Export Timesheet Excel</div><p class="sub">Scarica il dettaglio mensile da inviare al cliente.</p><form class="form" onsubmit="downloadTimesheetExcel(event)">${exportTimesheetViewOptions()}<div class="actions"><button class="primary">Scarica Excel</button><button type="button" class="secondary" onclick="go('settings')">Annulla</button></div></form>`)}
 
-function clients(){return appShell(`<h1>Clienti</h1><form class="form" onsubmit="addClient(event)"><div class="field"><label>Nome cliente</label><input name="name" required></div><div class="field"><label>Codice cliente</label><input name="code" maxlength="5" placeholder="Es. SO" oninput="this.value=normCode(this.value)"><div class="small">Da 2 a 5 lettere o cifre. Entra nel codice di ogni commessa: una volta usato non si cambia piu'.</div></div><div class="field"><label>Partita IVA</label><input name="vat_number" inputmode="numeric" placeholder="Es. 11695380961"><div class="small">Serve a riconoscere il cliente quando carichi una fattura emessa: è l’unico abbinamento certo.</div></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h">Tariffa giornaliera 8h</option><option value="monthly_flat">Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="0"></div><button class="primary">Aggiungi cliente</button></form>${sortControl('clients')}<div class="list">${sortEntities('clients',data.clients).map(c=>`<div class="row" onclick="${wbsReady()?`openClient('${c.id}')`:`editClient('${c.id}')`}"><div></div><div><div class="title">${esc(c.name)}</div><div class="desc">${c.compensation_type==='daily_rate_8h'?'Tariffa giornaliera 8h · '+fmtEUR(c.daily_rate||0):'Una tantum mensile'} · ${c.active?'Attivo':'Disattivo'}</div></div>${moveBtns('clients',c.id)}</div>`).join('')||emptyForm('Nessun cliente ancora inserito.')}</div>`)}
+function clients(){return appShell(`<h1>Clienti</h1>${state.nuovoCliente?`<form class="form" onsubmit="addClient(event)"><div class="field"><label>Nome cliente</label><input name="name" required></div><div class="field"><label>Codice cliente</label><input name="code" maxlength="5" placeholder="Es. SO" oninput="this.value=normCode(this.value)"><div class="small">Da 2 a 5 lettere o cifre. Entra nel codice di ogni commessa: una volta usato non si cambia piu'.</div></div><div class="field"><label>Partita IVA</label><input name="vat_number" inputmode="numeric" placeholder="Es. 11695380961"><div class="small">Serve a riconoscere il cliente quando carichi una fattura emessa: è l’unico abbinamento certo.</div></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h">Tariffa giornaliera 8h</option><option value="monthly_flat">Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="0"></div><button class="primary">Aggiungi cliente</button></form>`:''}${state.nuovoCliente?'':`<div class="miniActions"><button type="button" class="miniBtn" onclick="apriNuovoCliente()">+ Nuovo cliente</button></div>`}${sortControl('clients')}<div class="list">${sortEntities('clients',data.clients).map(c=>`<div class="row" onclick="${wbsReady()?`openClient('${c.id}')`:`editClient('${c.id}')`}"><div></div><div><div class="title">${esc(c.name)}</div><div class="desc">${c.compensation_type==='daily_rate_8h'?'Tariffa giornaliera 8h · '+fmtEUR(c.daily_rate||0):'Una tantum mensile'} · ${c.active?'Attivo':'Disattivo'}</div></div>${moveBtns('clients',c.id)}</div>`).join('')||emptyForm('Nessun cliente ancora inserito.')}</div>`)}
+// La pagina si apriva COL MODULO GIA' APERTO in cima, e la lista dei
+// clienti — che e' quello che si viene a vedere nove volte su dieci
+// — cominciava sotto cinque campi vuoti. Il modulo adesso si
+// chiede, con un tocco.
+function apriNuovoCliente(){state.nuovoCliente=true;render()}
+function chiudiNuovoCliente(){state.nuovoCliente=false;render()}
 function editClient(id){navigateTo('clientEdit',{edit:id})}
 // \u2500\u2500\u2500 Policy rimborsi: una pagina sua \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 // Stava in fondo al modulo di modifica cliente, una tendina per voce,
@@ -4051,7 +4107,7 @@ function clientEdit(){const c=clientById(state.edit);if(!c)return clients();retu
 async function addClient(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));
   // il codice cliente regge tutta la catena dei codici sotto: se non
   // lo si scrive, dal cliente non si riesce piu' a creare un progetto
-  const payload={name:norm(f.name),code:normCode(f.code)||null,compensation_type:f.compensation_type,daily_rate:Number(f.daily_rate||0),standard_hours:8,vat_number:norm(f.vat_number)||null,active:true};const res=await insertResilient('clients',payload,['code','vat_number']);if(res.error)return setMsg(motivoLeggibile(res.error),7000);const avviso=avvisoScartate(res);await reload();state.view='clients';render();if(avviso)setMsg(avviso,12000)}
+  const payload={name:norm(f.name),code:normCode(f.code)||null,compensation_type:f.compensation_type,daily_rate:Number(f.daily_rate||0),standard_hours:8,vat_number:norm(f.vat_number)||null,active:true};const res=await insertResilient('clients',payload,['code','vat_number']);if(res.error)return setMsg(motivoLeggibile(res.error),7000);const avviso=avvisoScartate(res);await reload();state.view='clients';state.nuovoCliente=false;render();if(avviso)setMsg(avviso,12000)}
 // Se il modulo non contiene nemmeno un campo della policy, la policy
 // non si tocca. Senza questa riga, salvare il cliente da un modulo
 // senza editor scriverebbe una policy vuota e i limiti sparirebbero
@@ -4128,7 +4184,8 @@ function projectEdit(){
         <input name="short_code" maxlength="6" value="${esc(p.short_code||'')}" ${bloccato?'readonly':'oninput="this.value=normCode(this.value)"'}>
         <div class="small">${bloccato?'Bloccato: su questo progetto ci sono gia\' delle registrazioni, il codice non si cambia.':'Entra nel codice del progetto e in quelli delle sue commesse.'}</div></div>
       <div class="field"><label>Nome del progetto</label><input name="name" value="${esc(p.name)}" required></div>
-      <div class="field"><label>Cliente finale</label><input name="end_client_name" value="${esc(p.end_client_name||'')}" placeholder="Se diverso dal cliente che paga"></div>
+      <div class="field"><label>Cliente finale</label><input name="end_client_name" value="${esc(p.end_client_name||clientName(p.client_id))}" required placeholder="Per chi si lavora davvero">
+        <div class="small">E' la prima cosa che si legge quando registri le ore. Se coincide col cliente che paga, riscrivilo lo stesso.</div></div>
       <div class="field"><label>Unità di fatturazione</label><select name="billing_unit">
         <option value="day" ${p.billing_unit!=='hour'?'selected':''}>Giornate</option>
         <option value="hour" ${p.billing_unit==='hour'?'selected':''}>Ore</option></select></div>
@@ -5106,16 +5163,17 @@ function projectNew(){
     la commessa e la voce su cui registrare le apre l'app da sé.</p>
     <form class="form" onsubmit="addProjectOfClient(event)">
       <div class="field"><label>Nome</label><input name="name" required placeholder="Es. EQUANS" autofocus></div>
+      <div class="field"><label>Cliente finale</label><input name="end_client_name" required value="${esc(c.name)}" placeholder="Per chi si lavora davvero">
+        <div class="small">E' la prima cosa che si legge quando registri le ore. Se coincide con ${esc(c.name)}, lascialo così.</div></div>
       <div class="field"><label>Codice breve</label>
         <input name="short_code" maxlength="6" required placeholder="Es. EQU" oninput="this.value=normCode(this.value);previewPrjCode()">
         <div class="small">Anteprima: <span id="prjCodePreview">${esc(c.code)}-…</span>${usati.length?" · già usati: "+usati.map(esc).join(", "):""}</div></div>
-      <details class="moreFields"><summary>Altri dettagli (fatturazione, date)</summary>
-        <div class="field"><label>Cliente finale</label><input name="end_client_name" placeholder="Solo se in fattura va un nome diverso"></div>
+      
         <div class="field"><label>Unità di fatturazione</label><select name="billing_unit"><option value="day">Giornate</option><option value="hour">Ore</option></select></div>
         <div class="field"><label>Descrizione predefinita della riga di fattura</label><input name="invoice_line_description" placeholder="Se vuoto si usa il nome del progetto"></div>
         <div class="field"><label>Data di inizio</label><input name="start_date" type="date"></div>
         <div class="field"><label>Data di fine</label><input name="end_date" type="date"></div>
-      </details>
+      
       <div class="actions"><button class="primary" data-busy="Creazione…">Crea progetto</button>
         <button type="button" class="secondary" onclick="openClient('${c.id}')">Annulla</button></div>
     </form>`);
@@ -5168,6 +5226,21 @@ async function addProjectOfClient(ev){
    Compare solo dove la gerarchia esiste davvero. Se un cliente non ha
    ancora commesse, il modulo resta quello di prima: cosi' chi non ha
    ancora migrato tutto continua a lavorare. */
+// Che cosa manca DAVVERO nella catena, e che si possa toccare.
+//
+// Il blocco diceva sempre «scegli l'attivita' della commessa», anche
+// quando quel menu non era a schermo: finche' non scegli il progetto,
+// commessa e attivita' restano vuote, e un livello vuoto resta
+// nascosto perche' non c'e' niente da scegliere. Risultato: l'app
+// chiedeva un campo invisibile, e il modulo sembrava rotto senza che si
+// capisse cosa volesse.
+function cosaMancaNellaCatena(cli,prj,eng,wbs){
+  if(!hierAvailable(cli))return null;
+  if(wbs)return null;
+  if(!prj)return 'Scegli il progetto / cliente finale: da lì l’app tira fuori la commessa.';
+  if(!eng)return 'Scegli la commessa di '+(projectName(prj)||'quel progetto')+'.';
+  return 'Scegli su quale attività della commessa registrare le ore.';
+}
 function hierAvailable(clientId){
   return wbsReady() && projectsOfClient(clientId).some(p=>engagementsOfProject(p.id).some(e=>wbsAperte(e.id).length));
 }
@@ -5210,6 +5283,29 @@ function apertiEng(projId){return engagementsOfProject(projId).filter(e=>STATI_A
 // ne portava una il salvataggio partiva col campo vuoto — e chi ha il
 // database che la pretende restava bloccato, con un messaggio che
 // nominava un campo invisibile a schermo.
+// Dove finiscono le ore, scritto per esteso. I livelli con una scelta
+// sola restano nascosti — non c'e' niente da scegliere — ma
+// nasconderli faceva sparire anche l'INFORMAZIONE: con un progetto solo
+// non si vedeva piu' su quale progetto, cioe' su quale cliente
+// finale, si stesse scaricando il lavoro. Il codice WBS da solo non lo
+// dice: SOL-EQU-2026-001-10 lo sa leggere chi lo ha scritto.
+function catenaWbs(wbsId){
+  const lin=wbsId?wbsLineage(wbsId):null;
+  if(!lin)return 'Le ore si registrano sulla commessa. In fattura confluiscono nel progetto.';
+  // Prima viene PER CHI si lavora: il cliente finale, se c'e';
+  // altrimenti il cliente dell'anagrafica, quello che paga. E' il nome
+  // che si riconosce al volo, e il codice WBS da solo non lo dice.
+  // Il progetto viene dopo, e solo se aggiunge qualcosa: spesso si
+  // chiama come il cliente, e ripeterlo sarebbe rumore.
+  const pezzi=[];
+  const fin=norm(lin.project.end_client_name)||clientName(lin.client_id);
+  const prj=projectName(lin.project.id);
+  if(fin)pezzi.push(fin);
+  if(prj&&prj!==fin)pezzi.push(prj);
+  if(lin.engagement&&lin.engagement.name)pezzi.push(lin.engagement.name);
+  pezzi.push(lin.wbs.code);
+  return pezzi.join(' · ')+(lin.wbs.billable?'':' · non fatturabile');
+}
 function hierFields(clientId,wbsId,attSel=''){
   const lin=wbsId?wbsLineage(wbsId):null;
   const prjList=apertiPrj(clientId);
@@ -5227,7 +5323,7 @@ function hierFields(clientId,wbsId,attSel=''){
       <select name="engagement_id" onchange="hierChanged(this.form,'engagement')">${prjSel?engagementOptionsOfProject(prjSel,engSel):'<option value="">— prima scegli il progetto —</option>'}</select></div>
     <div class="field" id="wbsField" ${wList.length<2?'hidden':''}><label>Attività della commessa</label>
       <select name="wbs_id" onchange="hierChanged(this.form,'wbs')">${engSel?wbsOptions(engSel,wSel):'<option value="">— prima scegli la commessa —</option>'}</select></div>
-    <div class="small" id="wbsHint">${wSel&&wbsById(wSel)?esc(wbsById(wSel).code)+(wbsById(wSel).billable?'':' · non fatturabile'):'Le ore si registrano sulla commessa. In fattura confluiscono nel progetto.'}</div>
+    <div class="small" id="wbsHint">${catenaWbs(wSel)}</div>
     <div class="field" id="attField" ${attDallaWbs?'hidden':''}><label>Tipo di attività</label>
       <select name="activity_id">${activityOptions(attSel)}</select>
       <div class="small">Serve ai report e ai colori. La «commessa» qui sopra è un'altra cosa: questo lo scegli solo quando la commessa non ne porta già uno.</div></div>`;
@@ -5268,11 +5364,7 @@ function hierChanged(form,livello){
     mostra('attField',!(w&&w.activity_id));
   }
   const hint=document.getElementById('wbsHint');
-  if(hint){
-    const w=form.wbs_id&&form.wbs_id.value?wbsById(form.wbs_id.value):null;
-    hint.textContent=w?(w.code+(w.billable?'':' · non fatturabile')):
-      'Le ore si registrano sulla commessa. In fattura confluiscono nel progetto.';
-  }
+  if(hint)hint.textContent=catenaWbs(form.wbs_id&&form.wbs_id.value);
 }
 
 // Quando si sceglie il cliente, si rifanno commessa/progetto/WBS
@@ -5951,6 +6043,8 @@ Object.assign(window,{
   taxSettings,
   fatturatoDetail,
   billingMeseCard,
+  billingVista,setBillingVista,
+  apriNuovoCliente,chiudiNuovoCliente,
   billingCassaCard,
   billingAnnoCard,
   expensesForYear,

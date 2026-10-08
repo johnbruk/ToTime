@@ -123,6 +123,10 @@ console.log('\n=== LA CASSA TORNA, E DICE SU CHE BASE ===');
 {
   const pg=await apri();
   await pg.evaluate(()=>window.go('billing'));
+  // la cassa e il prospetto dell’anno stanno nella vista «L’anno»:
+  // la pagina si apre sul mese, ed è giusto così
+  await pg.evaluate(()=>window.setBillingVista('anno'));
+  await pg.waitForTimeout(500);
   await pg.waitForTimeout(600);
   const t=await testo(pg);
   const daInc=euro(t,'Da incassare');
@@ -147,6 +151,10 @@ console.log('\n=== IL PROSPETTO DELL’ANNO SOMMA DAVVERO ===');
   // esattamente l'errore che stavo per fare.
   const pg=await apri();
   await pg.evaluate(()=>window.go('billing'));
+  // la cassa e il prospetto dell’anno stanno nella vista «L’anno»:
+  // la pagina si apre sul mese, ed è giusto così
+  await pg.evaluate(()=>window.setBillingVista('anno'));
+  await pg.waitForTimeout(500);
   await pg.waitForTimeout(600);
   const t=await testo(pg);
   const gia=euro(t,'Già fatturato');
@@ -170,6 +178,10 @@ console.log('\n=== LE DUE BASI SONO DIVERSE, E LA PAGINA DICE PERCHÉ ===');
   // non era spiegata da nessuna parte: sembrava un errore.
   const pg=await apri();
   await pg.evaluate(()=>window.go('billing'));
+  // la cassa e il prospetto dell’anno stanno nella vista «L’anno»:
+  // la pagina si apre sul mese, ed è giusto così
+  await pg.evaluate(()=>window.setBillingVista('anno'));
+  await pg.waitForTimeout(500);
   await pg.waitForTimeout(600);
   const t=await testo(pg);
   ok(/al netto/.test(t),'dice che il prospetto dell’anno è al netto');
@@ -185,6 +197,10 @@ console.log('\n=== SE SI È FATTURATO PIÙ DEL MATURATO, NON SPARISCE ===');
   // l'eccedenza si mostra per quello che è.
   const pg=await apri(`S.billing_headers[1].total_amount=20000;S.billing_headers[1].invoice_total_amount=20800;`);
   await pg.evaluate(()=>window.go('billing'));
+  // la cassa e il prospetto dell’anno stanno nella vista «L’anno»:
+  // la pagina si apre sul mese, ed è giusto così
+  await pg.evaluate(()=>window.setBillingVista('anno'));
+  await pg.waitForTimeout(500);
   await pg.waitForTimeout(600);
   const t=await testo(pg);
   const gia=euro(t,'Già fatturato');
@@ -196,6 +212,10 @@ console.log('\n=== SE SI È FATTURATO PIÙ DEL MATURATO, NON SPARISCE ===');
      `${gia} − ${ant} = ${gia-ant} contro ${mat}`);
   await pg.close();
 }
+
+// l’impostazione si ricorda: la riporto sul mese, se no il prossimo che
+// apre questa pagina la trova sull’anno senza capire perché
+{const pg=await apri();await pg.evaluate(()=>window.setBillingVista('mese'));await pg.waitForTimeout(400);await pg.close();}
 
 await b.close(); srv.close();
 console.log(`\n=== fatturazione chiara: OK ${pass} · KO ${fail} ===`);

@@ -139,8 +139,12 @@ assert.match(appNode.innerHTML, /Fatturazione e incassi/);
 // tre blocchi della pagina: cosa devo fare, cosa aspetto, come va
 // l'anno. Erano quattro schede impilate con «da fatturare» ripetuto due
 // volte su basi diverse.
+// La pagina ha due viste, «Il mese» e «L'anno»: prima mescolava il
+// mese scelto in alto con numeri dell'anno intero che non cambiavano
+// mai. All'apertura si entra dal mese, e le due schede ci sono
+// entrambe per passare da una all'altra.
+assert.match(appNode.innerHTML, /Il mese/);
+assert.match(appNode.innerHTML, /L’anno/);
 assert.match(appNode.innerHTML, /Da fatturare/);
-assert.match(appNode.innerHTML, /Da incassare/);
-assert.match(appNode.innerHTML, /Maturato e previsione/);
 
 console.log('navigation regression test passed');
