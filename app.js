@@ -3063,6 +3063,7 @@ function griglia(){
         <select id="g-attivita" aria-label="Attività" hidden>${opts(sortEntities('activities',data.activities.filter(a=>a.active)),'— attività —')}</select>
         <button type="button" class="miniBtn" onclick="addGridRow()">+ Aggiungi riga</button>
       </div>
+      <div class="small" id="grigliaNota" style="padding:0 14px 10px" hidden></div>
       <div class="calLegend" style="padding:10px 14px">
         <span><i class="sw we"></i>Weekend</span><span><i class="sw holiday"></i>Festivo</span>
         <span><i class="sw ferie"></i>Giorno off</span><span><i class="sw worked"></i>Oggi</span>
@@ -5311,7 +5312,7 @@ function cosaMancaNellaCatena(cli,prj,eng,wbs){
   if(!prjPercorribili(cli,prj).length)return null;
   if(!prj)return 'Scegli il progetto / cliente finale: da lì l’app tira fuori la commessa.';
   if(!engPercorribili(prj,eng).length)
-    return 'Il progetto '+(projectName(prj)||'scelto')+' non ha una commessa con attività aperte: scegline un altro qui sopra, oppure aggiungi la commessa da Configurazione › Progetti.';
+    return 'Il progetto '+(projectName(prj)||'scelto')+' non ha nessuna commessa: le ore si registrano dentro una commessa. Creala col pulsante qui sopra, oppure scegli un altro progetto.';
   if(!eng)return 'Scegli la commessa di '+(projectName(prj)||'quel progetto')+'.';
   if(!wbsSelezionabili(eng,wbs).length){
     const e=engagementById(eng);
@@ -5375,19 +5376,93 @@ function engPercorribili(projId,selected=''){return engSelezionabili(projId,sele
 function prjPercorribili(clientId,selected=''){return prjSelezionabili(clientId,selected).filter(p=>engPercorribili(p.id).length||p.id===selected)}
 // Un progetto che non porta a niente non compare piu' nel menu. Ma
 // spariva in silenzio, e cercarlo senza trovarlo e' solo un altro modo
-// di restare fermi: qui si dice il nome e dove si aggiunge cio' che
-// manca, cosi' l'assenza si spiega da se'.
+// di restare fermi. Qui si dice il fatto — quella commessa non esiste —
+// e si da' il gesto per crearla sul posto, senza uscire dal modulo e
+// senza perdere quello che si e' scritto: era proprio quello che
+// mancava, perche' sapere cosa manca non e' ancora poterlo fare.
+function etichettaProgetto(p){return p.code?p.code+' · '+p.name:p.name}
+function bottoneCreaCommessa(p){
+  return ` <button type="button" class="miniBtn" onclick="creaCommessaDi('${p.id}')">+ Crea la commessa di ${esc(p.name)}</button>`;
+}
 function notaVicoliCiechi(clientId,projId){
   const scelto=projId?projectById(projId):null;
   if(scelto&&!engPercorribili(scelto.id).length)
-    return 'Il progetto '+(scelto.code||scelto.name)+' non ha una commessa con attività aperte: la aggiungi da Configurazione › Progetti.';
+    return esc(etichettaProgetto(scelto))+' non ha nessuna commessa, e le ore si registrano dentro una commessa.'
+      +bottoneCreaCommessa(scelto);
   const fuori=projectsOfClient(clientId)
-    .filter(p=>(!p.status||STATI_APERTI.includes(p.status))&&!engPercorribili(p.id).length)
-    .map(p=>p.code||p.name);
+    .filter(p=>(!p.status||STATI_APERTI.includes(p.status))&&!engPercorribili(p.id).length);
   if(!fuori.length)return '';
   if(fuori.length===1)
-    return 'Il progetto '+fuori[0]+' non è in elenco: non ha ancora una commessa con attività aperte. La aggiungi da Configurazione › Progetti.';
-  return 'Non sono in elenco '+fuori.join(', ')+': non hanno ancora una commessa con attività aperte. Le commesse si aggiungono da Configurazione › Progetti.';
+    return esc(etichettaProgetto(fuori[0]))+' non è in elenco: non ha nessuna commessa creata, e le ore si registrano dentro una commessa.'
+      +bottoneCreaCommessa(fuori[0]);
+  return 'Questi progetti non sono in elenco perché non hanno nessuna commessa creata: '
+    +fuori.map(p=>esc(etichettaProgetto(p))).join(', ')+'.'
+    +fuori.map(bottoneCreaCommessa).join('');
+}
+// «Quindi valla a creare»: la commessa nasce qui, con la stessa ricetta
+// con cui l'app la crea da se' quando nasce un progetto — anno in
+// corso, nome del progetto, e la voce su cui registrare. Il codice lo
+// mette il database.
+// Niente reload() e niente fetchAll(): ricaricare ridisegna la pagina
+// — fetchAll comincia proprio con state.loading=true; render() — e
+// ridisegnare il modulo vuol dire portare via data, ore e descrizione
+// a chi le aveva appena scritte. E' il difetto che abbiamo gia' pagato
+// una volta oggi, e crearlo di nuovo qui sarebbe stato peggio: uno
+// clicca per sbloccarsi e perde quello che stava scrivendo.
+// Quindi si scrive con insertReturningResilient, che RESTITUISCE la
+// riga vera — col codice che compone il database — la si mette nei
+// dati in memoria, e si rifa' solo il blocco della gerarchia, con il
+// progetto appena sbloccato gia' scelto. Il resto del modulo non si
+// accorge di niente.
+async function creaCommessaDi(projectId){
+  const p=projectById(projectId);
+  if(!p)return setMsgLeggero('Quel progetto non c\'è più: ricarica la pagina.',6000);
+  const nome=norm(p.name)||p.code||'Commessa';
+  const anno=new Date().getFullYear();
+  const e1=await insertReturningResilient('engagements',{project_id:p.id,client_id:p.client_id,
+    year:anno,name:nome+' '+anno,status:'active'});
+  if(e1.error||!e1.data)
+    return setMsgLeggero('La commessa non si è creata: '+messaggioCommessa(e1.error||'nessuna riga restituita'),9000);
+  const eng=e1.data;
+  data.engagements=(data.engagements||[]).concat([eng]);
+  // La voce su cui registrare: una commessa senza attività non e' un
+  // posto dove mettere le ore, quindi nasce insieme a lei.
+  const w1=await insertReturningResilient('wbs_items',{engagement_id:eng.id,activity_code:'10',
+    name:nome,kind:'activity',billable:true,status:'active',sort_order:10});
+  if(w1.error||!w1.data)
+    return setMsgLeggero('La commessa '+(eng.code||nome)+' c\'è, ma la voce su cui registrare no: '
+      +motivoLeggibile(w1.error||'nessuna riga restituita')+' La aggiungi dalla scheda della commessa.',9000);
+  data.wbsItems=(data.wbsItems||[]).concat([w1.data]);
+  const form=document.querySelector('#app form.form');
+  const spese=document.getElementById('speseHier');
+  const blocco=spese||document.getElementById('hierBlock');
+  if(form&&blocco){
+    const cli=(form.client_id&&form.client_id.value)||p.client_id;
+    blocco.innerHTML=spese
+      ? campiCommessaSpesa(cli,{})
+      : hierFields(cli,'','')+'<input type="hidden" name="project_id" value="">';
+    if(form.hier_project_id){
+      form.hier_project_id.value=projectId;
+      hierChanged(form,'project');
+    }
+    return setMsgLeggero('Commessa '+(eng.code||nome)+' creata: ora puoi registrarci le ore.',6000);
+  }
+  // Dalla griglia: si rifa' la cascata e si sceglie il progetto appena
+  // sbloccato, senza ridisegnare — anche qui ridisegnare vorrebbe dire
+  // portare via le scelte appena fatte.
+  if(document.getElementById('g-cliente')){
+    gridClienteCambiato();
+    const sel=document.getElementById('g-progetto');
+    if(sel){sel.value=projectId;gridProgettoCambiato();}
+    // La griglia non sceglie da se' come il modulo, ma qui la commessa
+    // appena creata e' l'unica possibile: lasciarla da scegliere
+    // vorrebbe dire chiedere una cosa con una sola risposta.
+    const com=document.getElementById('g-commessa');
+    if(com){com.value=eng.id;gridCommessaCambiata();}
+    return setMsgLeggero('Commessa '+(eng.code||nome)+' creata: ora puoi aggiungere la riga.',6000);
+  }
+  render();
+  setMsg('Commessa '+(eng.code||nome)+' creata su '+etichettaProgetto(p)+'.',5000);
 }
 // In gerarchia il modulo mostrava «Attività della commessa», che e'
 // la WBS: un'altra cosa con quasi lo stesso nome. L'attività vera
@@ -5441,7 +5516,7 @@ function hierFields(clientId,wbsId,attSel=''){
     <div class="field" id="wbsField" ${wList.length<2?'hidden':''}><label>Attività della commessa</label>
       <select name="wbs_id" onchange="hierChanged(this.form,'wbs')">${engSel?wbsOptions(engSel,wSel,wList):'<option value="">— prima scegli la commessa —</option>'}</select></div>
     <div class="small" id="wbsHint">${catenaWbs(wSel)}</div>
-    <div class="small" id="hierNota" ${nota?'':'hidden'}>${esc(nota)}</div>
+    <div class="small" id="hierNota" ${nota?'':'hidden'}>${nota}</div>
     <div class="field" id="attField" ${attDallaWbs?'hidden':''}><label>Tipo di attività</label>
       <select name="activity_id">${activityOptions(attSel)}</select>
       <div class="small">Serve ai report e ai colori. La «commessa» qui sopra è un'altra cosa: questo lo scegli solo quando la commessa non ne porta già uno.</div></div>`;
@@ -5488,7 +5563,7 @@ function hierChanged(form,livello){
   const nota=document.getElementById('hierNota');
   if(nota){
     const testo=notaVicoliCiechi(form.client_id?form.client_id.value:'',form.hier_project_id?form.hier_project_id.value:'');
-    nota.textContent=testo;
+    nota.innerHTML=testo;
     nota.hidden=!testo;
   }
 }
@@ -5539,17 +5614,30 @@ function gridClienteCambiato(){
     com.hidden=true;
     document.getElementById('g-attivita').hidden=false;
     document.getElementById('g-wbs').hidden=true;
-    gridFillProjects();return;
+    gridFillProjects();notaGriglia();return;
   }
   document.getElementById('g-attivita').hidden=true;
   document.getElementById('g-wbs').hidden=false;
   gridProgettoCambiato();
+}
+// La regola vale dove si offrono progetti, non solo nel modulo: se
+// qui un progetto non compare, qui si dice perche' e qui si crea la
+// commessa che manca. Tenere la spiegazione in una schermata sola
+// voleva dire che nell'altra il progetto spariva in silenzio.
+function notaGriglia(){
+  const el=document.getElementById('grigliaNota');
+  if(!el)return;
+  const c=document.getElementById('g-cliente')?.value||'';
+  const p=document.getElementById('g-progetto')?.value||'';
+  const t=(c&&hierAvailable(c))?notaVicoliCiechi(c,p):'';
+  el.innerHTML=t; el.hidden=!t;
 }
 // Il progetto viene prima: e' lui a reggere le commesse
 function gridProgettoCambiato(){
   const p=document.getElementById('g-progetto').value;
   const com=document.getElementById('g-commessa');
   if(com)com.innerHTML=p?engagementOptionsOfProject(p,'',engPercorribili(p)):'<option value="">— prima scegli il progetto —</option>';
+  notaGriglia();
   gridCommessaCambiata();
 }
 function gridCommessaCambiata(){
@@ -6018,7 +6106,7 @@ Object.assign(window,{
   gridClienteCambiato,gridCommessaCambiata,gridProgettoCambiato,
   hierChanged,refreshHierForForm,wbsLineage,hierAvailable,
   normCode,wbsReady,engagementsOf,openEngagement,openProjectWbs,editWbs,setEngFilter,
-  openClient,openProject,nuovoProgettoDi,nuovaCommessaDi,nuovoProgettoScegliCliente,
+  openClient,openProject,nuovoProgettoDi,nuovaCommessaDi,creaCommessaDi,nuovoProgettoScegliCliente,
   importaFile,eseguiImport,annullaImport,
   previewEngCode,previewPrjCode,previewWbsCode,addEngagement,saveEngagement,addEngagementRef,
   addProjectOfClient,saveProjectFull,addWbs,saveWbs,deleteWbs,

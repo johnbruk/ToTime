@@ -292,10 +292,11 @@ console.log('\n=== UNA COMMESSA CHE NON ESISTE NON SI CHIEDE ===');
   const t0=await testo(pg);
   ok(/SOL-BOU/.test(t0),
      'ma non sparisce in silenzio: il nome si legge',(t0.match(/SOL-BOU[^.]{0,80}/)||[''])[0]||'NON SI LEGGE');
-  ok(/non ha ancora una commessa/.test(t0),
-     'e si legge perché non c’è, non solo che non c’è',(t0.match(/non è in elenco[^.]{0,80}/)||[''])[0]);
-  ok(/Progetti/.test((t0.match(/SOL-BOU[\s\S]{0,160}/)||[''])[0]),
-     'e dove si aggiunge quello che manca',(t0.match(/aggiungi[^.]{0,60}/)||[''])[0]);
+  ok(/non ha nessuna commessa creata/.test(t0),
+     'e si legge PERCHE non c’è: quella commessa non esiste',(t0.match(/non è in elenco[^.]{0,80}/)||[''])[0]);
+  ok(await pg.evaluate(()=>{const b=document.querySelector('#hierNota button');
+       return !!b&&/Crea la commessa/.test(b.textContent)}),
+     'e il modo di crearla è lì, non il rimando a un’altra pagina');
   // la riga si salva: l'unica destinazione possibile si prende da sé
   await pg.evaluate(()=>{
     const f=document.querySelector('#app form.form');
@@ -385,6 +386,80 @@ console.log('\n=== OGNI COSA CHE L’APP CHIEDE È A SCHERMO, CON VOCI DENTRO ==
 }
 
 
+console.log('\n=== LA COMMESSA CHE NON ESISTE, SI CREA DA QUI ===');
+{
+  // «Dovresti dare il messaggio che non esiste nessuna commessa
+  // creata. Quindi valla a creare.» Sapere cosa manca non e' ancora
+  // poterlo fare: il modulo dice il fatto e da' il gesto, sul posto.
+  const pg=await apri(`
+    S.projects.push({id:'bou',client_id:'sol',code:'SOL-BOU',name:'Bouygues',end_client_name:'Bouygues',active:true,status:'active'});`);
+  await pg.evaluate(()=>window.go('dailyForm'));
+  await pg.waitForTimeout(600);
+  await scegliCliente(pg,'sol');
+  const t0=await testo(pg);
+  ok(/non ha nessuna commessa creata/.test(t0),'dice il fatto: quella commessa non esiste',
+     (t0.match(/SOL-BOU[^.]{0,90}/)||[''])[0]||'non lo dice');
+  const bott=await pg.evaluate(()=>{
+    const b=document.querySelector('#hierNota button');
+    return b?{testo:b.textContent.trim(),tipo:b.getAttribute('type')}:null;
+  });
+  ok(!!bott&&/Crea la commessa/.test(bott.testo),'e il gesto per crearla e li\'',bott?bott.testo:'nessun pulsante');
+  ok(bott&&bott.tipo==='button','ed e un pulsante, non un invio del modulo',bott?String(bott.tipo):'—');
+  // scrivo data, ore e descrizione PRIMA: creare la commessa non deve
+  // portarle via, che e' il difetto che avevamo gia' pagato una volta
+  await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
+    f.entry_date.value='2026-02-05'; f.hours.value='7'; f.description.value='prova';});
+  await pg.evaluate(()=>document.querySelector('#hierNota button').click());
+  await pg.waitForTimeout(1500);
+  const dopo=await pg.evaluate(()=>{
+    const f=document.querySelector('#app form.form');
+    const E=window.__stores.engagements||[], W=window.__stores.wbs_items||[];
+    return {eng:E.length,wbs:W.length,codice:(E.slice(-1)[0]||{}).code||'',
+      codiceWbs:(W.slice(-1)[0]||{}).code||'',
+      prj:f.hier_project_id?f.hier_project_id.value:'',wbsSel:f.wbs_id?f.wbs_id.value:'',
+      data:f.entry_date.value,ore:f.hours.value,desc:f.description.value,
+      nota:document.getElementById('hierNota')?.hidden};
+  });
+  ok(dopo.eng===2&&dopo.wbs===2,'la commessa nasce, e con lei la voce su cui registrare',
+     `${dopo.eng} commesse · ${dopo.wbs} voci`);
+  ok(/^SOL-BOU-\d{4}-001$/.test(dopo.codice),'col codice che compone il database',dopo.codice||'senza codice');
+  ok(dopo.codiceWbs===dopo.codice+'-10','e la voce prende il codice dalla commessa',dopo.codiceWbs||'senza codice');
+  ok(dopo.prj==='bou','il modulo resta su Bouygues, che era dove volevo andare',dopo.prj||'nessun progetto');
+  ok(dopo.wbsSel!=='','con la voce gia scelta: la catena si completa da se\'',dopo.wbsSel||'vuota');
+  ok(dopo.data==='2026-02-05'&&dopo.ore==='7'&&dopo.desc==='prova',
+     'e non si porta via niente di quello che avevo scritto',`${dopo.data} · ${dopo.ore}h · ${dopo.desc}`);
+  ok(dopo.nota===true,'e la nota sparisce, perche non c\'e piu niente da dire',String(dopo.nota));
+  // e adesso il consuntivo su Bouygues si salva
+  await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
+    if(f.activity_id)f.activity_id.value='a1'; f.requestSubmit();});
+  await pg.waitForTimeout(1400);
+  const r=await pg.evaluate(()=>(window.__stores.timesheet_entries||[]).slice(-1)[0]||{});
+  ok(r.entry_date==='2026-02-05'&&Number(r.hours)===7,'e il consuntivo su Bouygues si salva',
+     `${r.entry_date} · ${r.hours}h`);
+  ok(String(r.wbs_id||'')!=='','agganciato alla commessa appena creata',String(r.wbs_id||'nessuna'));
+  await pg.close();
+}
+
+console.log('\n=== SENZA CODICE NON SI CREA, E LO DICE ===');
+{
+  // Il database pretende il codice del progetto per comporre quello
+  // della commessa. Se manca, rifiuta: il messaggio deve dire dove si
+  // mette, non il testo grezzo del database.
+  const pg=await apri(`
+    S.projects.push({id:'bou',client_id:'sol',name:'Bouygues',active:true,status:'active'});`);
+  await pg.evaluate(()=>window.go('dailyForm'));
+  await pg.waitForTimeout(600);
+  await scegliCliente(pg,'sol');
+  await pg.evaluate(()=>document.querySelector('#hierNota button').click());
+  await pg.waitForTimeout(1200);
+  const t=await testo(pg);
+  ok(/codice/.test(t),'dice che manca un codice a monte',(t.match(/[^.]*codice[^.]{0,70}/)||[''])[0]);
+  ok(/Clienti|codice breve/.test(t),'e dove si mette',(t.match(/[^.]*codice breve[^.]{0,40}/)||[''])[0]);
+  ok(await pg.evaluate(()=>(window.__stores.engagements||[]).length)===1,
+     'e non nasce niente a meta',String(await pg.evaluate(()=>(window.__stores.engagements||[]).length)));
+  await pg.close();
+}
+
 console.log('\n=== LA GRIGLIA E UN ALTRA PORTA, LA REGOLA E LA STESSA ===');
 {
   // «+ Aggiungi riga» nel Consuntivo mensile e' il secondo modo di
@@ -400,6 +475,16 @@ console.log('\n=== LA GRIGLIA E UN ALTRA PORTA, LA REGOLA E LA STESSA ===');
   await pg.waitForTimeout(400);
   const opz=await pg.evaluate(()=>[...document.querySelectorAll('#g-progetto option')].map(o=>o.textContent));
   ok(!opz.some(o=>/Bouygues/.test(o)),'nemmeno la griglia offre il progetto senza commesse',opz.join(' | '));
+  // e nemmeno qui sparisce in silenzio: la stessa spiegazione e lo
+  // stesso gesto del modulo, perche' la regola e' una sola
+  const notaG=await pg.evaluate(()=>{
+    const el=document.getElementById('grigliaNota');
+    const b=el?el.querySelector('button'):null;
+    return {testo:el&&!el.hidden?el.textContent.trim():'',bott:b?b.textContent.trim():''};
+  });
+  ok(/SOL-BOU/.test(notaG.testo)&&/non ha nessuna commessa creata/.test(notaG.testo),
+     'anche la griglia dice quale progetto manca e perche',notaG.testo||'nessuna nota');
+  ok(/Crea la commessa/.test(notaG.bott),'e offre lo stesso gesto',notaG.bott||'nessun pulsante');
   // chiede il progetto, e il menu del progetto e' quello che hai davanti
   await pg.evaluate(()=>window.addGridRow());
   await pg.waitForTimeout(500);
@@ -437,6 +522,37 @@ console.log('\n=== LA GRIGLIA E UN ALTRA PORTA, LA REGOLA E LA STESSA ===');
   ok(!/Nessuna commessa in questo mese/.test(t)&&/SOL-EQU-2026-001-10/.test(t),
      'e completata la catena la riga entra in griglia',
      (t.match(/SOL-EQU[^ ]*/)||[''])[0]||'nessuna riga');
+  await pg.close();
+}
+
+console.log('\n=== DALLA GRIGLIA LA COMMESSA SI CREA ALLO STESSO MODO ===');
+{
+  const pg=await apri(`
+    S.projects.push({id:'bou',client_id:'sol',code:'SOL-BOU',name:'Bouygues',active:true,status:'active'});`);
+  await pg.evaluate(()=>window.go('griglia'));
+  await pg.waitForTimeout(800);
+  await pg.evaluate(()=>{document.getElementById('g-cliente').value='sol';window.gridClienteCambiato()});
+  await pg.waitForTimeout(400);
+  await pg.evaluate(()=>document.querySelector('#grigliaNota button').click());
+  await pg.waitForTimeout(1500);
+  const dopo=await pg.evaluate(()=>({
+    eng:(window.__stores.engagements||[]).length,
+    wbs:(window.__stores.wbs_items||[]).length,
+    prj:document.getElementById('g-progetto')?.value||'',
+    com:document.getElementById('g-commessa')?.value||'',
+    w:document.getElementById('g-wbs')?.value||'',
+    cliente:document.getElementById('g-cliente')?.value||'',
+    nota:document.getElementById('grigliaNota')?.hidden}));
+  ok(dopo.eng===2&&dopo.wbs===2,'la commessa nasce anche da qui',`${dopo.eng} commesse · ${dopo.wbs} voci`);
+  ok(dopo.cliente==='sol','senza portarsi via il cliente scelto',dopo.cliente||'perso');
+  ok(dopo.prj==='bou'&&dopo.com!==''&&dopo.w!=='',
+     'e la catena si completa su Bouygues',`${dopo.prj} · ${dopo.com} · ${dopo.w}`);
+  ok(dopo.nota===true,'e la nota sparisce',String(dopo.nota));
+  await pg.evaluate(()=>window.addGridRow());
+  await pg.waitForTimeout(800);
+  const t2=await testo(pg);
+  ok(/SOL-BOU-\d{4}-001-10/.test(t2),'e la riga su Bouygues entra in griglia',
+     (t2.match(/SOL-BOU[^ ]*/)||[''])[0]||'nessuna riga');
   await pg.close();
 }
 
