@@ -529,6 +529,216 @@ function groupSummary(){
   expenseRows().filter(expIsPie).forEach(e=>{const k=`${e.client_id}|${e.project_id||''}|expense_report`; if(!map[k]) map[k]={client_id:e.client_id,project_id:e.project_id,type:'expense_report',label:'Spese a pi\u00e8 di lista',hours:null,amount:0,items:[]}; map[k].amount+=Number(e.amount||0); map[k].items.push(e)});
   return Object.values(map).sort((a,b)=>`${clientName(a.client_id)}|${projectName(a.project_id)||''}|${a.type}`.localeCompare(`${clientName(b.client_id)}|${projectName(b.project_id)||''}|${b.type}`));
 }
+// ============ LA FATTURA EMESSA E' LA VERITA' ============
+//
+// Fin qui l'app PROPONEVA i dati per la fattura. Ma la fattura, una
+// volta emessa e trasmessa allo SdI, e' quella che fa fede: se i due
+// non concordano, a sbagliare e' il consuntivo, non il documento.
+// Quindi si carica la fattura, si legge, e si dice dove l'app non
+// tornava.
+//
+// Si legge l'XML della fattura elettronica, non il PDF. L'XML ha i
+// campi gia' separati e certificati; il PDF andrebbe interpretato da un
+// testo impaginato, e si romperebbe al primo cambio di layout del
+// fornitore.
+//
+// I nomi dei tag si cercano per nome LOCALE: l'XML usa un prefisso di
+// namespace sulla radice (p:FatturaElettronica) e nessuno sui figli, e
+// altri emittenti lo mettono dappertutto. Cercare 'Numero' funziona in
+// entrambi i casi; cercare 'p:Numero' no.
+function tagLocale(nodo,nome){
+  if(!nodo)return null;
+  const tutti=nodo.getElementsByTagName('*');
+  for(let i=0;i<tutti.length;i++){
+    const t=tutti[i];
+    if((t.localName||t.nodeName.split(':').pop())===nome)return t;
+  }
+  return null;
+}
+function tuttiLocali(nodo,nome){
+  const out=[];
+  if(!nodo)return out;
+  const tutti=nodo.getElementsByTagName('*');
+  for(let i=0;i<tutti.length;i++){
+    const t=tutti[i];
+    if((t.localName||t.nodeName.split(':').pop())===nome)out.push(t);
+  }
+  return out;
+}
+const testoTag=(nodo,nome)=>{const t=tagLocale(nodo,nome);return t?(t.textContent||'').trim():''};
+const numTag=(nodo,nome)=>{const v=testoTag(nodo,nome);return v?Number(v):0};
+// Il mese che una riga fattura sta dentro la sua descrizione:
+// «Consulenza - Marzo 2026 | Giorni: 5,5». Non e' un campo dello
+// standard, e' una convenzione di chi emette: quindi si legge, ma non
+// si inventa. Se non si riconosce, la riga resta senza mese e lo dice.
+function meseDaDescrizione(d){
+  const t=String(d||'');
+  const m=monthNames.findIndex(n=>new RegExp('\\b'+n+'\\b','i').test(t));
+  const anno=(t.match(/\b(20\d{2})\b/)||[])[1];
+  if(m<0||!anno)return null;
+  return anno+'-'+String(m+1).padStart(2,'0');
+}
+// E i giorni, quando ci sono: «| Giorni: 5,5».
+function giorniDaDescrizione(d){
+  const m=String(d||'').match(/Giorni:\s*([0-9]+(?:[.,][0-9]+)?)/i);
+  return m?Number(m[1].replace(',','.')):null;
+}
+function leggiFatturaXML(testo){
+  const doc=new DOMParser().parseFromString(String(testo||''),'application/xml');
+  if(tagLocale(doc,'parsererror')||!tagLocale(doc,'FatturaElettronicaBody'))
+    return {errore:'Non sembra una fattura elettronica: manca FatturaElettronicaBody.'};
+  const body=tagLocale(doc,'FatturaElettronicaBody');
+  const head=tagLocale(doc,'FatturaElettronicaHeader');
+  const cliente=tagLocale(head,'CessionarioCommittente');
+  const fornitore=tagLocale(head,'CedentePrestatore');
+  const gen=tagLocale(body,'DatiGeneraliDocumento');
+  const cassa=tagLocale(gen,'DatiCassaPrevidenziale');
+  const bollo=tagLocale(gen,'DatiBollo');
+  const pag=tagLocale(body,'DettaglioPagamento');
+  const idCliente=tagLocale(cliente,'IdFiscaleIVA');
+  const righe=tuttiLocali(body,'DettaglioLinee').map(l=>{
+    const descrizione=testoTag(l,'Descrizione');
+    return {numero:numTag(l,'NumeroLinea'),descrizione,
+      quantita:numTag(l,'Quantita'),prezzoUnitario:numTag(l,'PrezzoUnitario'),
+      importo:numTag(l,'PrezzoTotale'),
+      mese:meseDaDescrizione(descrizione),giorni:giorniDaDescrizione(descrizione)};
+  });
+  const imponibile=cassa?numTag(cassa,'ImponibileCassa'):righe.reduce((s,r)=>s+r.importo,0);
+  return {
+    numero:testoTag(gen,'Numero'),
+    data:testoTag(gen,'Data'),
+    tipo:testoTag(gen,'TipoDocumento'),
+    divisa:testoTag(gen,'Divisa'),
+    clientePiva:idCliente?testoTag(idCliente,'IdCodice'):'',
+    clienteNome:testoTag(cliente,'Denominazione')||
+      [testoTag(cliente,'Nome'),testoTag(cliente,'Cognome')].filter(Boolean).join(' '),
+    fornitoreRegime:testoTag(fornitore,'RegimeFiscale'),
+    righe,imponibile,
+    rivalsaAliquota:cassa?numTag(cassa,'AlCassa'):0,
+    rivalsaImporto:cassa?numTag(cassa,'ImportoContributoCassa'):0,
+    bolloVirtuale:bollo?testoTag(bollo,'BolloVirtuale')==='SI':false,
+    bolloImporto:bollo?numTag(bollo,'ImportoBollo'):0,
+    totale:numTag(gen,'ImportoTotaleDocumento'),
+    scadenza:pag?testoTag(pag,'DataScadenzaPagamento'):'',
+    iban:pag?testoTag(pag,'IBAN'):'',
+  };
+}
+// Il confronto. Non interessa cosa c'e' nella fattura — quello si vede
+// aprendola — ma DOVE l'app non tornava con lei. Ogni scostamento e'
+// una riga, con la sua gravita': «blocco» va guardato prima di allineare
+// niente, «nota» e' informazione.
+//
+// Nessun numero viene toccato qui: questa funzione guarda e basta.
+function clientePerPiva(piva){
+  const p=String(piva||'').replace(/\s/g,'');
+  if(!p)return null;
+  return (data.clients||[]).find(c=>String(c.vat_number||'').replace(/\s/g,'')===p)||null;
+}
+// I giorni consuntivati di un cliente in un mese, per il confronto con
+// quelli fatturati. Si contano solo le ore gia' lavorate: il pianificato
+// non e' ancora lavoro.
+function giorniConsuntivati(clientId,mese){
+  const ore=(data.entries||[]).filter(e=>
+    e.client_id===clientId && String(e.entry_date||'').startsWith(mese) && !isPlanned(e)
+  ).reduce((s,e)=>s+Number(e.hours||0),0);
+  return ore/8;
+}
+function importoConsuntivato(clientId,mese){
+  const g=(data.entries||[]).filter(e=>
+    e.client_id===clientId && String(e.entry_date||'').startsWith(mese) && !isPlanned(e)
+  ).reduce((s,e)=>s+dailyAmount(e),0);
+  const mens=(data.monthly||[]).filter(e=>
+    e.client_id===clientId && (String(e.year)+'-'+String(e.month).padStart(2,'0'))===mese
+  ).reduce((s,e)=>s+Number(e.amount||0),0);
+  const man=(data.manualEntries||[]).filter(e=>
+    e.client_id===clientId && String(e.entry_date||'').startsWith(mese) && !isPlanned(e)
+  ).reduce((s,e)=>s+Number(e.amount||0),0);
+  return g+mens+man;
+}
+function rimborsiDelMese(clientId,mese){
+  return (data.travelExpenses||[]).filter(e=>
+    e.client_id===clientId && String(e.expense_date||'').startsWith(mese) && expIsInvoice(e)
+  ).reduce((s,e)=>s+Number(e.amount||0),0);
+}
+const vicini=(a,b)=>Math.abs(Number(a||0)-Number(b||0))<0.005;
+function confrontaFattura(f){
+  const esiti=[];
+  const nota=(liv,titolo,dettaglio)=>esiti.push({liv,titolo,dettaglio});
+  if(f.errore){nota('blocco','Non si riesce a leggere la fattura',f.errore);return {esiti,cliente:null}}
+
+  // 1. Di chi e'. Senza cliente non si confronta niente, quindi questo
+  //    viene prima di tutto e blocca.
+  const cliente=clientePerPiva(f.clientePiva);
+  if(!cliente)
+    nota('blocco','Cliente non riconosciuto',
+      `La fattura e' intestata a ${f.clienteNome||'?'} (P.IVA ${f.clientePiva||'assente'}), che non corrisponde a nessun cliente con quella partita IVA. Scrivila nella scheda del cliente, oppure scegli tu a chi appartiene.`);
+
+  // 2. La fattura torna con se' stessa? Se non torna lei, confrontarla
+  //    col consuntivo non ha senso.
+  const sommaRighe=f.righe.reduce((s,r)=>s+Number(r.importo||0),0);
+  if(!vicini(sommaRighe,f.imponibile))
+    nota('blocco','La fattura non torna con se stessa',
+      `Le righe sommano ${fmtEUR(sommaRighe)}, ma l'imponibile dichiarato e' ${fmtEUR(f.imponibile)}.`);
+  const attesoTotale=f.imponibile+f.rivalsaImporto+(f.bolloVirtuale?0:f.bolloImporto);
+  if(!vicini(attesoTotale,f.totale))
+    nota('blocco','Il totale non torna',
+      `${fmtEUR(f.imponibile)} di imponibile + ${fmtEUR(f.rivalsaImporto)} di rivalsa fanno ${fmtEUR(attesoTotale)}, ma il totale documento e' ${fmtEUR(f.totale)}.`);
+  if(f.rivalsaAliquota>0&&!vicini(f.imponibile*f.rivalsaAliquota/100,f.rivalsaImporto))
+    nota('scostamento','La rivalsa non torna con la sua aliquota',
+      `${fmtNum(f.rivalsaAliquota,2)}% di ${fmtEUR(f.imponibile)} farebbe ${fmtEUR(f.imponibile*f.rivalsaAliquota/100)}, in fattura c'e' ${fmtEUR(f.rivalsaImporto)}.`);
+
+  // 3. L'aliquota di rivalsa e' quella configurata?
+  const ts=currentTaxSetting(Number(String(f.data||'').slice(0,4))||currentYear());
+  const alConf=Number(ts.inps_recharge_rate||4);
+  if(f.rivalsaAliquota>0&&Math.abs(f.rivalsaAliquota-alConf)>0.005)
+    nota('scostamento','Aliquota di rivalsa diversa da quella configurata',
+      `In fattura ${fmtNum(f.rivalsaAliquota,2)}%, in Configurazione fiscale ${fmtNum(alConf,2)}%.`);
+
+  // 4. Il confronto che conta: ogni riga contro il mese che dichiara.
+  const mesi=[];
+  f.righe.forEach(r=>{
+    if(!r.mese){
+      nota('nota','Riga senza mese riconoscibile',
+        `«${r.descrizione}» non dice a che mese si riferisce: l'aggancio al consuntivo va fatto a mano.`);
+      return;
+    }
+    mesi.push(r.mese);
+    if(!cliente)return;
+    const et=monthLabel(r.mese);
+    if(r.giorni!==null){
+      const cons=giorniConsuntivati(cliente.id,r.mese);
+      if(Math.abs(cons-r.giorni)>0.005)
+        nota('scostamento',`Giorni diversi da quelli consuntivati · ${et}`,
+          `In fattura ${fmtNum(r.giorni,2)} gg, consuntivati ${fmtNum(cons,2)} gg. ${r.giorni>cons?'Hai fatturato piu’ di quanto risulta lavorato.':'Hai fatturato meno di quanto risulta lavorato.'}`);
+    }
+    const atteso=importoConsuntivato(cliente.id,r.mese)+rimborsiDelMese(cliente.id,r.mese);
+    if(!vicini(atteso,r.importo))
+      nota('scostamento',`Importo diverso dal fatturabile · ${et}`,
+        `In fattura ${fmtEUR(r.importo)}, l'app si aspettava ${fmtEUR(atteso)} (lavoro piu’ rimborsi spese del mese).`);
+  });
+
+  // 5. Mesi coperti: se sono piu' di uno, il modello a un mese per
+  //    fattura non lo regge, e va detto invece di scoprirlo dopo.
+  const unici=[...new Set(mesi)];
+  if(unici.length>1)
+    nota('nota','La fattura copre piu’ mesi',
+      `${unici.map(monthLabel).join(', ')}. Oggi una fattura sta su un mese solo: finche’ non cambia il modello, l’aggancio al secondo mese va fatto a mano.`);
+
+  // 6. Rimborsi che l'app si aspettava e in fattura non si vedono.
+  if(cliente)unici.forEach(m=>{
+    const rb=rimborsiDelMese(cliente.id,m);
+    if(rb>0&&!f.righe.some(r=>r.mese===m&&/spes|rimbors|trasfert/i.test(r.descrizione)))
+      nota('nota',`Rimborsi spese senza una riga propria · ${monthLabel(m)}`,
+        `L’app ha ${fmtEUR(rb)} di spese da riaddebitare in quel mese. Se sono dentro la riga della consulenza va bene; se non sono state fatturate, sono soldi tuoi.`);
+  });
+
+  // 7. Bollo: virtuale e non addebitato significa che lo paghi tu.
+  if(f.bolloImporto>0&&f.bolloVirtuale&&vicini(attesoTotale,f.totale))
+    nota('nota','Bollo a tuo carico',
+      `${fmtEUR(f.bolloImporto)} di imposta di bollo assolta in modo virtuale e non addebitata al cliente.`);
+
+  return {esiti,cliente,mesi:unici};
+}
 function renderTemplate(tpl,row){
   const fallback={daily_rate_8h:'Consulenza - [Mese Anno] - Cliente/Progetto: [Progetto] | Giorni: [Giorni]',monthly_flat:'Consulenza - [Mese Anno] - Cliente/Progetto: [Progetto]',manual_entry:'Prestazione professionale - [Mese Anno] - Cliente/Progetto: [Progetto]',travel_expenses:'Spese di trasferta - [Mese Anno] - Cliente/Progetto: [Progetto]'}[row.type]||'[Mese Anno] - [Progetto]';
   const text=(tpl?.template_text||fallback);
@@ -5258,6 +5468,7 @@ Object.assign(window,{
   rimborsiFuoriReddito,
   scomposizioneRimborsi,
   forecastCalc,
+  leggiFatturaXML,confrontaFattura,clientePerPiva,giorniConsuntivati,
   annualTaxCalc,
   cambiaClientePolicy,
   savePolicy,
