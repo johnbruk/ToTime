@@ -104,6 +104,13 @@ const oggi=await pg.evaluate(()=>{const d=new Date();
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`});
 await pg.fill('[name="entry_date"]',oggi);
 await pg.fill('[name="hours"]','8');
+// Il cliente non si propone piu': con un default preselezionato bastava
+// non guardare quel campo per consuntivare sul cliente sbagliato. Qui
+// lo si sceglie, come lo sceglie una persona.
+await pg.evaluate(()=>{const f=document.querySelector('form.form');
+  const sel=f.client_id;const primo=[...sel.options].find(o=>o.value);
+  if(primo){sel.value=primo.value;window.refreshProjectsForForm(f)}});
+await pg.waitForTimeout(400);
 await pg.evaluate(()=>document.querySelector('form.form').requestSubmit());
 await pg.waitForTimeout(600);
 const dopoArch=await archivio();

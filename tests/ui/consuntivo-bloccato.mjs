@@ -49,19 +49,32 @@ const apri=async(extra='')=>{
   await pg.waitForTimeout(700);
   return pg;
 };
-const compila=async(pg)=>pg.evaluate(()=>{
-  const f=document.querySelector('#app form.form');
-  if(!f)return 'nessun modulo';
-  f.entry_date.value='2026-10-07';
-  if(f.hours)f.hours.value='8';
-  return 'ok';
-});
+const compila=async(pg)=>{
+  const r=await pg.evaluate(()=>{
+    const f=document.querySelector('#app form.form');
+    if(!f)return 'nessun modulo';
+    f.entry_date.value='2026-10-07';
+    if(f.hours)f.hours.value='8';
+    // il cliente non si propone piu': si sceglie
+    const primo=[...f.client_id.options].find(o=>o.value);
+    if(primo&&!f.client_id.value){f.client_id.value=primo.value;window.refreshProjectsForForm(f)}
+    return 'ok';
+  });
+  await pg.waitForTimeout(400);
+  return r;
+};
 
 console.log('\n=== IL CAMPO C’È, QUANDO LA COMMESSA NON PORTA L’ATTIVITÀ ===');
 {
   const pg=await apri();
   await pg.evaluate(()=>window.go('dailyForm'));
   await pg.waitForTimeout(600);
+  // la gerarchia si disegna dopo aver scelto il cliente: prima non c’è
+  // niente da disegnare, perché non si sa di chi
+  await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
+    const primo=[...f.client_id.options].find(o=>o.value);
+    if(primo){f.client_id.value=primo.value;window.refreshProjectsForForm(f)}});
+  await pg.waitForTimeout(400);
   const campo=await pg.evaluate(()=>{
     const s=document.querySelector('#app form.form [name=activity_id]');
     if(!s)return 'assente';
@@ -79,6 +92,12 @@ console.log('\n=== CON LA COMMESSA CHE PORTA L’ATTIVITÀ, NON SI CHIEDE DUE VO
   const pg=await apri(`S.wbs_items[0].activity_id='a1';`);
   await pg.evaluate(()=>window.go('dailyForm'));
   await pg.waitForTimeout(600);
+  // la gerarchia si disegna dopo aver scelto il cliente: prima non c’è
+  // niente da disegnare, perché non si sa di chi
+  await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
+    const primo=[...f.client_id.options].find(o=>o.value);
+    if(primo){f.client_id.value=primo.value;window.refreshProjectsForForm(f)}});
+  await pg.waitForTimeout(400);
   const campo=await pg.evaluate(()=>{
     const s=document.querySelector('#app form.form [name=activity_id]');
     if(!s)return 'assente';
@@ -95,6 +114,12 @@ console.log('\n=== IL CONSUNTIVO SI SALVA, COL DATABASE CHE PRETENDE L’ATTIVIT
   await pg.evaluate(()=>{window.__nonNulle=['activity_id']});
   await pg.evaluate(()=>window.go('dailyForm'));
   await pg.waitForTimeout(600);
+  // la gerarchia si disegna dopo aver scelto il cliente: prima non c’è
+  // niente da disegnare, perché non si sa di chi
+  await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
+    const primo=[...f.client_id.options].find(o=>o.value);
+    if(primo){f.client_id.value=primo.value;window.refreshProjectsForForm(f)}});
+  await pg.waitForTimeout(400);
   ok(await compila(pg)==='ok','il modulo si compila');
   await pg.evaluate(()=>{
     const f=document.querySelector('#app form.form');
@@ -117,6 +142,12 @@ console.log('\n=== E SE IL DATABASE RIFIUTA LO STESSO, LO DICE IN ITALIANO ===')
   await pg.evaluate(()=>{window.__nonNulle=['activity_id']});
   await pg.evaluate(()=>window.go('dailyForm'));
   await pg.waitForTimeout(600);
+  // la gerarchia si disegna dopo aver scelto il cliente: prima non c’è
+  // niente da disegnare, perché non si sa di chi
+  await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
+    const primo=[...f.client_id.options].find(o=>o.value);
+    if(primo){f.client_id.value=primo.value;window.refreshProjectsForForm(f)}});
+  await pg.waitForTimeout(400);
   await compila(pg);
   await pg.evaluate(()=>{
     const f=document.querySelector('#app form.form');

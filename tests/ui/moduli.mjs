@@ -100,6 +100,15 @@ await pg.waitForTimeout(2500);
 const indietro=[];
 for(const v of ['dailyForm','tmForm','manualForm']){
   await pg.evaluate(x=>window.go(x),v);await pg.waitForTimeout(450);
+  // Il cliente non si propone piu': la gerarchia si disegna dopo averlo
+  // scelto, perche' prima non si sa di chi siano le commesse. Il
+  // controllo resta lo stesso — ogni modulo deve chiedere la voce —
+  // solo che adesso si guarda a cliente scelto, come fa una persona.
+  await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
+    if(!f||!f.client_id)return;
+    const primo=[...f.client_id.options].find(o=>o.value);
+    if(primo&&!f.client_id.value){f.client_id.value=primo.value;window.refreshProjectsForForm(f)}});
+  await pg.waitForTimeout(450);
   const n=await pg.evaluate(()=>[...document.querySelectorAll('#app form.form [name]')].map(e=>e.name));
   if(!n.includes('wbs_id'))indietro.push(v+' → '+n.join(', '));
 }

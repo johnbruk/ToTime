@@ -41,8 +41,18 @@ const conta=()=>pg.evaluate(()=>window.__stores.timesheet_entries.length);
 
 console.log('\n=== A. Dal modulo nuovo si prosegue al giorno dopo ===');
 await pg.evaluate(()=>window.go('dailyForm'));await pg.waitForTimeout(450);
+await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
+  const primo=[...f.client_id.options].find(o=>o.value);
+  if(primo&&!f.client_id.value){f.client_id.value=primo.value;window.refreshProjectsForForm(f)}});
+await pg.waitForTimeout(400);
 ok(await pg.$('button:has-text("Salva e vai al giorno dopo")')!==null,'il pulsante c\'è');
 await pg.evaluate(d=>{const f=document.querySelector('#app form.form');f.entry_date.value=d;},g(2));
+// Il cliente non si propone piu', e la cascata si disegna dopo averlo
+// scelto: prima non si sa di chi siano i progetti da mostrare.
+await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
+  const primo=[...f.client_id.options].find(o=>o.value);
+  if(primo){f.client_id.value=primo.value;window.refreshProjectsForForm(f)}});
+await pg.waitForTimeout(400);
 // scelto il progetto, la commessa si sceglie da se': e' l'unica, e il
 // suo menu non e' nemmeno visibile
 await pg.selectOption('[name="hier_project_id"]','p1');await pg.waitForTimeout(300);
@@ -70,6 +80,10 @@ ok(voci.filter(d=>[g(2),g(3),g(4)].includes(d)).length===3,'e i tre giorni sono 
 
 console.log('\n=== C. Se il giorno accanto e\' gia\' consuntivato, lo si apre ===');
 await pg.evaluate(()=>window.go('dailyForm'));await pg.waitForTimeout(450);
+await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
+  const primo=[...f.client_id.options].find(o=>o.value);
+  if(primo&&!f.client_id.value){f.client_id.value=primo.value;window.refreshProjectsForForm(f)}});
+await pg.waitForTimeout(400);
 await pg.evaluate(d=>{document.querySelector('#app form.form').entry_date.value=d},g(8));
 // scelto il progetto, la commessa si sceglie da se': e' l'unica, e il
 // suo menu non e' nemmeno visibile
@@ -96,8 +110,12 @@ console.log('\n=== La riga si porta dietro se stessa, cliente compreso ===');
 await pg.evaluate(()=>window.go('dailyForm'));await pg.waitForTimeout(500);
 const opz=await pg.evaluate(()=>{const s=document.querySelector('#app [name=client_id]');
   return s?[...s.options].map(o=>o.value):[]});
-ok(opz.length>1,'nel banco di prova ci sono piu\' clienti',opz.join(', '));
-const altro=opz[1];
+// La prima voce adesso e' il segnaposto «scegli il cliente»: i clienti
+// veri cominciano dopo, e qui ne serve uno DIVERSO da quello che si
+// sceglierebbe per primo.
+const reali=opz.filter(Boolean);
+ok(reali.length>1,'nel banco di prova ci sono piu\' clienti',reali.join(', '));
+const altro=reali[1];
 await pg.evaluate(v=>{const s=document.querySelector('#app [name=client_id]');
   s.value=v;s.dispatchEvent(new Event('change',{bubbles:true}))},altro);
 await pg.waitForTimeout(400);

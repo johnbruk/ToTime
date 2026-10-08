@@ -183,6 +183,12 @@ ok(/EQUANS/.test(sceltoE),'col progetto di partenza già selezionato',sceltoE||'
 
 console.log('\n=== G. La voce si chiede solo dove ce n\'e\' piu\' d\'una ===');
 await pg.evaluate(()=>window.go('dailyForm'));await pg.waitForTimeout(400);
+// Il cliente non si propone piu': la cascata si disegna dopo averlo
+// scelto, perche' prima non si sa di chi sono i progetti da mostrare.
+await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
+  const primo=[...f.client_id.options].find(o=>o.value);
+  if(primo){f.client_id.value=primo.value;window.refreshProjectsForForm(f)}});
+await pg.waitForTimeout(400);
 const scegli=async(nome,val)=>{await pg.selectOption(`[name="${nome}"]`,val);await pg.waitForTimeout(250)};
 await scegli('hier_project_id','p1');
 await scegli('engagement_id','e1');          // commessa con UNA voce

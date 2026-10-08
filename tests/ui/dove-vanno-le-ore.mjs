@@ -18,6 +18,15 @@ const port=srv.address().port;
 const b=await chromium.launch(process.env.CHROME?{executablePath:process.env.CHROME}:{});
 let pass=0,fail=0;
 const ok=(c,l,x='')=>{c?pass++:fail++;console.log((c?'  OK  ':'  KO  ')+l+(x?'  → '+x:''))};
+// Il cliente non si propone piu': ogni percorso che arriva al modulo
+// deve sceglierlo, come fa una persona.
+const scegliCliente=async(pg,id)=>{
+  await pg.evaluate(c=>{
+    const f=document.querySelector('#app form.form');
+    f.client_id.value=c; window.refreshProjectsForForm(f);
+  },id);
+  await pg.waitForTimeout(400);
+};
 const testo=pg=>pg.evaluate(()=>document.getElementById('app').innerText.replace(/\s+/g,' '));
 
 // Un cliente con UN SOLO progetto e UNA SOLA commessa: e' il caso in cui
@@ -50,6 +59,7 @@ console.log('\n=== CON UN PROGETTO SOLO, IL PROGETTO SI VEDE LO STESSO ===');
   const pg=await apri();
   await pg.evaluate(()=>window.go('dailyForm'));
   await pg.waitForTimeout(600);
+  await scegliCliente(pg,'sol');
   const prjNascosto=await pg.evaluate(()=>{
     const e=document.getElementById('prjField');return !e||e.hidden;
   });
@@ -70,6 +80,7 @@ console.log('\n=== NON È SOLO IL CODICE: C’È IL NOME ===');
   const pg=await apri();
   await pg.evaluate(()=>window.go('dailyForm'));
   await pg.waitForTimeout(600);
+  await scegliCliente(pg,'sol');
   const riga=await pg.evaluate(()=>document.getElementById('wbsHint')?.textContent.trim()||'');
   ok(/^Equans/.test(riga),'la riga sotto la commessa comincia dal cliente finale',riga);
   ok(riga.split('·').length===3,'cliente finale · commessa · codice',riga);
@@ -84,6 +95,7 @@ console.log('\n=== QUANDO SONO DIVERSI, VIENE PRIMA IL CLIENTE FINALE ===');
   const pg=await apri(`S.projects[0].name='Commessa quadro'; S.projects[0].end_client_name='Equans Italia';`);
   await pg.evaluate(()=>window.go('dailyForm'));
   await pg.waitForTimeout(600);
+  await scegliCliente(pg,'sol');
   const riga=await pg.evaluate(()=>document.getElementById('wbsHint')?.textContent.trim()||'');
   ok(/^Equans Italia/.test(riga),'la riga comincia dal cliente finale',riga);
   ok(/Commessa quadro/.test(riga),'e il progetto resta, dopo',riga);
@@ -102,6 +114,7 @@ console.log('\n=== CAMBIANDO COMMESSA, LA RIGA SEGUE ===');
       name:'Change',kind:'activity',status:'active',billable:false,activity_id:'a1'});`);
   await pg.evaluate(()=>window.go('dailyForm'));
   await pg.waitForTimeout(600);
+  await scegliCliente(pg,'sol');
   await pg.evaluate(()=>{
     const f=document.querySelector('#app form.form');
     f.wbs_id.value='w20';
@@ -121,6 +134,7 @@ console.log('\n=== SENZA CLIENTE FINALE, SI RIPETE QUELLO DELL’ANAGRAFICA ==='
   const pg=await apri(`delete S.projects[0].end_client_name; S.projects[0].name='Commessa quadro';`);
   await pg.evaluate(()=>window.go('dailyForm'));
   await pg.waitForTimeout(600);
+  await scegliCliente(pg,'sol');
   const riga=await pg.evaluate(()=>document.getElementById('wbsHint')?.textContent.trim()||'');
   ok(/^Solution/.test(riga),'ripiega sul cliente che paga',riga);
   await pg.close();
@@ -198,6 +212,7 @@ console.log('\n=== IL BLOCCO NOMINA UN CAMPO CHE PUOI TOCCARE ===');
       name:'Analisi',kind:'activity',status:'active',billable:true,activity_id:'a1'});`);
   await pg.evaluate(()=>window.go('dailyForm'));
   await pg.waitForTimeout(600);
+  await scegliCliente(pg,'sol');
   const visibili=await pg.evaluate(()=>['prjField','engField','wbsField']
     .filter(id=>{const e=document.getElementById(id);return e&&!e.hidden}));
   ok(visibili.includes('prjField'),'col progetto da scegliere, il suo menu si vede',visibili.join(', '));
@@ -215,6 +230,13 @@ console.log('\n=== IL BLOCCO NOMINA UN CAMPO CHE PUOI TOCCARE ===');
      (t.match(/Scegli [^.]{0,70}/)||[''])[0]);
   ok(!/attività della commessa registrare/.test(t),
      'e non un menu che a schermo non c’è',(t.match(/Scegli [^.]{0,70}/)||[''])[0]);
+  // e il modulo NON si svuota: un messaggio non porta via quello che
+  // stai scrivendo. Prima setMsg ridisegnava tutto, e con la data, le
+  // ore e il cliente spariva anche la voglia di riprovare.
+  ok(await pg.evaluate(()=>{
+    const f=document.querySelector('#app form.form');
+    return !!(f&&f.client_id&&f.client_id.value==='sol'&&f.entry_date&&f.entry_date.value==='2026-10-07');
+  }),'e quello che avevi scritto resta nel modulo');
   // scelto il progetto, la catena si completa da sé e si salva
   await pg.evaluate(()=>{
     const f=document.querySelector('#app form.form');
@@ -279,6 +301,60 @@ console.log('\n=== I CLIENTI SI APRONO SULLA LISTA, NON SUL MODULO ===');
   await pg.waitForTimeout(300);
   ok(await pg.evaluate(()=>!!document.querySelector('#app form.form [name=name]')),
      'che apre il modulo quando lo chiedi');
+  await pg.close();
+}
+
+console.log('\n=== UN CONSUNTIVO NEL PASSATO SI VEDE DOPO AVERLO SALVATO ===');
+{
+  // Si registrava un 19 febbraio e l'app tornava al Timesheet di
+  // OTTOBRE, dove quella riga non c'è: «0,00 gg», come se il
+  // salvataggio non fosse avvenuto. Era avvenuto — stava in un mese che
+  // non si stava guardando, e per trovarlo bisognava già sapere che
+  // c'era.
+  const pg=await apri();
+  await pg.evaluate(()=>window.go('dailyForm'));
+  await pg.waitForTimeout(600);
+  await scegliCliente(pg,'sol');
+  await pg.evaluate(()=>{
+    const f=document.querySelector('#app form.form');
+    f.entry_date.value='2026-02-19';
+    if(f.hours)f.hours.value='8';
+    f.requestSubmit();
+  });
+  await pg.waitForTimeout(1400);
+  const salvate=await pg.evaluate(()=>(window.__stores.timesheet_entries||[]).length);
+  ok(salvate===1,'la riga si salva',String(salvate));
+  const t=await testo(pg);
+  ok(/Febbraio 2026/.test(t),'e l’app va a Febbraio 2026, dove la riga sta',
+     (t.match(/Timesheet[^›]{0,40}/)||[''])[0]);
+  ok(/8,0 h/.test(t),'col suo conteggio, invece di un mese vuoto',
+     (t.match(/CONSUNTIVATE[^A-Z]{0,30}/)||[''])[0]);
+  await pg.close();
+}
+
+console.log('\n=== IL CLIENTE SI SCEGLIE, NON SI PROPONE ===');
+{
+  // Era il primo in ordine alfabetico, poi l'ultimo usato: in tutti e
+  // due i casi un consuntivo poteva finire sul cliente sbagliato
+  // semplicemente non guardando quel campo.
+  const pg=await apri();
+  await pg.evaluate(()=>window.go('dailyForm'));
+  await pg.waitForTimeout(600);
+  const scelto=await pg.evaluate(()=>document.querySelector('#app form.form [name=client_id]')?.value||'');
+  ok(scelto==='','nessun cliente proposto all’apertura',`«${scelto}»`);
+  const t0=await testo(pg);
+  ok(/scegli il cliente/i.test(t0),'e il menu lo dice',(t0.match(/—[^—]{0,30}—/)||[''])[0]);
+  await pg.evaluate(()=>{
+    const f=document.querySelector('#app form.form');
+    f.entry_date.value='2026-10-07'; if(f.hours)f.hours.value='8';
+    f.requestSubmit();
+  });
+  await pg.waitForTimeout(1000);
+  const t=await testo(pg);
+  ok(/Scegli il cliente/.test(t),'e senza sceglierlo non si salva, dicendolo',
+     (t.match(/Scegli il cliente[^.]{0,50}/)||[''])[0]);
+  ok(await pg.evaluate(()=>(window.__stores.timesheet_entries||[]).length)===0,
+     'niente riga scritta a caso');
   await pg.close();
 }
 
