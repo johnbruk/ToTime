@@ -587,7 +587,14 @@ function leggiFatturaXML(testo){
   const doc=new DOMParser().parseFromString(String(testo||''),'application/xml');
   if(tagLocale(doc,'parsererror')||!tagLocale(doc,'FatturaElettronicaBody'))
     return {errore:'Non sembra una fattura elettronica: manca FatturaElettronicaBody.'};
-  const body=tagLocale(doc,'FatturaElettronicaBody');
+  // Un file FatturaPA puo' contenere piu' fatture. Leggerne una sola e
+  // dire che e' andata bene significa nascondere le altre: numeri,
+  // righe e totali che nessuno vedrebbe mai. Finche' non c'e' una
+  // schermata che le mostri tutte, si rifiuta il file e si dice perche'.
+  const corpi=tuttiLocali(doc,'FatturaElettronicaBody');
+  if(corpi.length>1)
+    return {errore:`Il file contiene ${corpi.length} fatture. Caricane una alla volta: leggerne una sola e dire che \u00e8 andata bene nasconderebbe le altre.`};
+  const body=corpi[0];
   const head=tagLocale(doc,'FatturaElettronicaHeader');
   const cliente=tagLocale(head,'CessionarioCommittente');
   const fornitore=tagLocale(head,'CedentePrestatore');
@@ -603,7 +610,13 @@ function leggiFatturaXML(testo){
       importo:numTag(l,'PrezzoTotale'),
       mese:meseDaDescrizione(descrizione),giorni:giorniDaDescrizione(descrizione)};
   });
-  const imponibile=cassa?numTag(cassa,'ImponibileCassa'):righe.reduce((s,r)=>s+r.importo,0);
+  // L'imponibile della fattura e' la somma delle sue righe. NON e'
+  // ImponibileCassa, che e' solo la parte su cui si calcola la rivalsa:
+  // una fattura con voci escluse dal contributo (spese, per dire) ha i
+  // due numeri diversi, e scambiarli faceva fallire i controlli di
+  // quadratura su un documento sano.
+  const imponibile=righe.reduce((s,r)=>s+r.importo,0);
+  const imponibileCassa=cassa?numTag(cassa,'ImponibileCassa'):0;
   return {
     numero:testoTag(gen,'Numero'),
     data:testoTag(gen,'Data'),
@@ -613,7 +626,7 @@ function leggiFatturaXML(testo){
     clienteNome:testoTag(cliente,'Denominazione')||
       [testoTag(cliente,'Nome'),testoTag(cliente,'Cognome')].filter(Boolean).join(' '),
     fornitoreRegime:testoTag(fornitore,'RegimeFiscale'),
-    righe,imponibile,
+    righe,imponibile,imponibileCassa,
     rivalsaAliquota:cassa?numTag(cassa,'AlCassa'):0,
     rivalsaImporto:cassa?numTag(cassa,'ImportoContributoCassa'):0,
     bolloVirtuale:bollo?testoTag(bollo,'BolloVirtuale')==='SI':false,
@@ -629,6 +642,27 @@ function leggiFatturaXML(testo){
 // niente, «nota» e' informazione.
 //
 // Nessun numero viene toccato qui: questa funzione guarda e basta.
+// L'abbinamento del cliente. La partita IVA e' il modo certo, ma e' un
+// campo che l'anagrafica ha acquisito solo adesso: finche' non lo si
+// riempie, nessuna fattura troverebbe il suo cliente e tutti i
+// confronti resterebbero fermi. Quindi si ripiega sul nome — e si dice
+// che e' un ripiego, perche' due clienti possono chiamarsi uguale.
+function normaNome(v){return String(v||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').replace(/\b(s\.?r\.?l|s\.?p\.?a|snc|sas|srls)\b/g,'').trim()}
+function clientePerFattura(f){
+  const p=String(f&&f.clientePiva||'').replace(/\s/g,'');
+  if(p){
+    const perPiva=(data.clients||[]).find(c=>String(c.vat_number||'').replace(/\s/g,'')===p);
+    if(perPiva)return {cliente:perPiva,come:'piva'};
+  }
+  const n=normaNome(f&&f.clienteNome);
+  if(n){
+    const perNome=(data.clients||[]).filter(c=>normaNome(c.name)===n);
+    if(perNome.length===1)return {cliente:perNome[0],come:'nome'};
+    if(perNome.length>1)return {cliente:null,come:'omonimi'};
+  }
+  return {cliente:null,come:null};
+}
+// Tenuta per chi la usa gia': l'abbinamento per sola partita IVA.
 function clientePerPiva(piva){
   const p=String(piva||'').replace(/\s/g,'');
   if(!p)return null;
@@ -637,11 +671,14 @@ function clientePerPiva(piva){
 // I giorni consuntivati di un cliente in un mese, per il confronto con
 // quelli fatturati. Si contano solo le ore gia' lavorate: il pianificato
 // non e' ancora lavoro.
+// I giorni, con le ore standard di OGNI riga. Dividere il monte ore per
+// 8 fisse dava scostamenti falsi su chi ha la giornata diversa: 7,5 ore
+// con standard 7,5 sono un giorno pieno dappertutto nell'app, e qui
+// diventavano 0,94.
 function giorniConsuntivati(clientId,mese){
-  const ore=(data.entries||[]).filter(e=>
+  return (data.entries||[]).filter(e=>
     e.client_id===clientId && String(e.entry_date||'').startsWith(mese) && !isPlanned(e)
-  ).reduce((s,e)=>s+Number(e.hours||0),0);
-  return ore/8;
+  ).reduce((s,e)=>s+dailyDays(e),0);
 }
 function importoConsuntivato(clientId,mese){
   const g=(data.entries||[]).filter(e=>
@@ -664,80 +701,125 @@ const vicini=(a,b)=>Math.abs(Number(a||0)-Number(b||0))<0.005;
 function confrontaFattura(f){
   const esiti=[];
   const nota=(liv,titolo,dettaglio)=>esiti.push({liv,titolo,dettaglio});
-  if(f.errore){nota('blocco','Non si riesce a leggere la fattura',f.errore);return {esiti,cliente:null}}
+  if(f.errore){nota('blocco','Non si riesce a leggere la fattura',f.errore);return {esiti,cliente:null,mesi:[]}}
 
-  // 1. Di chi e'. Senza cliente non si confronta niente, quindi questo
-  //    viene prima di tutto e blocca.
-  const cliente=clientePerPiva(f.clientePiva);
-  if(!cliente)
+  // 0. Prima di tutto: e' un documento che questo confronto sa trattare?
+  //    Una nota di credito ha gli importi positivi e il segno glielo da'
+  //    il tipo: confrontarla come una fattura direbbe che hai fatturato
+  //    quello che invece hai stornato.
+  if(f.tipo&&f.tipo!=='TD01'){
+    nota('blocco','Tipo di documento non trattato',
+      `Questo e' un documento ${esc(f.tipo)}${f.tipo==='TD04'?' (nota di credito)':''}. Il confronto sa leggere solo le fatture TD01: su un documento di segno opposto direbbe il contrario del vero.`);
+    return {esiti,cliente:null,mesi:[]};
+  }
+  if(f.divisa&&f.divisa!=='EUR'){
+    nota('blocco','Valuta diversa dall’euro',
+      `La fattura e' in ${esc(f.divisa)}. I consuntivi sono in euro: confrontare i numeri senza convertirli darebbe scostamenti inventati.`);
+    return {esiti,cliente:null,mesi:[]};
+  }
+
+  // 1. Di chi e'.
+  const ab=clientePerFattura(f);
+  const cliente=ab.cliente;
+  if(!cliente&&ab.come==='omonimi')
+    nota('blocco','Più clienti con lo stesso nome',
+      `${f.clienteNome} corrisponde a piu' di un cliente. Scrivi la partita IVA nella scheda del cliente giusto, cosi' l'abbinamento diventa certo.`);
+  else if(!cliente)
     nota('blocco','Cliente non riconosciuto',
-      `La fattura e' intestata a ${f.clienteNome||'?'} (P.IVA ${f.clientePiva||'assente'}), che non corrisponde a nessun cliente con quella partita IVA. Scrivila nella scheda del cliente, oppure scegli tu a chi appartiene.`);
+      `La fattura e' intestata a ${f.clienteNome||'?'} (P.IVA ${f.clientePiva||'assente'}), che non corrisponde a nessun cliente. Scrivi quella partita IVA nella scheda del cliente, oppure allinea il nome.`);
+  else if(ab.come==='nome')
+    nota('nota','Cliente riconosciuto dal nome, non dalla partita IVA',
+      `Abbinato a ${clientName(cliente.id)} perche' il nome combacia. Scrivendo la P.IVA ${f.clientePiva||''} nella sua scheda, l'abbinamento diventa certo.`);
 
-  // 2. La fattura torna con se' stessa? Se non torna lei, confrontarla
-  //    col consuntivo non ha senso.
+  // 2. La fattura torna con se' stessa?
   const sommaRighe=f.righe.reduce((s,r)=>s+Number(r.importo||0),0);
   if(!vicini(sommaRighe,f.imponibile))
     nota('blocco','La fattura non torna con se stessa',
-      `Le righe sommano ${fmtEUR(sommaRighe)}, ma l'imponibile dichiarato e' ${fmtEUR(f.imponibile)}.`);
-  const attesoTotale=f.imponibile+f.rivalsaImporto+(f.bolloVirtuale?0:f.bolloImporto);
-  if(!vicini(attesoTotale,f.totale))
+      `Le righe sommano ${fmtEUR(sommaRighe)}, ma l'imponibile risulta ${fmtEUR(f.imponibile)}.`);
+  // Il bollo puo' essere addebitato al cliente oppure no: «virtuale»
+  // dice come si paga, non a chi tocca. Quindi si accettano entrambe le
+  // quadrature, e si blocca solo se non torna in nessuno dei due modi.
+  const senzaBollo=f.imponibile+f.rivalsaImporto;
+  const conBollo=senzaBollo+f.bolloImporto;
+  const bolloAddebitato=f.bolloImporto>0&&vicini(conBollo,f.totale);
+  if(!vicini(senzaBollo,f.totale)&&!bolloAddebitato)
     nota('blocco','Il totale non torna',
-      `${fmtEUR(f.imponibile)} di imponibile + ${fmtEUR(f.rivalsaImporto)} di rivalsa fanno ${fmtEUR(attesoTotale)}, ma il totale documento e' ${fmtEUR(f.totale)}.`);
-  if(f.rivalsaAliquota>0&&!vicini(f.imponibile*f.rivalsaAliquota/100,f.rivalsaImporto))
+      `${fmtEUR(f.imponibile)} di imponibile + ${fmtEUR(f.rivalsaImporto)} di rivalsa fanno ${fmtEUR(senzaBollo)}${f.bolloImporto>0?', o '+fmtEUR(conBollo)+' col bollo':''}, ma il totale documento e' ${fmtEUR(f.totale)}.`);
+  // La rivalsa si verifica sulla SUA base, che non e' per forza
+  // l'imponibile della fattura.
+  const baseRivalsa=f.imponibileCassa||f.imponibile;
+  if(f.rivalsaAliquota>0&&!vicini(baseRivalsa*f.rivalsaAliquota/100,f.rivalsaImporto))
     nota('scostamento','La rivalsa non torna con la sua aliquota',
-      `${fmtNum(f.rivalsaAliquota,2)}% di ${fmtEUR(f.imponibile)} farebbe ${fmtEUR(f.imponibile*f.rivalsaAliquota/100)}, in fattura c'e' ${fmtEUR(f.rivalsaImporto)}.`);
+      `${fmtNum(f.rivalsaAliquota,2)}% di ${fmtEUR(baseRivalsa)} farebbe ${fmtEUR(baseRivalsa*f.rivalsaAliquota/100)}, in fattura c'e' ${fmtEUR(f.rivalsaImporto)}.`);
 
-  // 3. L'aliquota di rivalsa e' quella configurata?
+  // 3. La rivalsa concorda con la configurazione? Va guardato in
+  //    entrambi i versi: c'e' e non dovrebbe, oppure manca e dovrebbe.
   const ts=currentTaxSetting(Number(String(f.data||'').slice(0,4))||currentYear());
   const alConf=Number(ts.inps_recharge_rate||4);
-  if(f.rivalsaAliquota>0&&Math.abs(f.rivalsaAliquota-alConf)>0.005)
+  const attivaConf=ts.inps_recharge_enabled!==false;
+  if(f.rivalsaImporto>0&&!attivaConf)
+    nota('scostamento','Rivalsa in fattura ma disattivata in configurazione',
+      `La fattura addebita ${fmtEUR(f.rivalsaImporto)} di rivalsa, mentre in Configurazione fiscale la rivalsa e' spenta.`);
+  else if(!(f.rivalsaImporto>0)&&attivaConf)
+    nota('scostamento','Rivalsa attiva in configurazione ma assente in fattura',
+      `In Configurazione fiscale la rivalsa e' al ${fmtNum(alConf,2)}%, ma la fattura non ne addebita.`);
+  else if(f.rivalsaAliquota>0&&Math.abs(f.rivalsaAliquota-alConf)>0.005)
     nota('scostamento','Aliquota di rivalsa diversa da quella configurata',
       `In fattura ${fmtNum(f.rivalsaAliquota,2)}%, in Configurazione fiscale ${fmtNum(alConf,2)}%.`);
 
-  // 4. Il confronto che conta: ogni riga contro il mese che dichiara.
-  const mesi=[];
+  // 4. Il confronto col consuntivo, PER MESE e non per riga. Una
+  //    fattura puo' avere piu' righe sullo stesso mese — progetti
+  //    diversi, o la consulenza e le spese separate — e confrontare
+  //    ogni riga col totale del mese produceva uno scostamento falso
+  //    per ognuna di esse.
+  const perMese={};
   f.righe.forEach(r=>{
     if(!r.mese){
       nota('nota','Riga senza mese riconoscibile',
         `«${r.descrizione}» non dice a che mese si riferisce: l'aggancio al consuntivo va fatto a mano.`);
       return;
     }
-    mesi.push(r.mese);
-    if(!cliente)return;
-    const et=monthLabel(r.mese);
-    if(r.giorni!==null){
-      const cons=giorniConsuntivati(cliente.id,r.mese);
-      if(Math.abs(cons-r.giorni)>0.005)
+    const m=perMese[r.mese]=perMese[r.mese]||{importo:0,giorni:0,haGiorni:false,righe:0};
+    m.importo+=Number(r.importo||0);
+    m.righe++;
+    if(r.giorni!==null){m.giorni+=r.giorni;m.haGiorni=true}
+  });
+  const mesi=Object.keys(perMese).sort();
+  if(cliente)mesi.forEach(mese=>{
+    const m=perMese[mese],et=monthLabel(mese);
+    const quante=m.righe>1?` (${m.righe} righe sommate)`:'';
+    if(m.haGiorni){
+      const cons=giorniConsuntivati(cliente.id,mese);
+      if(Math.abs(cons-m.giorni)>0.005)
         nota('scostamento',`Giorni diversi da quelli consuntivati · ${et}`,
-          `In fattura ${fmtNum(r.giorni,2)} gg, consuntivati ${fmtNum(cons,2)} gg. ${r.giorni>cons?'Hai fatturato piu’ di quanto risulta lavorato.':'Hai fatturato meno di quanto risulta lavorato.'}`);
+          `In fattura ${fmtNum(m.giorni,2)} gg${quante}, consuntivati ${fmtNum(cons,2)} gg. ${m.giorni>cons?'Hai fatturato piu’ di quanto risulta lavorato.':'Hai fatturato meno di quanto risulta lavorato.'}`);
     }
-    const atteso=importoConsuntivato(cliente.id,r.mese)+rimborsiDelMese(cliente.id,r.mese);
-    if(!vicini(atteso,r.importo))
+    const atteso=importoConsuntivato(cliente.id,mese)+rimborsiDelMese(cliente.id,mese);
+    if(!vicini(atteso,m.importo))
       nota('scostamento',`Importo diverso dal fatturabile · ${et}`,
-        `In fattura ${fmtEUR(r.importo)}, l'app si aspettava ${fmtEUR(atteso)} (lavoro piu’ rimborsi spese del mese).`);
+        `In fattura ${fmtEUR(m.importo)}${quante}, l'app si aspettava ${fmtEUR(atteso)} (lavoro piu’ rimborsi spese del mese).`);
   });
 
-  // 5. Mesi coperti: se sono piu' di uno, il modello a un mese per
-  //    fattura non lo regge, e va detto invece di scoprirlo dopo.
-  const unici=[...new Set(mesi)];
-  if(unici.length>1)
+  // 5. Mesi coperti.
+  if(mesi.length>1)
     nota('nota','La fattura copre piu’ mesi',
-      `${unici.map(monthLabel).join(', ')}. Oggi una fattura sta su un mese solo: finche’ non cambia il modello, l’aggancio al secondo mese va fatto a mano.`);
+      `${mesi.map(monthLabel).join(', ')}. Oggi una fattura sta su un mese solo: finche’ non cambia il modello, l’aggancio al secondo mese va fatto a mano.`);
 
   // 6. Rimborsi che l'app si aspettava e in fattura non si vedono.
-  if(cliente)unici.forEach(m=>{
+  if(cliente)mesi.forEach(m=>{
     const rb=rimborsiDelMese(cliente.id,m);
     if(rb>0&&!f.righe.some(r=>r.mese===m&&/spes|rimbors|trasfert/i.test(r.descrizione)))
       nota('nota',`Rimborsi spese senza una riga propria · ${monthLabel(m)}`,
         `L’app ha ${fmtEUR(rb)} di spese da riaddebitare in quel mese. Se sono dentro la riga della consulenza va bene; se non sono state fatturate, sono soldi tuoi.`);
   });
 
-  // 7. Bollo: virtuale e non addebitato significa che lo paghi tu.
-  if(f.bolloImporto>0&&f.bolloVirtuale&&vicini(attesoTotale,f.totale))
-    nota('nota','Bollo a tuo carico',
-      `${fmtEUR(f.bolloImporto)} di imposta di bollo assolta in modo virtuale e non addebitata al cliente.`);
+  // 7. Il bollo: chi lo paga si deduce dalla quadratura, non da
+  //    «virtuale».
+  if(f.bolloImporto>0)
+    nota('nota',bolloAddebitato?'Bollo addebitato al cliente':'Bollo a tuo carico',
+      `${fmtEUR(f.bolloImporto)} di imposta di bollo${f.bolloVirtuale?', assolta in modo virtuale':''}${bolloAddebitato?', compresa nel totale della fattura.':', non addebitata al cliente.'}`);
 
-  return {esiti,cliente,mesi:unici};
+  return {esiti,cliente,mesi,abbinamento:ab.come};
 }
 // La schermata che fa vedere cosa si e' capito, PRIMA di toccare
 // qualunque dato salvato. Qui non si scrive niente: si carica il file,
@@ -3601,7 +3683,7 @@ async function savePolicy(ev){
   state.view='policyRimborsi';state.edit=id;render();
   setMsg('Policy di '+clientName(id)+' salvata.',4000);
 }
-function clientEdit(){const c=clientById(state.edit);if(!c)return clients();return appShell(`<h1>Modifica cliente</h1><form class="form" onsubmit="saveClient(event)"><div class="field"><label>Nome cliente</label><input name="name" value="${esc(c.name)}" required></div><div class="field"><label>Codice cliente</label><input name="code" maxlength="5" value="${esc(c.code||'')}" oninput="this.value=normCode(this.value)"${projectsOfClient(c.id).some(p=>p.code)?' readonly title="Ha gia\' dei progetti: il codice non si cambia"':''}><div class="small">${projectsOfClient(c.id).some(p=>p.code)?'Bloccato: da questo codice dipendono i codici dei progetti.':'Da 2 a 5 lettere o cifre.'}</div></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h" ${c.compensation_type==='daily_rate_8h'?'selected':''}>Tariffa giornaliera 8h</option><option value="monthly_flat" ${c.compensation_type==='monthly_flat'?'selected':''}>Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="${Number(c.daily_rate||0)}"></div><div class="field"><label>Ore standard giornata</label><input name="standard_hours" type="number" step="0.25" value="${Number(c.standard_hours||8)}"></div><div class="field"><label>Sede operativa (base trasferte)</label><input name="base_city" value="${esc(c.base_city||'')}" placeholder="Es. Milano"></div><div class="field"><label>Attivo</label><select name="active"><option value="true" ${c.active?'selected':''}>Sì</option><option value="false" ${!c.active?'selected':''}>No</option></select></div><h2>Policy rimborsi spese</h2><p class="sub">Per ogni voce di spesa scegli come viene gestita con questo cliente. L'app la proporrà in automatico quando inserisci una spesa.</p><div class="card"><b>Policy rimborsi</b><div class="desc" style="margin-top:4px">Chi paga ogni voce di spesa e fino a quanto. Sta in una pagina sua, così c'è spazio per i limiti.</div><button type="button" class="secondary" style="margin-top:12px" onclick="apriPolicy('${c.id}')">Apri la policy di ${esc(c.name)}</button></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteClient('${c.id}')">Elimina cliente</button><button type="button" class="secondary" onclick="${wbsReady()?`openClient('${c.id}')`:`go('clients')`}">Annulla</button></div></form>`)}
+function clientEdit(){const c=clientById(state.edit);if(!c)return clients();return appShell(`<h1>Modifica cliente</h1><form class="form" onsubmit="saveClient(event)"><div class="field"><label>Nome cliente</label><input name="name" value="${esc(c.name)}" required></div><div class="field"><label>Codice cliente</label><input name="code" maxlength="5" value="${esc(c.code||'')}" oninput="this.value=normCode(this.value)"${projectsOfClient(c.id).some(p=>p.code)?' readonly title="Ha gia\' dei progetti: il codice non si cambia"':''}><div class="small">${projectsOfClient(c.id).some(p=>p.code)?'Bloccato: da questo codice dipendono i codici dei progetti.':'Da 2 a 5 lettere o cifre.'}</div></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h" ${c.compensation_type==='daily_rate_8h'?'selected':''}>Tariffa giornaliera 8h</option><option value="monthly_flat" ${c.compensation_type==='monthly_flat'?'selected':''}>Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="${Number(c.daily_rate||0)}"></div><div class="field"><label>Ore standard giornata</label><input name="standard_hours" type="number" step="0.25" value="${Number(c.standard_hours||8)}"></div><div class="field"><label>Partita IVA</label><input name="vat_number" inputmode="numeric" value="${esc(c.vat_number||'')}" placeholder="Es. 11695380961"><div class="small">Serve a riconoscere il cliente quando carichi una fattura emessa: è l’unico abbinamento certo.</div></div><div class="field"><label>Sede operativa (base trasferte)</label><input name="base_city" value="${esc(c.base_city||'')}" placeholder="Es. Milano"></div><div class="field"><label>Attivo</label><select name="active"><option value="true" ${c.active?'selected':''}>Sì</option><option value="false" ${!c.active?'selected':''}>No</option></select></div><h2>Policy rimborsi spese</h2><p class="sub">Per ogni voce di spesa scegli come viene gestita con questo cliente. L'app la proporrà in automatico quando inserisci una spesa.</p><div class="card"><b>Policy rimborsi</b><div class="desc" style="margin-top:4px">Chi paga ogni voce di spesa e fino a quanto. Sta in una pagina sua, così c'è spazio per i limiti.</div><button type="button" class="secondary" style="margin-top:12px" onclick="apriPolicy('${c.id}')">Apri la policy di ${esc(c.name)}</button></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteClient('${c.id}')">Elimina cliente</button><button type="button" class="secondary" onclick="${wbsReady()?`openClient('${c.id}')`:`go('clients')`}">Annulla</button></div></form>`)}
 async function addClient(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));
   // il codice cliente regge tutta la catena dei codici sotto: se non
   // lo si scrive, dal cliente non si riesce piu' a creare un progetto
@@ -3625,7 +3707,7 @@ function collectPolicyFromForm(f,esistente){
   });
   return pol;
 }
-async function saveClient(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const policy=collectPolicyFromForm(f,parsePolicy(clientById(state.edit)));const payload={name:norm(f.name),compensation_type:f.compensation_type,daily_rate:Number(f.daily_rate||0),standard_hours:Number(f.standard_hours||8),active:f.active==='true',base_city:norm(f.base_city)||null,expense_policy:policy};
+async function saveClient(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const policy=collectPolicyFromForm(f,parsePolicy(clientById(state.edit)));const payload={name:norm(f.name),compensation_type:f.compensation_type,daily_rate:Number(f.daily_rate||0),standard_hours:Number(f.standard_hours||8),active:f.active==='true',base_city:norm(f.base_city)||null,vat_number:norm(f.vat_number)||null,expense_policy:policy};
   // il codice si scrive solo se il modulo lo ha lasciato modificabile:
   // dove ci sono gia' dei progetti e' bloccato, e non va sovrascritto
   if(f.code!==undefined&&normCode(f.code))payload.code=normCode(f.code);

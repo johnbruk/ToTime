@@ -65,7 +65,7 @@ const leggi=(pg,xml)=>pg.evaluate(x=>window.leggiFatturaXML(x),xml);
 const confronta=(pg,xml)=>pg.evaluate(x=>{
   const f=window.leggiFatturaXML(x);
   const r=window.confrontaFattura(f);
-  return {f,esiti:r.esiti,cliente:r.cliente?r.cliente.id:null,mesi:r.mesi};
+  return {f,esiti:r.esiti,cliente:r.cliente?r.cliente.id:null,mesi:r.mesi,abbinamento:r.abbinamento};
 },xml);
 
 console.log('\n=== SI LEGGE TUTTO QUELLO CHE SERVE ===');
@@ -124,7 +124,9 @@ console.log('\n=== SE HO LAVORATO MENO DI QUANTO HO FATTURATO, LO DICE ===');
 
 console.log('\n=== E SE IL CLIENTE NON SI RICONOSCE, NON TIRA A INDOVINARE ===');
 {
-  const pg=await apri(`S.clients[0].vat_number='99999999999';`);
+  // Serve che NON combacino ne' la P.IVA ne' il nome: col solo nome
+  // diverso il ripiego lo troverebbe lo stesso, ed e' giusto cosi'.
+  const pg=await apri(`S.clients[0].vat_number='99999999999'; S.clients[0].name='Altro Cliente Diverso';`);
   const r=await confronta(pg,XML);
   ok(r.cliente===null,'nessun cliente abbinato');
   const b=r.esiti.find(e=>e.liv==='blocco');
@@ -200,6 +202,157 @@ console.log('\n=== DALLA DASHBOARD FINO AL CONFRONTO A SCHERMO ===');
   const scritture=await pg.evaluate(()=>(window.__ins||[]).length);
   ok(scritture===0,'nessuna scrittura sul database, verificata',String(scritture));
   await pg.close();
+}
+
+console.log('\n=== SENZA LA PARTITA IVA IN ANAGRAFICA, RIPIEGA SUL NOME E LO DICE ===');
+{
+  // Il campo P.IVA sul cliente non esisteva: la prima versione di
+  // questa funzione sarebbe nata morta, perche' in produzione nessun
+  // cliente ne ha una e ogni fattura avrebbe risposto «non
+  // riconosciuto». Il test precedente non lo vedeva perche' la fixture
+  // il campo se lo inventava — lo stesso errore gia' fatto altrove:
+  // provare il proprio disegno invece della realta'.
+  const pg=await apri(`delete S.clients[0].vat_number; S.clients[0].name='Cliente Esempio SRL';`);
+  const r=await confronta(pg,XML);
+  ok(r.cliente==='sol','il cliente si trova lo stesso, dal nome');
+  ok(r.abbinamento==='nome','e l’app sa che è un ripiego',String(r.abbinamento));
+  const n=r.esiti.find(e=>/dal nome, non dalla partita IVA/.test(e.titolo));
+  ok(!!n,'che dichiara a schermo, invece di far credere a un abbinamento certo');
+  ok(!!n&&/22222222222/.test(n.dettaglio),'dicendo quale P.IVA scrivere per renderlo certo');
+  await pg.close();
+}
+
+console.log('\n=== DUE CLIENTI CON LO STESSO NOME: NON SCEGLIE LUI ===');
+{
+  const pg=await apri(`delete S.clients[0].vat_number; S.clients[0].name='Cliente Esempio SRL';
+    S.clients.push({id:'due',name:'Cliente Esempio SRL',daily_rate:460,standard_hours:8,
+      compensation_type:'daily_rate_8h',active:true});`);
+  const r=await confronta(pg,XML);
+  ok(r.cliente===null,'non abbina nessuno');
+  ok(r.esiti.some(e=>e.liv==='blocco'&&/stesso nome/.test(e.titolo)),
+     'e si ferma, chiedendo la partita IVA');
+  await pg.close();
+}
+
+console.log('\n=== UNA NOTA DI CREDITO NON SI CONFRONTA COME UNA FATTURA ===');
+{
+  // TD04 ha gli importi positivi e il segno glielo da' il tipo:
+  // trattarla come una fattura direbbe che hai fatturato quello che
+  // invece hai stornato.
+  const nc=XML.replace('<TipoDocumento>TD01','<TipoDocumento>TD04');
+  const pg=await apri();
+  const r=await confronta(pg,nc);
+  const b=r.esiti.find(e=>e.liv==='blocco');
+  ok(!!b&&/Tipo di documento non trattato/.test(b.titolo),'si ferma subito',b?b.titolo:'nessuno');
+  ok(!!b&&/nota di credito/.test(b.dettaglio),'dicendo che è una nota di credito');
+  ok(r.esiti.length===1,'e non aggiunge confronti che non avrebbero senso');
+  await pg.close();
+}
+
+console.log('\n=== UNA FATTURA IN ALTRA VALUTA NON SI CONFRONTA IN EURO ===');
+{
+  const usd=XML.replace('<Divisa>EUR','<Divisa>USD');
+  const pg=await apri();
+  const r=await confronta(pg,usd);
+  const b=r.esiti.find(e=>e.liv==='blocco');
+  ok(!!b&&/Valuta diversa/.test(b.titolo),'si ferma',b?b.titolo:'nessuno');
+  ok(!!b&&/USD/.test(b.dettaglio),'dicendo quale valuta ha trovato');
+  await pg.close();
+}
+
+console.log('\n=== PIÙ FATTURE IN UN FILE SOLO: NON NE LEGGE UNA E TACE ===');
+{
+  // Leggerne una e dire «fatto» nasconderebbe le altre.
+  const doppia=XML.replace('</FatturaElettronicaBody>',
+    '</FatturaElettronicaBody><FatturaElettronicaBody><DatiGenerali><DatiGeneraliDocumento><TipoDocumento>TD01</TipoDocumento><Numero>2/2026</Numero></DatiGeneraliDocumento></DatiGenerali></FatturaElettronicaBody>');
+  const pg=await apri();
+  const r=await confronta(pg,doppia);
+  const b=r.esiti.find(e=>e.liv==='blocco');
+  ok(!!b&&/2 fatture/.test(b.dettaglio),'dice quante ne ha trovate',b?b.dettaglio.slice(0,60):'nessuno');
+  await pg.close();
+}
+
+console.log('\n=== IL BOLLO: CHI LO PAGA SI DEDUCE DALLA QUADRATURA ===');
+{
+  // «BolloVirtuale SI» dice COME si paga, non A CHI tocca. Dedurne che
+  // non e' addebitato bloccava come «totale che non torna» una fattura
+  // sanissima che invece il bollo lo addebita.
+  const pg=await apri();
+  const r0=await confronta(pg,XML);
+  ok(!r0.esiti.some(e=>/totale non torna/i.test(e.titolo)),
+     'la fattura che NON addebita il bollo quadra');
+  ok(r0.esiti.some(e=>/Bollo a tuo carico/.test(e.titolo)),'e il bollo risulta a tuo carico');
+  // la stessa fattura, ma col bollo dentro il totale
+  const conBollo=XML.replace('<ImportoTotaleDocumento>3109.60','<ImportoTotaleDocumento>3111.60');
+  const r1=await confronta(pg,conBollo);
+  ok(!r1.esiti.some(e=>/totale non torna/i.test(e.titolo)),
+     'e anche quella che lo addebita quadra: non si blocca piu’ a torto');
+  ok(r1.esiti.some(e=>/Bollo addebitato al cliente/.test(e.titolo)),
+     'e stavolta dice che l’ha pagato il cliente');
+  await pg.close();
+}
+
+console.log('\n=== GIORNATE NON DA OTTO ORE: NIENTE SCOSTAMENTI FALSI ===');
+{
+  // Chi ha la giornata da 7,5 ore: 7,5 ore sono UN giorno in tutta
+  // l'app, e dividendo per 8 fisse diventavano 0,94.
+  const pg=await apri(`
+    S.clients[0].standard_hours=7.5;
+    S.timesheet_entries=[
+      {id:'f1',entry_date:'2026-02-10',client_id:'sol',project_id:'p1',activity_id:'a1',hours:7.5,standard_hours_snapshot:7.5},
+      {id:'x1',entry_date:'2026-03-02',client_id:'sol',project_id:'p1',activity_id:'a1',hours:7.5,standard_hours_snapshot:7.5},
+      {id:'x2',entry_date:'2026-03-03',client_id:'sol',project_id:'p1',activity_id:'a1',hours:7.5,standard_hours_snapshot:7.5},
+      {id:'x3',entry_date:'2026-03-04',client_id:'sol',project_id:'p1',activity_id:'a1',hours:7.5,standard_hours_snapshot:7.5},
+      {id:'x4',entry_date:'2026-03-05',client_id:'sol',project_id:'p1',activity_id:'a1',hours:7.5,standard_hours_snapshot:7.5},
+      {id:'x5',entry_date:'2026-03-06',client_id:'sol',project_id:'p1',activity_id:'a1',hours:7.5,standard_hours_snapshot:7.5},
+      {id:'x6',entry_date:'2026-03-09',client_id:'sol',project_id:'p1',activity_id:'a1',hours:3.75,standard_hours_snapshot:7.5}];
+  `);
+  const r=await confronta(pg,XML);
+  const g=r.esiti.find(e=>/Giorni diversi/.test(e.titolo));
+  ok(!g,'1 e 5,5 giornate da 7,5 ore sono 1 e 5,5 giorni: nessuno scostamento',
+     g?g.dettaglio.slice(0,80):'nessuno');
+  await pg.close();
+}
+
+console.log('\n=== PIÙ RIGHE SULLO STESSO MESE SI SOMMANO PRIMA DI CONFRONTARE ===');
+{
+  // Il flusso di fatturazione emette righe separate per consulenza e
+  // spese: confrontare OGNI riga col totale del mese produceva uno
+  // scostamento falso per ognuna.
+  const terza='<DettaglioLinee><NumeroLinea>3</NumeroLinea><Descrizione>Spese di trasferta - Marzo 2026</Descrizione><Quantita>1.00</Quantita><PrezzoUnitario>200.00</PrezzoUnitario><PrezzoTotale>200.00</PrezzoTotale><AliquotaIVA>0.00</AliquotaIVA><Natura>N2.2</Natura></DettaglioLinee>';
+  // La consulenza resta 2.530 e si AGGIUNGE la riga spese da 200: cosi'
+  // marzo in fattura fa 2.730, che e' esattamente quello che l'app si
+  // aspetta (lavoro + rimborsi). Totale documento adeguato, altrimenti
+  // sarebbe la fattura a non quadrare e il test proverebbe altro.
+  const spezzata=XML
+    .replace('<DatiRiepilogo>',terza+'<DatiRiepilogo>')
+    .replace('<ImportoTotaleDocumento>3109.60','<ImportoTotaleDocumento>3309.60');
+  const pg=await apri(`S.travel_expenses=[{id:'s1',expense_date:'2026-03-20',client_id:'sol',
+    project_id:'p1',expense_category_id:'volo',work_city:'Citta',amount:200,reimbursement_type:'invoice'}];`);
+  const r=await confronta(pg,spezzata);
+  ok(r.f.righe.length===3,'la fattura ha tre righe',String(r.f.righe.length));
+  const sc=r.esiti.filter(e=>/Importo diverso/.test(e.titolo));
+  ok(sc.length===0,'e nessuno scostamento: le due righe di marzo si sommano',
+     sc.map(e=>e.dettaglio).join(' | ').slice(0,110)||'nessuno');
+  await pg.close();
+}
+
+console.log('\n=== LA RIVALSA SI GUARDA IN TUTTI E DUE I VERSI ===');
+{
+  // C'e' in fattura ma e' spenta in configurazione, oppure manca in
+  // fattura ma e' accesa: prima nessuno dei due casi diceva niente.
+  const pg=await apri(`S.tax_settings[0].inps_recharge_enabled=false;`);
+  const r=await confronta(pg,XML);
+  ok(r.esiti.some(e=>/Rivalsa in fattura ma disattivata/.test(e.titolo)),
+     'rivalsa in fattura con la configurazione spenta: lo dice');
+  await pg.close();
+  const senza=XML.replace(/<DatiCassaPrevidenziale>[\s\S]*?<\/DatiCassaPrevidenziale>/,'')
+                 .replace('<ImportoTotaleDocumento>3109.60','<ImportoTotaleDocumento>2990.00');
+  const pg2=await apri();
+  const r2=await confronta(pg2,senza);
+  ok(r2.esiti.some(e=>/Rivalsa attiva in configurazione ma assente/.test(e.titolo)),
+     'e viceversa: configurazione accesa e fattura senza rivalsa');
+  await pg2.close();
 }
 
 await b.close(); srv.close();
