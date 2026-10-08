@@ -654,16 +654,38 @@ function leggiFatturaXML(testo){
     // righe piu' 0,01 di arrotondamento fanno 100,00 di imponibile, e
     // senza leggerlo la fattura risultava guasta per un centesimo.
     arrotondamento:numTag(r,'Arrotondamento')}));
+  // DatiRiepilogo e' obbligatorio nella fattura elettronica, ed e'
+  // l'unica fonte indipendente con cui confrontare le righe. Senza, il
+  // controllo «la fattura torna con se stessa» si saltava in silenzio e
+  // il totale si ricostruiva dalle righe stesse: un documento troncato
+  // poteva arrivare in fondo e far dire «tutto torna».
+  if(!riepiloghi.length)
+    return {errore:"Manca DatiRiepilogo, che nella fattura elettronica \u00e8 obbligatorio. Senza, non c'\u00e8 niente con cui verificare che le righe tornino: o il file \u00e8 troncato, o non \u00e8 una fattura elettronica."};
   const imposta=riepiloghi.reduce((a,r)=>a+r.imposta,0);
   const arrotondamentoRiepiloghi=riepiloghi.reduce((a,r)=>a+r.arrotondamento,0);
   const idCliente=tagLocale(cliente,'IdFiscaleIVA');
   const idFornitore=tagLocale(fornitore,'IdFiscaleIVA');
   const righe=tuttiLocali(body,'DettaglioLinee').map(l=>{
     const descrizione=testoTag(l,'Descrizione');
+    // DataInizioPeriodo e DataFinePeriodo sono campi dello standard: il
+    // mese che la riga fattura spesso sta li', scritto come dato. La
+    // convenzione «Consulenza - Marzo 2026» nella descrizione e' di chi
+    // emette, e cercare solo quella voleva dire non riconoscere il mese
+    // di nessun altro emittente: la riga finiva «senza mese» e il
+    // confronto mensile si fermava del tutto.
+    // Vale solo quando il periodo sta DENTRO un mese: a cavallo di due
+    // non si puo' attribuire, e allora si torna alla descrizione.
+    const dal=testoTag(l,'DataInizioPeriodo'),al=testoTag(l,'DataFinePeriodo');
+    const mesePeriodo=(dal&&(!al||al.slice(0,7)===dal.slice(0,7)))?dal.slice(0,7):null;
+    // E cosi' l'unita' di misura: «5,5 GG» dice i giorni senza bisogno
+    // di ripeterli in parole dentro la descrizione.
+    const um=testoTag(l,'UnitaMisura').trim();
+    const inGiorni=/^(gg|giorn|day)/i.test(um);
     return {numero:numTag(l,'NumeroLinea'),descrizione,
       quantita:numTag(l,'Quantita'),prezzoUnitario:numTag(l,'PrezzoUnitario'),
-      importo:numTag(l,'PrezzoTotale'),
-      mese:meseDaDescrizione(descrizione),giorni:giorniDaDescrizione(descrizione)};
+      importo:numTag(l,'PrezzoTotale'),unitaMisura:um,dal,al,
+      mese:mesePeriodo||meseDaDescrizione(descrizione),
+      giorni:inGiorni?numTag(l,'Quantita'):giorniDaDescrizione(descrizione)};
   });
   // L'imponibile della fattura e' la somma delle sue righe. NON e'
   // ImponibileCassa, che e' solo la parte su cui si calcola la rivalsa:
@@ -965,9 +987,19 @@ function confrontaFattura(f){
   const conBollo=senzaBollo+f.bolloImporto;
   const bolloAddebitato=f.bolloImporto>0&&vicini(conBollo,f.totale);
   // E un totale non dichiarato non e' un totale a zero: e' facoltativo.
-  if(f.totaleDichiarato&&!vicini(senzaBollo,f.totale)&&!bolloAddebitato)
+  const totaleGuasto=f.totaleDichiarato&&!vicini(senzaBollo,f.totale)&&!bolloAddebitato;
+  if(totaleGuasto)
     nota('blocco','Il totale non torna',
       `${fmtEUR(f.imponibile)} di righe + ${fmtEUR(f.rivalsaImporto)} di rivalsa${f.imposta>0?' + '+fmtEUR(f.imposta)+' di IVA':''} fanno ${fmtEUR(senzaBollo)}${f.bolloImporto>0?', o '+fmtEUR(conBollo)+' col bollo':''}, ma il totale documento e' ${fmtEUR(f.totale)}.`);
+  // E si ferma, come per il riepilogo: tutto quello che viene dopo si
+  // appoggia agli stessi importi, e proseguire vorrebbe dire dare la
+  // colpa ai consuntivi usando un documento gia' dichiarato
+  // inattendibile. Il ramo del riepilogo si fermava gia'; questo no.
+  if(totaleGuasto){
+    nota('nota','Il confronto coi tuoi dati si ferma qui',
+      'Finche’ il totale della fattura non torna con le sue parti, confrontarla col consuntivo produrrebbe scostamenti che vengono dal documento, non dall’app.');
+    return {esiti,cliente,mesi:[],abbinamento:ab.come};
+  }
   if(!f.totaleDichiarato)
     nota('nota','La fattura non dichiara un totale documento',
       `E' un campo facoltativo: la quadratura del totale non si puo' verificare. Le righe sommano ${fmtEUR(sommaRighe)}.`);
@@ -1007,6 +1039,17 @@ function confrontaFattura(f){
   });
   const mesi=Object.keys(perMese).sort();
   const senzaMese=f.righe.filter(r=>!r.mese).length;
+  // Lo sconto di documento sta fuori dalle righe: perMese sommava i
+  // PrezzoTotale LORDI e li confrontava con l'attesa netta dell'app.
+  // Su un mese solo lo sconto e' tutto suo e si applica; su piu' mesi
+  // non si sa come ripartirlo, e inventare una ripartizione sarebbe
+  // peggio che dirlo.
+  const scontoDoc=Number(f.sconto||0);
+  let scontoNonRipartibile=false;
+  if(scontoDoc){
+    if(mesi.length===1)perMese[mesi[0]].importo+=scontoDoc;
+    else if(mesi.length>1)scontoNonRipartibile=true;
+  }
 
   // 3. La rivalsa concorda con la configurazione? Va guardato in
   //    entrambi i versi: c'e' e non dovrebbe, oppure manca e dovrebbe.
@@ -1071,7 +1114,10 @@ function confrontaFattura(f){
   if(senzaMese&&mesi.length)
     nota('nota','Il confronto mese per mese non si fa',
       `${senzaMese===1?'Una riga non dice':senzaMese+' righe non dicono'} a che mese si riferisc${senzaMese===1?'e':'ono'}: potrebbe stare in uno qualunque dei mesi in fattura, quindi confrontarli darebbe scostamenti inventati. Scrivi il mese nella descrizione e ricarica.`);
-  if(cliente&&!senzaMese)mesi.forEach(mese=>{
+  if(scontoNonRipartibile)
+    nota('nota','Sconto di documento su più mesi',
+      `La fattura porta ${fmtEUR(Math.abs(scontoDoc))} di ${scontoDoc<0?'sconto':'maggiorazione'} in piede, che vale per tutto il documento: non si sa quanto ne tocchi a ciascun mese, quindi gli importi mese per mese non si confrontano.`);
+  if(cliente&&!senzaMese&&!scontoNonRipartibile)mesi.forEach(mese=>{
     const m=perMese[mese],et=monthLabel(mese);
     const quante=m.righe>1?` (${m.righe} righe sommate)`:'';
     if(m.haGiorni){

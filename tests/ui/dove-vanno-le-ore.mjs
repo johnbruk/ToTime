@@ -324,6 +324,15 @@ console.log('\n=== UN CONSUNTIVO NEL PASSATO SI VEDE DOPO AVERLO SALVATO ===');
   await pg.waitForTimeout(1400);
   const salvate=await pg.evaluate(()=>(window.__stores.timesheet_entries||[]).length);
   ok(salvate===1,'la riga si salva',String(salvate));
+  // Non basta che ESISTA una riga: deve essere QUELLA riga. Il caso
+  // segnalato era un consuntivo su Solution con data nel passato, e un
+  // test che conta e basta passerebbe anche se finisse sul cliente
+  // sbagliato o sulla data di oggi.
+  const riga=await pg.evaluate(()=>(window.__stores.timesheet_entries||[])[0]||{});
+  ok(riga.client_id==='sol','sul cliente Solution',String(riga.client_id));
+  ok(riga.entry_date==='2026-02-19','con la data del passato che avevo scritto',String(riga.entry_date));
+  ok(Number(riga.hours)===8,'e le ore giuste',String(riga.hours));
+  ok(riga.wbs_id==='w10','agganciata alla commessa',String(riga.wbs_id));
   const t=await testo(pg);
   ok(/Febbraio 2026/.test(t),'e l’app va a Febbraio 2026, dove la riga sta',
      (t.match(/Timesheet[^›]{0,40}/)||[''])[0]);
@@ -355,6 +364,42 @@ console.log('\n=== IL CLIENTE SI SCEGLIE, NON SI PROPONE ===');
      (t.match(/Scegli il cliente[^.]{0,50}/)||[''])[0]);
   ok(await pg.evaluate(()=>(window.__stores.timesheet_entries||[]).length)===0,
      'niente riga scritta a caso');
+  await pg.close();
+}
+
+console.log('\n=== SOLUTION NEL PASSATO, CON LA COMMESSA SENZA ATTIVITÀ ===');
+{
+  // È il caso esatto segnalato: cliente Solution, data nel passato, e
+  // la commessa che NON porta con sé un'attività — la condizione che
+  // faceva partire il salvataggio col campo vuoto. Qui il database la
+  // pretende, come quello vero prima della migrazione.
+  const pg=await apri(`S.wbs_items[0].activity_id=null;`);
+  await pg.evaluate(()=>{window.__nonNulle=['activity_id']});
+  await pg.evaluate(()=>window.go('dailyForm'));
+  await pg.waitForTimeout(600);
+  await scegliCliente(pg,'sol');
+  const campo=await pg.evaluate(()=>{
+    const s=document.querySelector('#app form.form [name=activity_id]');
+    return !s?'assente':(s.closest('.field')&&s.closest('.field').hidden?'nascosto':'visibile');
+  });
+  ok(campo==='visibile','il tipo di attività si può scegliere: la commessa non ne porta',campo);
+  await pg.evaluate(()=>{
+    const f=document.querySelector('#app form.form');
+    f.entry_date.value='2026-02-19';
+    if(f.hours)f.hours.value='8';
+    f.activity_id.value='a1';
+    f.requestSubmit();
+  });
+  await pg.waitForTimeout(1400);
+  const riga=await pg.evaluate(()=>(window.__stores.timesheet_entries||[])[0]||{});
+  ok(riga.client_id==='sol'&&riga.entry_date==='2026-02-19',
+     'il consuntivo si salva, su Solution e col 19 febbraio',
+     `${riga.client_id} · ${riga.entry_date}`);
+  ok(riga.activity_id==='a1','con l’attività scelta, che il database pretende',String(riga.activity_id));
+  const t=await testo(pg);
+  ok(/Febbraio 2026/.test(t),'e si finisce su Febbraio 2026, dove la riga sta',
+     (t.match(/Timesheet[^›]{0,40}/)||[''])[0]);
+  ok(!/null value in column/.test(t),'senza nessun testo grezzo del database');
   await pg.close();
 }
 
