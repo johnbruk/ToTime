@@ -355,6 +355,148 @@ console.log('\n=== LA RIVALSA SI GUARDA IN TUTTI E DUE I VERSI ===');
   await pg2.close();
 }
 
+console.log('\n=== L’IVA FA PARTE DEL TOTALE: NON SOLO FORFETTARI ===');
+{
+  // L'app supporta anche ordinario e semplificato. Una fattura da
+  // 1.000 + 220 di IVA risultava «non quadrata» solo perche' l'imposta
+  // non veniva sommata.
+  const conIva=XML
+    .replace(/<DatiCassaPrevidenziale>[\s\S]*?<\/DatiCassaPrevidenziale>/,'')
+    .replace('<ImponibileImporto>3109.60','<ImponibileImporto>2990.00')
+    .replace('<Imposta>0.00','<Imposta>657.80')
+    .replace('<ImportoTotaleDocumento>3109.60','<ImportoTotaleDocumento>3647.80');
+  const pg=await apri();
+  const r=await confronta(pg,conIva);
+  ok(Math.abs(r.f.imposta-657.8)<0.005,'l’IVA si legge dai riepiloghi',String(r.f.imposta));
+  ok(!r.esiti.some(e=>/totale non torna/i.test(e.titolo)),
+     'e 2.990 + 657,80 = 3.647,80 quadra: niente blocco a torto',
+     (r.esiti.find(e=>/totale/i.test(e.titolo))||{}).dettaglio||'nessuno');
+  await pg.close();
+}
+
+console.log('\n=== IL CONTROLLO DI QUADRATURA ADESSO PUÒ DAVVERO FALLIRE ===');
+{
+  // Confrontava le righe con la somma delle righe stesse: non poteva
+  // fallire mai, pur essendo annunciato a schermo come fatto.
+  const bugiarda=XML.replace('<ImponibileImporto>3109.60','<ImponibileImporto>5000.00')
+                    .replace('<ImportoTotaleDocumento>3109.60','<ImportoTotaleDocumento>5000.00');
+  const pg=await apri();
+  const r=await confronta(pg,bugiarda);
+  const b=r.esiti.find(e=>/non torna con se stessa/.test(e.titolo));
+  ok(!!b,'righe e riepiloghi che non concordano: ora si vede',b?b.titolo:'nessuno');
+  ok(!!b&&/5\.000,00/.test(b.dettaglio),'coi due numeri a confronto',b?b.dettaglio.slice(0,100):'');
+  await pg.close();
+}
+
+console.log('\n=== UN TOTALE NON DICHIARATO NON È UN TOTALE A ZERO ===');
+{
+  const senzaTot=XML.replace(/<ImportoTotaleDocumento>[^<]*<\/ImportoTotaleDocumento>/,'');
+  const pg=await apri();
+  const r=await confronta(pg,senzaTot);
+  ok(!r.esiti.some(e=>/totale non torna/i.test(e.titolo)),
+     'non lo dichiara come sbagliato: è un campo facoltativo');
+  ok(r.esiti.some(e=>/non dichiara un totale/.test(e.titolo)),
+     'ma dice che manca, invece di mostrare 0,00 senza spiegazione');
+  await pg.close();
+}
+
+console.log('\n=== PAGAMENTO A RATE: NON SPACCIA LA PRIMA PER L’UNICA ===');
+{
+  const aRate=XML.replace('</DatiPagamento>',
+    '<DettaglioPagamento><ModalitaPagamento>MP05</ModalitaPagamento><DataScadenzaPagamento>2026-06-30</DataScadenzaPagamento><ImportoPagamento>1554.80</ImportoPagamento></DettaglioPagamento></DatiPagamento>');
+  const pg=await apri();
+  const r=await confronta(pg,aRate);
+  ok(r.f.rate.length===2,'legge tutte le rate',String(r.f.rate.length));
+  const n=r.esiti.find(e=>/più rate/i.test(e.titolo));
+  ok(!!n,'e lo segnala',n?n.titolo:'nessuno');
+  ok(!!n&&/30\/06\/2026/.test(n.dettaglio),'elencando anche la seconda scadenza',n?n.dettaglio.slice(0,90):'');
+  await pg.close();
+}
+
+console.log('\n=== SIGLE COL PUNTO: «Acme S.r.l.» È «Acme SRL» ===');
+{
+  const conPunti=XML.replace('<Denominazione>CLIENTE ESEMPIO SRL','<Denominazione>Cliente Esempio S.r.l.');
+  const pg=await apri(`delete S.clients[0].vat_number; S.clients[0].name='Cliente Esempio SRL';`);
+  const r=await confronta(pg,conPunti);
+  ok(r.cliente==='sol','il cliente si trova lo stesso',String(r.cliente));
+  ok(r.abbinamento==='nome','dal nome, togliendo la sigla anche se puntata');
+  await pg.close();
+}
+
+console.log('\n=== DUE CLIENTI CON LA STESSA PARTITA IVA: NON SCEGLIE ===');
+{
+  const pg=await apri(`S.clients.push({id:'bis',name:'Doppione',vat_number:'22222222222',
+    daily_rate:460,standard_hours:8,compensation_type:'daily_rate_8h',active:true});`);
+  const r=await confronta(pg,XML);
+  ok(r.cliente===null,'non ne sceglie uno a caso');
+  ok(r.esiti.some(e=>e.liv==='blocco'&&/stessa partita IVA/.test(e.titolo)),
+     'e dice che la P.IVA sta su più schede');
+  await pg.close();
+}
+
+console.log('\n=== LE ORE NON FATTURABILI NON ENTRANO NELLE ATTESE ===');
+{
+  // Una commessa non fatturabile: prospettoProgetto ne azzera gia' il
+  // da fatturare. Contandole qui, una fattura emessa correttamente
+  // risultava corta di tutto il lavoro interno.
+  const pg=await apri(`
+    S.wbs_items=[{id:'w1',project_id:'p1',code:'INT',name:'Interno',kind:'activity',billable:false,status:'active'}];
+    S.timesheet_entries.push({id:'int1',entry_date:'2026-03-11',client_id:'sol',project_id:'p1',
+      activity_id:'a1',hours:8,wbs_id:'w1'});
+  `);
+  const r=await confronta(pg,XML);
+  const g=r.esiti.find(e=>/Giorni diversi/.test(e.titolo));
+  ok(!g,'il giorno interno non conta come fatturabile: nessuno scostamento',
+     g?g.dettaglio.slice(0,80):'nessuno');
+  const i=r.esiti.find(e=>/Importo diverso/.test(e.titolo));
+  ok(!i,'e nemmeno sull’importo',i?i.dettaglio.slice(0,80):'nessuno');
+  await pg.close();
+}
+
+console.log('\n=== SE IL DATABASE NON HA ANCORA LA COLONNA, LO DICE ===');
+{
+  // Senza la migrazione la scrittura passa lo stesso, ma senza la
+  // partita IVA. Dire «salvato» e basta farebbe credere che ci sia, e
+  // poi il riconoscimento della fattura non funzionerebbe senza che si
+  // capisca perche'.
+  const pg=await apri();
+  await pg.evaluate(()=>{window.__colonneMancanti=['vat_number']});
+  await pg.evaluate(()=>window.go('clients'));
+  await pg.waitForTimeout(500);
+  await pg.evaluate(()=>{
+    const f=document.querySelector('#app form.form');
+    f.name.value='Nuovo Cliente';
+    if(f.vat_number)f.vat_number.value='12345678901';
+    f.requestSubmit();
+  });
+  await pg.waitForTimeout(1200);
+  const t=await testo(pg);
+  ok(/non ha ancora dove mettere/.test(t),'avvisa che il dato non è stato scritto',t.slice(0,110));
+  ok(/partita IVA/i.test(t),'nominando la partita IVA');
+  ok(/2026-10-08_partita-iva-cliente\.sql/.test(t),'e la migrazione da lanciare');
+  await pg.close();
+}
+
+console.log('\n=== IL CAMPO C’È ANCHE QUANDO SI CREA IL CLIENTE ===');
+{
+  // Chiesto esplicitamente: poterla inserire gia' alla creazione, non
+  // solo modificando dopo.
+  const pg=await apri();
+  await pg.evaluate(()=>window.go('clients'));
+  await pg.waitForTimeout(500);
+  ok(await pg.evaluate(()=>!!document.querySelector('#app form.form [name=vat_number]')),
+     'il modulo di creazione ha il campo Partita IVA');
+  await pg.evaluate(()=>{
+    const f=document.querySelector('#app form.form');
+    f.name.value='Cliente Nuovo'; f.vat_number.value='98765432109'; f.requestSubmit();
+  });
+  await pg.waitForTimeout(1200);
+  const c=await pg.evaluate(()=>(window.__stores.clients||[]).find(x=>x.name==='Cliente Nuovo'));
+  ok(!!c,'il cliente si crea');
+  ok(!!c&&c.vat_number==='98765432109','con la sua partita IVA salvata',String(c&&c.vat_number));
+  await pg.close();
+}
+
 await b.close(); srv.close();
 console.log(`\n=== fattura caricata: OK ${pass} · KO ${fail} ===`);
 process.exit(fail?1:0);

@@ -282,6 +282,7 @@ async function runResilient(makeCall,payload,dropKeys){
 const MIGRAZIONE_DI={
   trip_id:'2026-10-06_trasferte.sql',
   vehicle_id:'2026-10-06_veicoli-e-chilometrica.sql',
+  vat_number:'2026-10-08_partita-iva-cliente.sql',
   from_place:'2026-10-06_veicoli-e-chilometrica.sql',
   to_place:'2026-10-06_veicoli-e-chilometrica.sql',
   round_trip:'2026-10-06_veicoli-e-chilometrica.sql',
@@ -294,6 +295,7 @@ const NOME_COLONNA={
   trip_id:'la trasferta',vehicle_id:'il veicolo',from_place:'la partenza',
   to_place:'l\u2019arrivo',round_trip:'l\u2019andata e ritorno',
   payment_method:'come l\u2019hai pagata',receipt_kept:'la ricevuta',
+  vat_number:'la partita IVA del cliente',
   receipt_path:'la ricevuta allegata',wbs_id:'la commessa',
   is_mileage:'il rimborso chilometrico'
 };
@@ -601,7 +603,20 @@ function leggiFatturaXML(testo){
   const gen=tagLocale(body,'DatiGeneraliDocumento');
   const cassa=tagLocale(gen,'DatiCassaPrevidenziale');
   const bollo=tagLocale(gen,'DatiBollo');
+  // Le rate: una fattura puo' avere piu' scadenze. Tenere solo la prima
+  // e presentarla come LA scadenza della fattura nasconde le altre.
+  const rate=tuttiLocali(body,'DettaglioPagamento').map(p=>({
+    scadenza:testoTag(p,'DataScadenzaPagamento'),
+    importo:numTag(p,'ImportoPagamento'),
+    iban:testoTag(p,'IBAN')}));
   const pag=tagLocale(body,'DettaglioPagamento');
+  // I riepiloghi sono la fonte autorevole dell'imponibile e dell'IVA.
+  // Senza leggerli, il controllo «la fattura torna con se stessa»
+  // confrontava le righe con la somma delle righe stesse: non poteva
+  // fallire mai, pur essendo annunciato a schermo.
+  const riepiloghi=tuttiLocali(body,'DatiRiepilogo').map(r=>({
+    imponibile:numTag(r,'ImponibileImporto'),imposta:numTag(r,'Imposta')}));
+  const imposta=riepiloghi.reduce((a,r)=>a+r.imposta,0);
   const idCliente=tagLocale(cliente,'IdFiscaleIVA');
   const righe=tuttiLocali(body,'DettaglioLinee').map(l=>{
     const descrizione=testoTag(l,'Descrizione');
@@ -631,7 +646,15 @@ function leggiFatturaXML(testo){
     rivalsaImporto:cassa?numTag(cassa,'ImportoContributoCassa'):0,
     bolloVirtuale:bollo?testoTag(bollo,'BolloVirtuale')==='SI':false,
     bolloImporto:bollo?numTag(bollo,'ImportoBollo'):0,
+    // ImportoTotaleDocumento e' facoltativo: assente non vuol dire
+    // zero. Trattarlo come zero faceva risultare «totale che non
+    // torna» ogni fattura che non lo espone, e mostrava 0,00 a schermo.
     totale:numTag(gen,'ImportoTotaleDocumento'),
+    totaleDichiarato:!!tagLocale(gen,'ImportoTotaleDocumento'),
+    imposta,riepiloghi,
+    // L'imponibile autorevole viene dai riepiloghi, non dalle righe.
+    imponibileRiepilogo:riepiloghi.length?riepiloghi.reduce((a,r)=>a+r.imponibile,0):null,
+    rate,
     scadenza:pag?testoTag(pag,'DataScadenzaPagamento'):'',
     iban:pag?testoTag(pag,'IBAN'):'',
   };
@@ -647,12 +670,28 @@ function leggiFatturaXML(testo){
 // riempie, nessuna fattura troverebbe il suo cliente e tutti i
 // confronti resterebbero fermi. Quindi si ripiega sul nome — e si dice
 // che e' un ripiego, perche' due clienti possono chiamarsi uguale.
-function normaNome(v){return String(v||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').replace(/\b(s\.?r\.?l|s\.?p\.?a|snc|sas|srls)\b/g,'').trim()}
+// Le sigle societarie si tolgono PRIMA di appiattire la punteggiatura:
+// «Acme S.r.l.» diventava «acme s r l», e a quel punto la sigla non si
+// riconosceva piu'. Il cliente salvato come «Acme SRL» diventava
+// «acme», i due non combaciavano, e un cliente vero risultava
+// sconosciuto.
+function normaNome(v){
+  return String(v||'').toLowerCase()
+    .replace(/\bs\s*\.?\s*r\s*\.?\s*l\s*\.?s?\b/g,' ')
+    .replace(/\bs\s*\.?\s*p\s*\.?\s*a\s*\.?\b/g,' ')
+    .replace(/\bs\s*\.?\s*n\s*\.?\s*c\s*\.?\b/g,' ')
+    .replace(/\bs\s*\.?\s*a\s*\.?\s*s\s*\.?\b/g,' ')
+    .replace(/[^a-z0-9]+/g,' ').trim();
+}
 function clientePerFattura(f){
   const p=String(f&&f.clientePiva||'').replace(/\s/g,'');
   if(p){
-    const perPiva=(data.clients||[]).find(c=>String(c.vat_number||'').replace(/\s/g,'')===p);
-    if(perPiva)return {cliente:perPiva,come:'piva'};
+    // Niente impedisce a due schede di avere la stessa partita IVA: il
+    // database non ha un vincolo e il modulo non lo rifiuta. Sceglierne
+    // una vorrebbe dire attribuire gli scostamenti al cliente sbagliato.
+    const perPiva=(data.clients||[]).filter(c=>String(c.vat_number||'').replace(/\s/g,'')===p);
+    if(perPiva.length===1)return {cliente:perPiva[0],come:'piva'};
+    if(perPiva.length>1)return {cliente:null,come:'pivaDoppia'};
   }
   const n=normaNome(f&&f.clienteNome);
   if(n){
@@ -675,15 +714,24 @@ function clientePerPiva(piva){
 // 8 fisse dava scostamenti falsi su chi ha la giornata diversa: 7,5 ore
 // con standard 7,5 sono un giorno pieno dappertutto nell'app, e qui
 // diventavano 0,94.
-function giorniConsuntivati(clientId,mese){
+// Le ore su una commessa non fatturabile non vanno in fattura: lo dice
+// gia' prospettoProgetto, che per quelle azzera il da fatturare.
+// Contandole qui, una fattura emessa correttamente risultava corta di
+// tutto il lavoro interno.
+function rigaFatturabile(e){
+  const w=e&&e.wbs_id?wbsById(e.wbs_id):null;
+  return !w||w.billable!==false;
+}
+function oreDelMese(clientId,mese){
   return (data.entries||[]).filter(e=>
-    e.client_id===clientId && String(e.entry_date||'').startsWith(mese) && !isPlanned(e)
-  ).reduce((s,e)=>s+dailyDays(e),0);
+    e.client_id===clientId && String(e.entry_date||'').startsWith(mese) &&
+    !isPlanned(e) && rigaFatturabile(e));
+}
+function giorniConsuntivati(clientId,mese){
+  return oreDelMese(clientId,mese).reduce((s,e)=>s+dailyDays(e),0);
 }
 function importoConsuntivato(clientId,mese){
-  const g=(data.entries||[]).filter(e=>
-    e.client_id===clientId && String(e.entry_date||'').startsWith(mese) && !isPlanned(e)
-  ).reduce((s,e)=>s+dailyAmount(e),0);
+  const g=oreDelMese(clientId,mese).reduce((s,e)=>s+dailyAmount(e),0);
   const mens=(data.monthly||[]).filter(e=>
     e.client_id===clientId && (String(e.year)+'-'+String(e.month).padStart(2,'0'))===mese
   ).reduce((s,e)=>s+Number(e.amount||0),0);
@@ -721,7 +769,10 @@ function confrontaFattura(f){
   // 1. Di chi e'.
   const ab=clientePerFattura(f);
   const cliente=ab.cliente;
-  if(!cliente&&ab.come==='omonimi')
+  if(!cliente&&ab.come==='pivaDoppia')
+    nota('blocco','Pi\u00f9 clienti con la stessa partita IVA',
+      `La P.IVA ${f.clientePiva} compare su piu' di una scheda cliente. Finche' resta cos\u00ec, i confronti finirebbero sul cliente sbagliato: tienila su una sola.`);
+  else if(!cliente&&ab.come==='omonimi')
     nota('blocco','Più clienti con lo stesso nome',
       `${f.clienteNome} corrisponde a piu' di un cliente. Scrivi la partita IVA nella scheda del cliente giusto, cosi' l'abbinamento diventa certo.`);
   else if(!cliente)
@@ -733,18 +784,43 @@ function confrontaFattura(f){
 
   // 2. La fattura torna con se' stessa?
   const sommaRighe=f.righe.reduce((s,r)=>s+Number(r.importo||0),0);
-  if(!vicini(sommaRighe,f.imponibile))
+  // Il confronto va fatto contro i RIEPILOGHI, che sono la fonte
+  // autorevole. Confrontando le righe con l'imponibile — che e' esso
+  // stesso la somma delle righe — il controllo non poteva fallire mai,
+  // pur essendo annunciato a schermo come fatto.
+  // Attenzione all'aritmetica della FatturaPA: nel riepilogo il
+  // contributo cassa CONCORRE all'imponibile, quindi ImponibileImporto
+  // vale righe + rivalsa. Non in tutti i documenti pero': esiste anche
+  // la convenzione in cui non concorre. Si accettano entrambe, e si
+  // segnala solo se non torna in nessuno dei due modi.
+  const righePiuRivalsa=sommaRighe+f.rivalsaImporto;
+  if(f.imponibileRiepilogo!==null&&
+     !vicini(sommaRighe,f.imponibileRiepilogo)&&!vicini(righePiuRivalsa,f.imponibileRiepilogo))
     nota('blocco','La fattura non torna con se stessa',
-      `Le righe sommano ${fmtEUR(sommaRighe)}, ma l'imponibile risulta ${fmtEUR(f.imponibile)}.`);
+      `Le righe sommano ${fmtEUR(sommaRighe)}${f.rivalsaImporto>0?' ('+fmtEUR(righePiuRivalsa)+' con la rivalsa)':''}, ma i riepiloghi dichiarano ${fmtEUR(f.imponibileRiepilogo)} di imponibile.`);
   // Il bollo puo' essere addebitato al cliente oppure no: «virtuale»
   // dice come si paga, non a chi tocca. Quindi si accettano entrambe le
   // quadrature, e si blocca solo se non torna in nessuno dei due modi.
-  const senzaBollo=f.imponibile+f.rivalsaImporto;
+  // L'IVA fa parte del totale documento. L'app non serve solo
+  // forfettari: in regime ordinario o semplificato una fattura da
+  // 1.000 + 220 di IVA risultava «non quadrata» solo perche' l'imposta
+  // non veniva sommata.
+  // Il totale: si parte dall'imponibile del riepilogo quando c'e',
+  // perche' la rivalsa li' e' gia' dentro; altrimenti dalle righe piu'
+  // la rivalsa. Poi l'IVA, che in regime ordinario fa parte del totale.
+  const baseTotale=f.imponibileRiepilogo!==null
+    ? (vicini(righePiuRivalsa,f.imponibileRiepilogo)?f.imponibileRiepilogo:f.imponibileRiepilogo+f.rivalsaImporto)
+    : righePiuRivalsa;
+  const senzaBollo=baseTotale+f.imposta;
   const conBollo=senzaBollo+f.bolloImporto;
   const bolloAddebitato=f.bolloImporto>0&&vicini(conBollo,f.totale);
-  if(!vicini(senzaBollo,f.totale)&&!bolloAddebitato)
+  // E un totale non dichiarato non e' un totale a zero: e' facoltativo.
+  if(f.totaleDichiarato&&!vicini(senzaBollo,f.totale)&&!bolloAddebitato)
     nota('blocco','Il totale non torna',
-      `${fmtEUR(f.imponibile)} di imponibile + ${fmtEUR(f.rivalsaImporto)} di rivalsa fanno ${fmtEUR(senzaBollo)}${f.bolloImporto>0?', o '+fmtEUR(conBollo)+' col bollo':''}, ma il totale documento e' ${fmtEUR(f.totale)}.`);
+      `${fmtEUR(f.imponibile)} di righe + ${fmtEUR(f.rivalsaImporto)} di rivalsa${f.imposta>0?' + '+fmtEUR(f.imposta)+' di IVA':''} fanno ${fmtEUR(senzaBollo)}${f.bolloImporto>0?', o '+fmtEUR(conBollo)+' col bollo':''}, ma il totale documento e' ${fmtEUR(f.totale)}.`);
+  if(!f.totaleDichiarato)
+    nota('nota','La fattura non dichiara un totale documento',
+      `E' un campo facoltativo: la quadratura del totale non si puo' verificare. Le righe sommano ${fmtEUR(sommaRighe)}.`);
   // La rivalsa si verifica sulla SUA base, che non e' per forza
   // l'imponibile della fattura.
   const baseRivalsa=f.imponibileCassa||f.imponibile;
@@ -799,6 +875,13 @@ function confrontaFattura(f){
       nota('scostamento',`Importo diverso dal fatturabile · ${et}`,
         `In fattura ${fmtEUR(m.importo)}${quante}, l'app si aspettava ${fmtEUR(atteso)} (lavoro piu’ rimborsi spese del mese).`);
   });
+
+  // 4-bis. Le rate: dire «da saldare entro il...» indicando solo la
+  //        prima scadenza farebbe credere che valga per l'intero
+  //        importo.
+  if(f.rate&&f.rate.length>1)
+    nota('nota','Pagamento in pi\u00f9 rate',
+      `${f.rate.length} scadenze: ${f.rate.map(r=>(r.scadenza?fmtDMY(r.scadenza):'senza data')+' '+fmtEUR(r.importo)).join(' \u00b7 ')}. La data in alto e' solo la prima.`);
 
   // 5. Mesi coperti.
   if(mesi.length>1)
@@ -3644,7 +3727,7 @@ function appearance(){return appShell(`<div class="screenTitle">Aspetto / Tema</
 function exportTimesheetViewOptions(){const clients=activeClients();const selected=clients[0]?.id||'';return `<div class="field"><label>Mese</label><input name="month" type="month" value="${state.month}"></div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)"><option value="">Tutti i clienti (solo per archivio)</option>${clients.map(c=>`<option value="${c.id}"${c.id===selected?' selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Cliente/Progetto</label><select name="project_id"><option value="">Tutti i progetti</option>${projectOptions(selected)}</select></div><div class="field"><label>Includi importi</label><select name="include_amount"><option value="false">No, solo dettaglio operativo</option><option value="true">Sì, includi importi</option></select></div>`}
 function exportTimesheet(){return appShell(`<div class="screenTitle">Export Timesheet Excel</div><p class="sub">Scarica il dettaglio mensile da inviare al cliente.</p><form class="form" onsubmit="downloadTimesheetExcel(event)">${exportTimesheetViewOptions()}<div class="actions"><button class="primary">Scarica Excel</button><button type="button" class="secondary" onclick="go('settings')">Annulla</button></div></form>`)}
 
-function clients(){return appShell(`<h1>Clienti</h1><form class="form" onsubmit="addClient(event)"><div class="field"><label>Nome cliente</label><input name="name" required></div><div class="field"><label>Codice cliente</label><input name="code" maxlength="5" placeholder="Es. SO" oninput="this.value=normCode(this.value)"><div class="small">Da 2 a 5 lettere o cifre. Entra nel codice di ogni commessa: una volta usato non si cambia piu'.</div></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h">Tariffa giornaliera 8h</option><option value="monthly_flat">Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="0"></div><button class="primary">Aggiungi cliente</button></form>${sortControl('clients')}<div class="list">${sortEntities('clients',data.clients).map(c=>`<div class="row" onclick="${wbsReady()?`openClient('${c.id}')`:`editClient('${c.id}')`}"><div></div><div><div class="title">${esc(c.name)}</div><div class="desc">${c.compensation_type==='daily_rate_8h'?'Tariffa giornaliera 8h · '+fmtEUR(c.daily_rate||0):'Una tantum mensile'} · ${c.active?'Attivo':'Disattivo'}</div></div>${moveBtns('clients',c.id)}</div>`).join('')||emptyForm('Nessun cliente ancora inserito.')}</div>`)}
+function clients(){return appShell(`<h1>Clienti</h1><form class="form" onsubmit="addClient(event)"><div class="field"><label>Nome cliente</label><input name="name" required></div><div class="field"><label>Codice cliente</label><input name="code" maxlength="5" placeholder="Es. SO" oninput="this.value=normCode(this.value)"><div class="small">Da 2 a 5 lettere o cifre. Entra nel codice di ogni commessa: una volta usato non si cambia piu'.</div></div><div class="field"><label>Partita IVA</label><input name="vat_number" inputmode="numeric" placeholder="Es. 11695380961"><div class="small">Serve a riconoscere il cliente quando carichi una fattura emessa: è l’unico abbinamento certo.</div></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h">Tariffa giornaliera 8h</option><option value="monthly_flat">Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="0"></div><button class="primary">Aggiungi cliente</button></form>${sortControl('clients')}<div class="list">${sortEntities('clients',data.clients).map(c=>`<div class="row" onclick="${wbsReady()?`openClient('${c.id}')`:`editClient('${c.id}')`}"><div></div><div><div class="title">${esc(c.name)}</div><div class="desc">${c.compensation_type==='daily_rate_8h'?'Tariffa giornaliera 8h · '+fmtEUR(c.daily_rate||0):'Una tantum mensile'} · ${c.active?'Attivo':'Disattivo'}</div></div>${moveBtns('clients',c.id)}</div>`).join('')||emptyForm('Nessun cliente ancora inserito.')}</div>`)}
 function editClient(id){navigateTo('clientEdit',{edit:id})}
 // \u2500\u2500\u2500 Policy rimborsi: una pagina sua \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 // Stava in fondo al modulo di modifica cliente, una tendina per voce,
@@ -3687,7 +3770,7 @@ function clientEdit(){const c=clientById(state.edit);if(!c)return clients();retu
 async function addClient(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));
   // il codice cliente regge tutta la catena dei codici sotto: se non
   // lo si scrive, dal cliente non si riesce piu' a creare un progetto
-  const payload={name:norm(f.name),code:normCode(f.code)||null,compensation_type:f.compensation_type,daily_rate:Number(f.daily_rate||0),standard_hours:8,active:true};const {error}=await insertResilient('clients',payload,['code']);if(error)return setMsg(error.message,7000);await reload();state.view='clients';render()}
+  const payload={name:norm(f.name),code:normCode(f.code)||null,compensation_type:f.compensation_type,daily_rate:Number(f.daily_rate||0),standard_hours:8,vat_number:norm(f.vat_number)||null,active:true};const res=await insertResilient('clients',payload,['code','vat_number']);if(res.error)return setMsg(res.error.message,7000);const avviso=avvisoScartate(res);await reload();state.view='clients';render();if(avviso)setMsg(avviso,12000)}
 // Se il modulo non contiene nemmeno un campo della policy, la policy
 // non si tocca. Senza questa riga, salvare il cliente da un modulo
 // senza editor scriverebbe una policy vuota e i limiti sparirebbero
@@ -3711,7 +3794,10 @@ async function saveClient(ev){ev.preventDefault();const f=Object.fromEntries(new
   // il codice si scrive solo se il modulo lo ha lasciato modificabile:
   // dove ci sono gia' dei progetti e' bloccato, e non va sovrascritto
   if(f.code!==undefined&&normCode(f.code))payload.code=normCode(f.code);
-  const {error}=await updateResilient('clients',payload,state.edit,['base_city','expense_policy','code']);if(error)return setMsg(error.message,7000);await reload();state.view='clients';state.edit=null;render()}
+  const res=await updateResilient('clients',payload,state.edit,['base_city','expense_policy','code','vat_number']);if(res.error)return setMsg(res.error.message,7000);await reload();state.view='clients';state.edit=null;render();
+  // Se il database non ha ancora la colonna, la scrittura passa senza
+  // la partita IVA: dire «salvato» e basta farebbe credere che ci sia.
+  const avviso=avvisoScartate(res);if(avviso)setMsg(avviso,12000)}
 async function deleteClient(idv){if(!confirm('Eliminare il cliente? Se esistono consuntivi collegati, il database potrebbe bloccare la cancellazione. In quel caso usa Disattivo.'))return;const {error}=await sb.from('clients').delete().eq('id',idv);if(error)return setMsg(error.message,7000);await reload();state.view='clients';render()}
 // Elenco di tutti i progetti. Quando la gerarchia c'e' e' di sola
 // consultazione: un progetto si crea dal cliente, perche' il suo
