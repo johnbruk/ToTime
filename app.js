@@ -3076,11 +3076,16 @@ function addGridRow(){
   const p=document.getElementById('g-progetto')?.value||'';
   const a=document.getElementById('g-attivita')?.value||'';
   const w=document.getElementById('g-wbs')?.value||'';
-  if(!c)return setMsg('Scegli almeno il cliente.',5000);
-  // dove il cliente ha delle commesse, la WBS e' obbligatoria: e'
-  // quella che dice su cosa si sta lavorando
-  if(wbsReady()&&engagementsOf(c).length&&!w)
-    return setMsg('Scegli progetto e commessa.',5000);
+  // La stessa domanda del modulo, con la stessa risposta: che cosa
+  // manca e che si possa toccare. Prima bastava che il cliente avesse
+  // una commessa da qualche parte per pretendere la WBS, e il
+  // messaggio diceva «scegli progetto e commessa» anche quando il
+  // progetto scelto non aveva nessuna commessa da offrire: lo stesso
+  // vicolo cieco del modulo, da un'altra porta. E un messaggio
+  // leggero, perche' setMsg ridisegna la griglia e porta via le scelte
+  // appena fatte.
+  const e2=document.getElementById('g-commessa')?.value||'';
+  {const manca=cosaMancaNellaCatena(c,p,e2,w);if(manca)return setMsgLeggero(manca,6000);}
   const lin=w?wbsLineage(w):null;
   const k=w?('w|'+w):[c,p,a].join('|');
   state.gridNew=state.gridNew||[];
@@ -5280,6 +5285,16 @@ async function addProjectOfClient(ev){
 // nascosto perche' non c'e' niente da scegliere. Risultato: l'app
 // chiedeva un campo invisibile, e il modulo sembrava rotto senza che si
 // capisse cosa volesse.
+//
+// Reso preciso il messaggio restava il difetto peggiore: nominava il
+// livello giusto senza guardare se quel livello avesse qualcosa da
+// scegliere. Un progetto senza commesse veniva offerto nel menu, lo si
+// sceglieva, e l'app chiedeva «scegli la commessa di Bouygues» — una
+// commessa che non esisteva, in un menu vuoto e percio' nascosto: un
+// cartello davanti a una porta che non c'e'. Due rimedi, ai due capi:
+// quel progetto non viene piu' offerto (prjPercorribili), e qui, prima
+// di chiedere di scegliere, si guarda se c'e' qualcosa da scegliere.
+// Quando non c'e', si dice cosa manca e dove si aggiunge.
 function cosaMancaNellaCatena(cli,prj,eng,wbs){
   // Il cliente non si propone piu': era il primo in ordine alfabetico,
   // poi l'ultimo usato, e in tutti e due i casi un consuntivo poteva
@@ -5289,29 +5304,45 @@ function cosaMancaNellaCatena(cli,prj,eng,wbs){
   if(!cli)return 'Scegli il cliente: le ore di un giorno vanno a uno solo.';
   if(!hierAvailable(cli))return null;
   if(wbs)return null;
+  // Senza nemmeno un progetto percorribile il modulo non e' in
+  // gerarchia: non si chiede niente e si salva. Ridondante finche'
+  // hierAvailable e prjPercorribili concordano — ed e' proprio
+  // divergendo che due funzioni cosi' hanno prodotto il blocco.
+  if(!prjPercorribili(cli,prj).length)return null;
   if(!prj)return 'Scegli il progetto / cliente finale: da lì l’app tira fuori la commessa.';
+  if(!engPercorribili(prj,eng).length)
+    return 'Il progetto '+(projectName(prj)||'scelto')+' non ha una commessa con attività aperte: scegline un altro qui sopra, oppure aggiungi la commessa da Configurazione › Progetti.';
   if(!eng)return 'Scegli la commessa di '+(projectName(prj)||'quel progetto')+'.';
+  if(!wbsSelezionabili(eng,wbs).length){
+    const e=engagementById(eng);
+    return 'La commessa '+((e&&(e.name||e.code))||'scelta')+' non ha attività aperte: scegline un’altra, oppure aggiungine una da Configurazione › Commesse.';
+  }
   return 'Scegli su quale attività della commessa registrare le ore.';
 }
+// «Questo cliente lavora a commessa» vuol dire una cosa sola: esiste
+// almeno un posto aperto dove mettere delle ore nuove. E' la stessa
+// domanda a cui risponde il menu dei progetti, quindi si risponde con
+// la stessa funzione: quando le due risposte divergevano il modulo
+// partiva in gerarchia e poi non aveva niente da offrire.
 function hierAvailable(clientId){
-  return wbsReady() && projectsOfClient(clientId).some(p=>engagementsOfProject(p.id).some(e=>wbsAperte(e.id).length));
+  return wbsReady() && prjPercorribili(clientId).length>0;
 }
 // Distinto da projectOptions() piu' in alto, che serve alle maschere
 // senza WBS: quella elenca i progetti attivi, questa quelli della
 // gerarchia, con il codice davanti.
-function projectOptionsOfClient(clientId,selected=''){
-  const list=projectsOfClient(clientId).filter(p=>!p.status||STATI_APERTI.includes(p.status)||p.id===selected);
-  return `<option value="">— progetto / cliente finale —</option>`+list.map(p=>
+function projectOptionsOfClient(clientId,selected='',list=null){
+  const voci=list||prjSelezionabili(clientId,selected);
+  return `<option value="">— progetto / cliente finale —</option>`+voci.map(p=>
     `<option value="${p.id}" ${p.id===selected?'selected':''}>${esc(p.code||p.name)} · ${esc(p.name)}</option>`).join('');
 }
-function engagementOptionsOfProject(projId,selected=''){
-  const list=engagementsOfProject(projId).filter(e=>STATI_APERTI.includes(e.status)||e.id===selected);
-  return `<option value="">— commessa —</option>`+list.map(e=>
+function engagementOptionsOfProject(projId,selected='',list=null){
+  const voci=list||engSelezionabili(projId,selected);
+  return `<option value="">— commessa —</option>`+voci.map(e=>
     `<option value="${e.id}" ${e.id===selected?'selected':''}>${esc(e.code)} · ${esc(e.name)}</option>`).join('');
 }
-function wbsOptions(engId,selected=''){
-  const list=wbsOfEngagement(engId).filter(w=>STATI_APERTI.includes(w.status)||w.id===selected);
-  return `<option value="">— scegli l'attività —</option>`+list.map(w=>
+function wbsOptions(engId,selected='',list=null){
+  const voci=list||wbsSelezionabili(engId,selected);
+  return `<option value="">— scegli l'attività —</option>`+voci.map(w=>
     `<option value="${w.id}" ${w.id===selected?'selected':''}>${esc(w.activity_code)} · ${esc(w.name)}${w.billable?'':' (non fatturabile)'}</option>`).join('');
 }
 // Da una WBS si risale a tutto il resto: non si duplica niente a mano
@@ -5327,8 +5358,37 @@ function wbsLineage(wbsId){
 // modulo torna a essere quello di sempre — cliente e ore — e la
 // gerarchia resta sotto, senza chiedere niente.
 function soloUno(lista){return lista.length===1?lista[0].id:''}
-function apertiPrj(clientId){return projectsOfClient(clientId).filter(p=>!p.status||STATI_APERTI.includes(p.status))}
-function apertiEng(projId){return engagementsOfProject(projId).filter(e=>STATI_APERTI.includes(e.status))}
+// --- Due elenchi, perche' sono due domande diverse ---
+// SELEZIONABILI: quello che esiste ed e' aperto, piu' la voce gia'
+// scelta su una riga esistente anche se intanto e' stata chiusa —
+// modificare un vecchio consuntivo non deve spostargli la
+// destinazione. Serve ai filtri della griglia, che guardano indietro.
+// PERCORRIBILI: solo i livelli che portano davvero a un'attivita'
+// aperta. Serve ai moduli, che guardano avanti: un progetto senza
+// commesse non e' una scelta, e' un vicolo cieco, e offrirlo poteva
+// finire soltanto in un blocco. La distinzione vale per i livelli
+// sopra la foglia: sulla WBS le due domande coincidono.
+function prjSelezionabili(clientId,selected=''){return projectsOfClient(clientId).filter(p=>!p.status||STATI_APERTI.includes(p.status)||p.id===selected)}
+function engSelezionabili(projId,selected=''){return engagementsOfProject(projId).filter(e=>STATI_APERTI.includes(e.status)||e.id===selected)}
+function wbsSelezionabili(engId,selected=''){return wbsOfEngagement(engId).filter(w=>STATI_APERTI.includes(w.status)||w.id===selected)}
+function engPercorribili(projId,selected=''){return engSelezionabili(projId,selected).filter(e=>wbsSelezionabili(e.id).length||e.id===selected)}
+function prjPercorribili(clientId,selected=''){return prjSelezionabili(clientId,selected).filter(p=>engPercorribili(p.id).length||p.id===selected)}
+// Un progetto che non porta a niente non compare piu' nel menu. Ma
+// spariva in silenzio, e cercarlo senza trovarlo e' solo un altro modo
+// di restare fermi: qui si dice il nome e dove si aggiunge cio' che
+// manca, cosi' l'assenza si spiega da se'.
+function notaVicoliCiechi(clientId,projId){
+  const scelto=projId?projectById(projId):null;
+  if(scelto&&!engPercorribili(scelto.id).length)
+    return 'Il progetto '+(scelto.code||scelto.name)+' non ha una commessa con attività aperte: la aggiungi da Configurazione › Progetti.';
+  const fuori=projectsOfClient(clientId)
+    .filter(p=>(!p.status||STATI_APERTI.includes(p.status))&&!engPercorribili(p.id).length)
+    .map(p=>p.code||p.name);
+  if(!fuori.length)return '';
+  if(fuori.length===1)
+    return 'Il progetto '+fuori[0]+' non è in elenco: non ha ancora una commessa con attività aperte. La aggiungi da Configurazione › Progetti.';
+  return 'Non sono in elenco '+fuori.join(', ')+': non hanno ancora una commessa con attività aperte. Le commesse si aggiungono da Configurazione › Progetti.';
+}
 // In gerarchia il modulo mostrava «Attività della commessa», che e'
 // la WBS: un'altra cosa con quasi lo stesso nome. L'attività vera
 // non si poteva scegliere da nessuna parte, quindi se la commessa non
@@ -5360,22 +5420,28 @@ function catenaWbs(wbsId){
 }
 function hierFields(clientId,wbsId,attSel=''){
   const lin=wbsId?wbsLineage(wbsId):null;
-  const prjList=apertiPrj(clientId);
-  const prjSel=lin?lin.project.id:soloUno(prjList);
-  const engList=prjSel?apertiEng(prjSel):[];
-  const engSel=lin&&lin.engagement?lin.engagement.id:soloUno(engList);
-  const wList=engSel?wbsAperte(engSel):[];
+  // La voce gia' salvata entra in elenco anche se intanto e' stata
+  // chiusa: modificare un vecchio consuntivo non deve spostarlo.
+  const prjPre=lin?lin.project.id:'';
+  const prjList=prjPercorribili(clientId,prjPre);
+  const prjSel=prjPre||soloUno(prjList);
+  const engPre=lin&&lin.engagement?lin.engagement.id:'';
+  const engList=prjSel?engPercorribili(prjSel,engPre):[];
+  const engSel=engPre||soloUno(engList);
+  const wList=engSel?wbsSelezionabili(engSel,wbsId):[];
   const wSel=wbsId||soloUno(wList);
   // Se la commessa porta gia' la sua attivita' il campo resta
   // nascosto: il salvataggio preferisce comunque quella della commessa.
   const attDallaWbs=wSel&&wbsById(wSel)?wbsById(wSel).activity_id:null;
+  const nota=notaVicoliCiechi(clientId,prjSel);
   return `<div class="field" id="prjField" ${prjList.length<2?'hidden':''}><label>Progetto / cliente finale</label>
-      <select name="hier_project_id" onchange="hierChanged(this.form,'project')">${projectOptionsOfClient(clientId,prjSel)}</select></div>
+      <select name="hier_project_id" onchange="hierChanged(this.form,'project')">${projectOptionsOfClient(clientId,prjSel,prjList)}</select></div>
     <div class="field" id="engField" ${engList.length<2?'hidden':''}><label>Commessa</label>
-      <select name="engagement_id" onchange="hierChanged(this.form,'engagement')">${prjSel?engagementOptionsOfProject(prjSel,engSel):'<option value="">— prima scegli il progetto —</option>'}</select></div>
+      <select name="engagement_id" onchange="hierChanged(this.form,'engagement')">${prjSel?engagementOptionsOfProject(prjSel,engSel,engList):'<option value="">— prima scegli il progetto —</option>'}</select></div>
     <div class="field" id="wbsField" ${wList.length<2?'hidden':''}><label>Attività della commessa</label>
-      <select name="wbs_id" onchange="hierChanged(this.form,'wbs')">${engSel?wbsOptions(engSel,wSel):'<option value="">— prima scegli la commessa —</option>'}</select></div>
+      <select name="wbs_id" onchange="hierChanged(this.form,'wbs')">${engSel?wbsOptions(engSel,wSel,wList):'<option value="">— prima scegli la commessa —</option>'}</select></div>
     <div class="small" id="wbsHint">${catenaWbs(wSel)}</div>
+    <div class="small" id="hierNota" ${nota?'':'hidden'}>${esc(nota)}</div>
     <div class="field" id="attField" ${attDallaWbs?'hidden':''}><label>Tipo di attività</label>
       <select name="activity_id">${activityOptions(attSel)}</select>
       <div class="small">Serve ai report e ai colori. La «commessa» qui sopra è un'altra cosa: questo lo scegli solo quando la commessa non ne porta già uno.</div></div>`;
@@ -5385,24 +5451,24 @@ function hierChanged(form,livello){
   const mostra=(id,cond)=>{const el=document.getElementById(id);if(el)el.hidden=!cond};
   if(livello==='client'){
     const cli=form.client_id?form.client_id.value:'';
-    const prj=apertiPrj(cli);
-    if(form.hier_project_id){form.hier_project_id.innerHTML=projectOptionsOfClient(cli,'');
+    const prj=prjPercorribili(cli);
+    if(form.hier_project_id){form.hier_project_id.innerHTML=projectOptionsOfClient(cli,'',prj);
       if(prj.length===1)form.hier_project_id.value=prj[0].id;}
     mostra('prjField',prj.length>1);
     livello='project';
   }
   if(livello==='project'){
     const prjId=form.hier_project_id?form.hier_project_id.value:'';
-    const eng=prjId?apertiEng(prjId):[];
-    if(form.engagement_id){form.engagement_id.innerHTML=prjId?engagementOptionsOfProject(prjId,''):'<option value="">— prima scegli il progetto —</option>';
+    const eng=prjId?engPercorribili(prjId):[];
+    if(form.engagement_id){form.engagement_id.innerHTML=prjId?engagementOptionsOfProject(prjId,'',eng):'<option value="">— prima scegli il progetto —</option>';
       if(eng.length===1)form.engagement_id.value=eng[0].id;}
     mostra('engField',eng.length>1);
     livello='engagement';
   }
   if(livello==='engagement'){
     const engId=form.engagement_id?form.engagement_id.value:'';
-    const w=engId?wbsAperte(engId):[];
-    if(form.wbs_id){form.wbs_id.innerHTML=engId?wbsOptions(engId,''):'<option value="">— prima scegli la commessa —</option>';
+    const w=engId?wbsSelezionabili(engId):[];
+    if(form.wbs_id){form.wbs_id.innerHTML=engId?wbsOptions(engId,'',w):'<option value="">— prima scegli la commessa —</option>';
       if(w.length===1)form.wbs_id.value=w[0].id;}
     mostra('wbsField',w.length>1);
   }
@@ -5417,12 +5483,21 @@ function hierChanged(form,livello){
   }
   const hint=document.getElementById('wbsHint');
   if(hint)hint.textContent=catenaWbs(form.wbs_id&&form.wbs_id.value);
+  // Anche la nota si ricalcola a ogni cambio: il blocco non viene
+  // ridisegnato, quindi se restasse ferma direbbe cose vecchie.
+  const nota=document.getElementById('hierNota');
+  if(nota){
+    const testo=notaVicoliCiechi(form.client_id?form.client_id.value:'',form.hier_project_id?form.hier_project_id.value:'');
+    nota.textContent=testo;
+    nota.hidden=!testo;
+  }
 }
 
 // Quando si sceglie il cliente, si rifanno commessa/progetto/WBS
 function refreshHierForForm(form){
   if(!form||!form.hier_project_id)return;
-  form.hier_project_id.innerHTML=projectOptionsOfClient(form.client_id.value,'');
+  const cli=form.client_id.value;
+  form.hier_project_id.innerHTML=projectOptionsOfClient(cli,'',prjPercorribili(cli));
   hierChanged(form,'project');
 }
 
@@ -5452,9 +5527,13 @@ function gridRigaEtichetta(r){
 function gridClienteCambiato(){
   const c=document.getElementById('g-cliente').value;
   const com=document.getElementById('g-commessa');
-  if(wbsReady()&&projectsOfClient(c).some(p=>engagementsOfProject(p.id).length)){
+  // Stessa domanda, stessa funzione del modulo: «questo cliente ha un
+  // posto aperto dove mettere delle ore?». Prima qui bastava che un
+  // progetto qualsiasi avesse una commessa, e poi il menu offriva
+  // anche i progetti che non ne avevano nessuna.
+  if(hierAvailable(c)){
     com.hidden=false;
-    document.getElementById('g-progetto').innerHTML=projectOptionsOfClient(c,'');
+    document.getElementById('g-progetto').innerHTML=projectOptionsOfClient(c,'',prjPercorribili(c));
   }else{
     // niente commesse per questo cliente: si torna al percorso di prima
     com.hidden=true;
@@ -5470,7 +5549,7 @@ function gridClienteCambiato(){
 function gridProgettoCambiato(){
   const p=document.getElementById('g-progetto').value;
   const com=document.getElementById('g-commessa');
-  if(com)com.innerHTML=p?engagementOptionsOfProject(p,''):'<option value="">— prima scegli il progetto —</option>';
+  if(com)com.innerHTML=p?engagementOptionsOfProject(p,'',engPercorribili(p)):'<option value="">— prima scegli il progetto —</option>';
   gridCommessaCambiata();
 }
 function gridCommessaCambiata(){
