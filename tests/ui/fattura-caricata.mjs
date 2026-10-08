@@ -46,6 +46,7 @@ const SEMI=`
     {id:'m4',entry_date:'2026-03-05',client_id:'sol',project_id:'p1',activity_id:'a1',hours:8},
     {id:'m5',entry_date:'2026-03-06',client_id:'sol',project_id:'p1',activity_id:'a1',hours:8},
     {id:'m6',entry_date:'2026-03-09',client_id:'sol',project_id:'p1',activity_id:'a1',hours:4}];
+  S.user_profiles=[{id:'u1',user_id:'u1',first_name:'G',last_name:'B',vat_number:'11111111111'}];
   S.monthly_compensations=[];S.manual_entries=[];S.travel_expenses=[];
   S.trips=[];S.vehicles=[];S.billing_headers=[];
   S.tax_settings=[{id:'t1',fiscal_year:2026,regime:'forfettario',profitability_coefficient:78,
@@ -902,6 +903,54 @@ console.log('\n=== LA PARTITA IVA PORTA CON SÉ IL SUO PAESE ===');
      'e non ci si arriva nemmeno dal nome: sono due soggetti',
      r4.esiti.map(e=>e.titolo).join(' | '));
   await pg4.close();
+}
+
+console.log('\n=== UNA FATTURA CHE HAI RICEVUTO NON SI CONFRONTA ===');
+{
+  // Le fatture emesse e quelle ricevute stanno nella stessa cartella e
+  // hanno la stessa forma: pescare quella sbagliata e' un gesto, non una
+  // distrazione rara. Prima il confronto partiva lo stesso e produceva
+  // scostamenti dall'aria autorevole su un documento di un altro.
+  const altrui=XML.replace(/(<CedentePrestatore>[\s\S]*?)<IdCodice>11111111111<\/IdCodice>/,
+                           '$1<IdCodice>99999999999</IdCodice>');
+  const pg=await apri();
+  const r=await confronta(pg,altrui);
+  const b=r.esiti.find(e=>e.liv==='blocco');
+  ok(!!b&&/non l’hai emessa tu/.test(b.titolo),'si ferma subito',b?b.titolo:'nessun blocco');
+  ok(!!b&&/99999999999/.test(b.dettaglio)&&/11111111111/.test(b.dettaglio),
+     'mettendo a confronto le due partite IVA',b?b.dettaglio.slice(0,140):'');
+  ok(r.cliente===null&&r.mesi.length===0,'e non confronta niente',
+     `${r.cliente} · ${r.mesi.length} mesi`);
+  ok(!r.esiti.some(e=>/Giorni diversi|Importo diverso|Rivalsa|Bollo/.test(e.titolo)),
+     'nessuno scostamento su un documento che non e tuo',
+     r.esiti.map(e=>e.titolo).join(' | '));
+  await pg.close();
+}
+
+console.log('\n=== LA TUA, INVECE, PASSA SENZA DIRE NIENTE ===');
+{
+  const pg=await apri();
+  const r=await confronta(pg,XML);
+  ok(!r.esiti.some(e=>/emessa tu|verificare che la fattura sia tua/.test(e.titolo)),
+     'la partita IVA combacia: nessuna parola di troppo',
+     r.esiti.map(e=>e.titolo).join(' | '));
+  ok(r.cliente==='sol','e il confronto va avanti come prima');
+  await pg.close();
+}
+
+console.log('\n=== SENZA LA TUA P.IVA NEL PROFILO, LO DICE E NON BLOCCA ===');
+{
+  // Un dato mai scritto non e' una smentita: bloccare chi non ha ancora
+  // riempito il profilo renderebbe la schermata inutilizzabile.
+  const pg=await apri(`delete S.user_profiles[0].vat_number;`);
+  const r=await confronta(pg,XML);
+  ok(!r.esiti.some(e=>e.liv==='blocco'),'non blocca',
+     (r.esiti.find(e=>e.liv==='blocco')||{}).titolo||'nessun blocco');
+  const n=r.esiti.find(e=>/verificare che la fattura sia tua/.test(e.titolo));
+  ok(!!n,'ma dice che il controllo non si e potuto fare',n?n.titolo:'niente');
+  ok(!!n&&/Account/.test(n.dettaglio),'e dove scrivere la partita IVA',n?n.dettaglio.slice(0,110):'');
+  ok(r.cliente==='sol','e intanto il confronto si fa lo stesso');
+  await pg.close();
 }
 
 await b.close(); srv.close();
