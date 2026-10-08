@@ -49,7 +49,8 @@ const SEMI=`
   S.monthly_compensations=[];S.manual_entries=[];S.travel_expenses=[];
   S.trips=[];S.vehicles=[];S.billing_headers=[];
   S.tax_settings=[{id:'t1',fiscal_year:2026,regime:'forfettario',profitability_coefficient:78,
-    substitute_tax_rate:5,inps_gs_rate:26.07,inps_recharge_rate:4,inps_recharge_enabled:true}];
+    substitute_tax_rate:5,inps_gs_rate:26.07,inps_recharge_rate:4,inps_recharge_enabled:true,
+    stamp_duty_enabled:true,stamp_duty_amount:2}];
 `;
 const apri=async(extra='')=>{
   const pg=await b.newPage({viewport:{width:390,height:1600},hasTouch:true});
@@ -326,6 +327,7 @@ console.log('\n=== PIÙ RIGHE SULLO STESSO MESE SI SOMMANO PRIMA DI CONFRONTARE 
   // sarebbe la fattura a non quadrare e il test proverebbe altro.
   const spezzata=XML
     .replace('<DatiRiepilogo>',terza+'<DatiRiepilogo>')
+    .replace('<ImponibileImporto>3109.60','<ImponibileImporto>3309.60')
     .replace('<ImportoTotaleDocumento>3109.60','<ImportoTotaleDocumento>3309.60');
   const pg=await apri(`S.travel_expenses=[{id:'s1',expense_date:'2026-03-20',client_id:'sol',
     project_id:'p1',expense_category_id:'volo',work_city:'Citta',amount:200,reimbursement_type:'invoice'}];`);
@@ -347,6 +349,7 @@ console.log('\n=== LA RIVALSA SI GUARDA IN TUTTI E DUE I VERSI ===');
      'rivalsa in fattura con la configurazione spenta: lo dice');
   await pg.close();
   const senza=XML.replace(/<DatiCassaPrevidenziale>[\s\S]*?<\/DatiCassaPrevidenziale>/,'')
+                 .replace('<ImponibileImporto>3109.60','<ImponibileImporto>2990.00')
                  .replace('<ImportoTotaleDocumento>3109.60','<ImportoTotaleDocumento>2990.00');
   const pg2=await apri();
   const r2=await confronta(pg2,senza);
@@ -495,6 +498,227 @@ console.log('\n=== IL CAMPO C’È ANCHE QUANDO SI CREA IL CLIENTE ===');
   ok(!!c,'il cliente si crea');
   ok(!!c&&c.vat_number==='98765432109','con la sua partita IVA salvata',String(c&&c.vat_number));
   await pg.close();
+}
+
+console.log('\n=== IL NOME COMBACIA MA LA PARTITA IVA NO: NON ABBINA ===');
+{
+  // Due societa' con la stessa ragione sociale esistono davvero. Il
+  // ripiego sul nome le confondeva anche quando l'anagrafica aveva
+  // GIA' un'altra partita IVA: la fattura dell'una finiva confrontata
+  // coi timesheet dell'altra, e gli scostamenti venivano da dati di un
+  // cliente diverso.
+  const pg=await apri(`S.clients[0].vat_number='99999999999';`);
+  const r=await confronta(pg,XML);
+  ok(r.cliente===null,'non abbina',String(r.cliente));
+  const b=r.esiti.find(e=>e.liv==='blocco'&&/partita IVA no/.test(e.titolo));
+  ok(!!b,'e dice perché',b?b.titolo:(r.esiti.map(e=>e.titolo).join(' | ')||'nessuno'));
+  ok(!!b&&/99999999999/.test(b.dettaglio)&&/22222222222/.test(b.dettaglio),
+     'mettendo a confronto le due partite IVA',b?b.dettaglio.slice(0,130):'');
+  ok(!r.esiti.some(e=>/Giorni diversi|Importo diverso/.test(e.titolo)),
+     'e non confronta la fattura con le ore di quel cliente',
+     r.esiti.map(e=>e.titolo).join(' | '));
+  await pg.close();
+  // Ma se la P.IVA in anagrafica non c'e', il ripiego sul nome resta:
+  // e' il caso di chi non l'ha ancora riempita, cioe' quasi tutti.
+  const pg2=await apri(`delete S.clients[0].vat_number;`);
+  const r2=await confronta(pg2,XML);
+  ok(r2.cliente==='sol'&&r2.abbinamento==='nome',
+     'con la casella vuota il nome basta ancora',`${r2.cliente} · ${r2.abbinamento}`);
+  await pg2.close();
+}
+
+console.log('\n=== FATTURA CHE NON QUADRA CON SÉ: IL CONFRONTO SI FERMA ===');
+{
+  // Prima proseguiva: dichiarava inattendibili gli importi della
+  // fattura e poi li usava per dare la colpa ai consuntivi.
+  // Qui il consuntivo e' ANCHE guasto (manca mezza giornata di marzo),
+  // cosi' si vede che lo scostamento sui giorni sarebbe arrivato e
+  // invece non arriva.
+  const bugiarda=XML.replace('<ImponibileImporto>3109.60','<ImponibileImporto>5000.00')
+                    .replace('<ImportoTotaleDocumento>3109.60','<ImportoTotaleDocumento>5000.00');
+  const pg=await apri(`S.timesheet_entries=S.timesheet_entries.filter(e=>e.id!=='m6');`);
+  // prima la prova che quel consuntivo guasto SI VEDE, su una fattura sana
+  const sano=await confronta(pg,XML);
+  ok(sano.esiti.some(e=>/Giorni diversi/.test(e.titolo)),
+     'col documento sano lo scostamento sui giorni c’è');
+  const r=await confronta(pg,bugiarda);
+  ok(r.esiti.some(e=>/non torna con se stessa/.test(e.titolo)),'il blocco interno c’è');
+  ok(r.esiti.some(e=>/si ferma qui/.test(e.titolo)),
+     'e dice che il confronto si ferma, invece di tacere');
+  ok(!r.esiti.some(e=>/Giorni diversi|Importo diverso/.test(e.titolo)),
+     'nessuno scostamento sui consuntivi con numeri inattendibili',
+     r.esiti.map(e=>e.titolo).join(' | '));
+  ok(!r.esiti.some(e=>/totale non torna/i.test(e.titolo)),
+     'e nemmeno sul totale, che si appoggia agli stessi numeri');
+  ok(r.mesi.length===0,'nessun mese dichiarato coperto',String(r.mesi.length));
+  await pg.close();
+}
+
+console.log('\n=== SCONTO DI DOCUMENTO: NON È UNA FATTURA CHE NON QUADRA ===');
+{
+  // ScontoMaggiorazione sotto DatiGeneraliDocumento: l'imponibile del
+  // riepilogo e' piu' basso della somma delle righe, ed e' corretto che
+  // lo sia. Senza leggerlo, la fattura risultava guasta e — adesso che
+  // il confronto si ferma sul guasto — non si sarebbe confrontato piu'
+  // niente.
+  const pg=await apri();
+  const sconto=XML
+    .replace('<ImportoTotaleDocumento>','<ScontoMaggiorazione><Tipo>SC</Tipo><Importo>90.00</Importo></ScontoMaggiorazione><ImportoTotaleDocumento>')
+    .replace('<ImponibileImporto>3109.60','<ImponibileImporto>3019.60')
+    .replace('<ImportoTotaleDocumento>3109.60','<ImportoTotaleDocumento>3019.60');
+  const r=await confronta(pg,sconto);
+  ok(Math.abs(r.f.sconto+90)<0.005,'lo sconto si legge col suo segno',String(r.f.sconto));
+  ok(Math.abs(r.f.imponibile-2900)<0.005,'e l’imponibile scende a 2.900',String(r.f.imponibile));
+  ok(Math.abs(r.f.righeSomma-2990)<0.005,'mentre le righe restano 2.990',String(r.f.righeSomma));
+  ok(!r.esiti.some(e=>/non torna con se stessa/.test(e.titolo)),
+     '2.990 − 90 + 119,60 = 3.019,60: la fattura quadra',
+     (r.esiti.find(e=>/non torna con se stessa/.test(e.titolo))||{}).dettaglio||'nessuno');
+  ok(!r.esiti.some(e=>/totale non torna/i.test(e.titolo)),'e il totale pure');
+  // Con la sola percentuale, senza importo: 3% di 2.990 = 89,70.
+  const perc=XML
+    .replace('<ImportoTotaleDocumento>','<ScontoMaggiorazione><Tipo>SC</Tipo><Percentuale>3.00</Percentuale></ScontoMaggiorazione><ImportoTotaleDocumento>')
+    .replace('<ImponibileImporto>3109.60','<ImponibileImporto>3019.90')
+    .replace('<ImportoTotaleDocumento>3109.60','<ImportoTotaleDocumento>3019.90');
+  const r2=await confronta(pg,perc);
+  ok(Math.abs(r2.f.sconto+89.7)<0.005,'la percentuale si applica alle righe',String(r2.f.sconto));
+  ok(!r2.esiti.some(e=>/non torna con se stessa/.test(e.titolo)),'e quadra anche così');
+  // E una MAGGIORAZIONE alza: il segno non è scritto nel codice.
+  const magg=XML
+    .replace('<ImportoTotaleDocumento>','<ScontoMaggiorazione><Tipo>MG</Tipo><Importo>50.00</Importo></ScontoMaggiorazione><ImportoTotaleDocumento>')
+    .replace('<ImponibileImporto>3109.60','<ImponibileImporto>3159.60')
+    .replace('<ImportoTotaleDocumento>3109.60','<ImportoTotaleDocumento>3159.60');
+  const r3=await confronta(pg,magg);
+  ok(Math.abs(r3.f.sconto-50)<0.005,'una maggiorazione alza, non abbassa',String(r3.f.sconto));
+  ok(!r3.esiti.some(e=>/non torna con se stessa/.test(e.titolo)),'e quadra',
+     (r3.esiti.find(e=>/non torna con se stessa/.test(e.titolo))||{}).dettaglio||'nessuno');
+  // Due sconti si applicano IN SEQUENZA: il 10% e poi il 5% su quel che
+  // resta fanno 2.990 → 2.691 → 2.556,45, non 2.990 − 15%.
+  const dueSconti=XML
+    .replace('<ImportoTotaleDocumento>','<ScontoMaggiorazione><Tipo>SC</Tipo><Percentuale>10.00</Percentuale></ScontoMaggiorazione><ScontoMaggiorazione><Tipo>SC</Tipo><Percentuale>5.00</Percentuale></ScontoMaggiorazione><ImportoTotaleDocumento>')
+    .replace('<ImponibileImporto>3109.60','<ImponibileImporto>2676.05')
+    .replace('<ImportoTotaleDocumento>3109.60','<ImportoTotaleDocumento>2676.05');
+  const r5=await confronta(pg,dueSconti);
+  ok(Math.abs(r5.f.imponibile-2556.45)<0.005,
+     'due sconti si applicano in sequenza, non sommando le percentuali',String(r5.f.imponibile));
+  ok(!r5.esiti.some(e=>/non torna con se stessa/.test(e.titolo)),
+     'e 2.556,45 + 119,60 = 2.676,05 quadra',
+     (r5.esiti.find(e=>/non torna con se stessa/.test(e.titolo))||{}).dettaglio||'nessuno');
+  // Lo sconto di RIGA invece è già dentro PrezzoTotale: sommarlo di
+  // nuovo lo conterebbe due volte e romperebbe una fattura sana.
+  const diRiga=XML.replace('<PrezzoTotale>460.00</PrezzoTotale>',
+    '<ScontoMaggiorazione><Tipo>SC</Tipo><Importo>40.00</Importo></ScontoMaggiorazione><PrezzoTotale>460.00</PrezzoTotale>');
+  const r4=await confronta(pg,diRiga);
+  ok(r4.f.sconto===0,'lo sconto di riga non si tocca',String(r4.f.sconto));
+  ok(!r4.esiti.some(e=>/non torna con se stessa/.test(e.titolo)),'e la fattura resta quadrata');
+  await pg.close();
+}
+
+console.log('\n=== L’ARROTONDAMENTO SPOSTA IL TOTALE, E VA LETTO ===');
+{
+  // Arrotondamento sotto DatiGeneraliDocumento: senza leggerlo, una
+  // fattura arrotondata di qualche centesimo risultava col «totale che
+  // non torna» — e quei centesimi non sono un errore dei consuntivi.
+  const arr=XML
+    .replace('<ImportoTotaleDocumento>','<Arrotondamento>0.40</Arrotondamento><ImportoTotaleDocumento>')
+    .replace('<ImportoTotaleDocumento>3109.60','<ImportoTotaleDocumento>3110.00');
+  const pg=await apri();
+  const r=await confronta(pg,arr);
+  ok(Math.abs(r.f.arrotondamento-0.4)<0.005,'l’arrotondamento si legge',String(r.f.arrotondamento));
+  ok(!r.esiti.some(e=>/totale non torna/i.test(e.titolo)),
+     'e 3.109,60 + 0,40 = 3.110,00: il totale quadra',
+     (r.esiti.find(e=>/totale non torna/i.test(e.titolo))||{}).dettaglio||'nessuno');
+  ok(!r.esiti.some(e=>/non torna con se stessa/.test(e.titolo)),
+     'mentre l’imponibile resta quello delle righe: non lo sposta');
+  await pg.close();
+}
+
+console.log('\n=== DUE CASSE PREVIDENZIALI: SI SOMMANO, NON SI SCARTA LA SECONDA ===');
+{
+  // La FatturaPA ne ammette piu' di una (cassa di categoria e
+  // contributo integrativo). Tenendo solo la prima, la rivalsa
+  // risultava piu' bassa del vero e la quadratura dell'imponibile
+  // falliva su un documento sanissimo.
+  const seconda='<DatiCassaPrevidenziale><TipoCassa>TC01</TipoCassa><AlCassa>2.00</AlCassa><ImportoContributoCassa>59.80</ImportoContributoCassa><ImponibileCassa>2990.00</ImponibileCassa><AliquotaIVA>0.00</AliquotaIVA><Natura>N2.2</Natura></DatiCassaPrevidenziale>';
+  const due=XML
+    .replace('</DatiCassaPrevidenziale>','</DatiCassaPrevidenziale>'+seconda)
+    .replace('<ImponibileImporto>3109.60','<ImponibileImporto>3169.40')
+    .replace('<ImportoTotaleDocumento>3109.60','<ImportoTotaleDocumento>3169.40');
+  const pg=await apri();
+  const r=await confronta(pg,due);
+  ok(r.f.casse&&r.f.casse.length===2,'legge entrambi i blocchi',String(r.f.casse&&r.f.casse.length));
+  ok(Math.abs(r.f.rivalsaImporto-179.4)<0.005,'e somma 119,60 + 59,80 = 179,40',String(r.f.rivalsaImporto));
+  ok(!r.esiti.some(e=>/non torna con se stessa/.test(e.titolo)),
+     '2.990 + 179,40 = 3.169,40: quadra',
+     (r.esiti.find(e=>/non torna con se stessa/.test(e.titolo))||{}).dettaglio||'nessuno');
+  ok(!r.esiti.some(e=>/totale non torna/i.test(e.titolo)),'e il totale pure');
+  const n=r.esiti.find(e=>/contributi previdenziali/.test(e.titolo));
+  ok(!!n,'e dice che sono due, invece di mostrarne una sola',n?n.titolo:'nessuno');
+  ok(!!n&&/TC22/.test(n.dettaglio)&&/TC01/.test(n.dettaglio),'nominandole',n?n.dettaglio.slice(0,110):'');
+  await pg.close();
+  // Ognuna si verifica sulla SUA aliquota: un'aliquota media non
+  // starebbe scritta in nessun documento.
+  const storta=due.replace('<AlCassa>2.00</AlCassa>','<AlCassa>5.00</AlCassa>');
+  const pg2=await apri();
+  const r2=await confronta(pg2,storta);
+  const sc=r2.esiti.find(e=>/rivalsa non torna con la sua aliquota/.test(e.titolo));
+  ok(!!sc,'la cassa col conto sbagliato si vede',sc?sc.titolo:'nessuna');
+  ok(!!sc&&/TC01/.test(sc.titolo),'e si capisce quale delle due',sc?sc.titolo:'');
+  await pg2.close();
+}
+
+console.log('\n=== IL BOLLO SI CONFRONTA CON LA CONFIGURAZIONE, COME LA RIVALSA ===');
+{
+  // Sulla rivalsa i due versi c'erano; sul bollo nessuno dei due.
+  const pg=await apri(`S.tax_settings[0].stamp_duty_enabled=false;`);
+  const r=await confronta(pg,XML);
+  ok(r.esiti.some(e=>/Bollo in fattura ma disattivato/.test(e.titolo)),
+     'bollo in fattura con la configurazione spenta: lo dice',
+     r.esiti.map(e=>e.titolo).join(' | '));
+  await pg.close();
+  const senzaBollo=XML.replace(/<DatiBollo>[\s\S]*?<\/DatiBollo>/,'');
+  const pg2=await apri();
+  const r2=await confronta(pg2,senzaBollo);
+  const b=r2.esiti.find(e=>/Bollo attivo in configurazione ma assente/.test(e.titolo));
+  ok(!!b,'e viceversa: configurazione accesa e fattura senza bollo',
+     b?b.titolo:r2.esiti.map(e=>e.titolo).join(' | '));
+  ok(!!b&&/77,47/.test(b.dettaglio),'citando la soglia oltre cui è dovuto',b?b.dettaglio.slice(0,140):'');
+  await pg2.close();
+  const pg3=await apri(`S.tax_settings[0].stamp_duty_amount=3;`);
+  const r3=await confronta(pg3,XML);
+  ok(r3.esiti.some(e=>/Importo del bollo diverso/.test(e.titolo)),
+     'e se l’importo non è quello configurato, pure',
+     r3.esiti.map(e=>e.titolo).join(' | '));
+  await pg3.close();
+  // Sotto i 77,47 € di importi esenti il bollo NON è dovuto: senza la
+  // soglia, ogni fatturina piccola risulterebbe «senza il bollo».
+  const piccola=senzaBollo
+    .replace('<PrezzoTotale>460.00','<PrezzoTotale>10.00')
+    .replace('<PrezzoTotale>2530.00','<PrezzoTotale>30.00')
+    .replace('<ImportoContributoCassa>119.60','<ImportoContributoCassa>1.60')
+    .replace('<ImponibileCassa>2990.00','<ImponibileCassa>40.00')
+    .replace('<ImponibileImporto>3109.60','<ImponibileImporto>41.60')
+    .replace('<ImportoTotaleDocumento>3109.60','<ImportoTotaleDocumento>41.60');
+  const pg4=await apri();
+  const r4=await confronta(pg4,piccola);
+  ok(Math.abs(r4.f.baseEsente-41.6)<0.005,'la base esente si legge dai riepiloghi',String(r4.f.baseEsente));
+  ok(!r4.esiti.some(e=>/Bollo attivo in configurazione ma assente/.test(e.titolo)),
+     'e sotto la soglia non pretende il bollo',
+     (r4.esiti.find(e=>/Bollo/.test(e.titolo))||{}).titolo||'nessuno');
+  await pg4.close();
+  // Con l'IVA invece il bollo non c'entra: niente importi esenti,
+  // niente bollo da pretendere.
+  const conIva=senzaBollo
+    .replace(/<DatiCassaPrevidenziale>[\s\S]*?<\/DatiCassaPrevidenziale>/,'')
+    .replace(/(<DatiRiepilogo>[\s\S]*?)<AliquotaIVA>0\.00<\/AliquotaIVA>/,'$1<AliquotaIVA>22.00</AliquotaIVA>')
+    .replace('<ImponibileImporto>3109.60','<ImponibileImporto>2990.00')
+    .replace('<Imposta>0.00','<Imposta>657.80')
+    .replace('<ImportoTotaleDocumento>3109.60','<ImportoTotaleDocumento>3647.80');
+  const pg5=await apri();
+  const r5=await confronta(pg5,conIva);
+  ok(r5.f.baseEsente===0,'una fattura con IVA non ha importi esenti',String(r5.f.baseEsente));
+  ok(!r5.esiti.some(e=>/Bollo attivo in configurazione ma assente/.test(e.titolo)),
+     'e il bollo non si pretende');
+  await pg5.close();
 }
 
 await b.close(); srv.close();

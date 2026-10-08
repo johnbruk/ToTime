@@ -67,9 +67,26 @@ Caricata la fattura, l'app confronta e **segnala**:
 | `Giorni: 5,5` marzo | i giorni consuntivati a marzo | **fatturato ≠ lavorato** |
 | totale prestazioni | servizi + manuali + spese attesi | manca o avanza qualcosa |
 | rivalsa 4% | la rivalsa calcolata | aliquota o base diversa |
+| rivalsa sì/no | la configurazione fiscale | c'è e non dovrebbe, o manca e dovrebbe |
+| marca da bollo | la configurazione fiscale | idem, ma solo sopra i 77,47 € esenti |
 | totale documento | la somma delle sue parti | la fattura non torna con sé stessa |
 | spese riaddebitate | i rimborsi che l'app si aspettava | una spesa non fatturata |
 | scadenza | — | campo nuovo |
+
+Dove lo standard ammette più di un valore, si leggono **tutti**: più
+scadenze di pagamento, più blocchi `DatiCassaPrevidenziale` (si sommano),
+sconti e maggiorazioni di documento (che spostano l'imponibile rispetto
+alla somma delle righe). Tenerne uno e dire «fatto» nasconderebbe gli
+altri.
+
+E se la fattura **non torna con sé stessa**, il confronto si ferma lì:
+proseguire vorrebbe dire dare la colpa ai consuntivi usando numeri
+appena dichiarati inattendibili.
+
+Quando la partita IVA della fattura non trova nessuno, si ripiega sul
+nome — ma non contro un cliente che in anagrafica ha **un'altra** partita
+IVA: due società possono chiamarsi uguale, e abbinarle confronterebbe la
+fattura con le ore di un altro.
 
 Nessun allineamento avviene in silenzio: prima si vede cosa cambia, poi
 si conferma.

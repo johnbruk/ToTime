@@ -601,8 +601,27 @@ function leggiFatturaXML(testo){
   const cliente=tagLocale(head,'CessionarioCommittente');
   const fornitore=tagLocale(head,'CedentePrestatore');
   const gen=tagLocale(body,'DatiGeneraliDocumento');
-  const cassa=tagLocale(gen,'DatiCassaPrevidenziale');
+  // Le casse previdenziali sono PIU' DI UNA quando l'emittente espone
+  // sia la cassa di categoria sia il contributo integrativo. Tenendo
+  // solo la prima, la rivalsa risultava piu' bassa del vero: la
+  // quadratura dell'imponibile falliva su un documento sano, e il
+  // confronto si fermava dando la colpa alla fattura.
+  const casse=tuttiLocali(gen,'DatiCassaPrevidenziale').map(c=>({
+    tipo:testoTag(c,'TipoCassa'),aliquota:numTag(c,'AlCassa'),
+    importo:numTag(c,'ImportoContributoCassa'),base:numTag(c,'ImponibileCassa')}));
+  const rivalsaImporto=casse.reduce((a,c)=>a+c.importo,0);
+  // Un'aliquota sola si puo' mostrare e verificare; con piu' casse non
+  // esiste «l'aliquota della fattura», e farne una media direbbe una
+  // percentuale che non sta scritta in nessun documento.
+  const rivalsaAliquota=casse.length===1?casse[0].aliquota:0;
   const bollo=tagLocale(gen,'DatiBollo');
+  // Sconti e maggiorazioni di DOCUMENTO: abbassano (Tipo SC) o alzano
+  // (MG) l'imponibile del riepilogo rispetto alla somma delle righe.
+  // Senza leggerli, una fattura con uno sconto in piede risultava «non
+  // torna con se stessa» pur essendo corretta.
+  // Quelli di RIGA non si toccano: lo standard li vuole gia' compresi
+  // in PrezzoTotale, e sommarli di nuovo li conterebbe due volte.
+  const scontiEl=tuttiLocali(gen,'ScontoMaggiorazione');
   // Le rate: una fattura puo' avere piu' scadenze. Tenere solo la prima
   // e presentarla come LA scadenza della fattura nasconde le altre.
   const rate=tuttiLocali(body,'DettaglioPagamento').map(p=>({
@@ -615,6 +634,7 @@ function leggiFatturaXML(testo){
   // confrontava le righe con la somma delle righe stesse: non poteva
   // fallire mai, pur essendo annunciato a schermo.
   const riepiloghi=tuttiLocali(body,'DatiRiepilogo').map(r=>({
+    aliquota:numTag(r,'AliquotaIVA'),natura:testoTag(r,'Natura'),
     imponibile:numTag(r,'ImponibileImporto'),imposta:numTag(r,'Imposta')}));
   const imposta=riepiloghi.reduce((a,r)=>a+r.imposta,0);
   const idCliente=tagLocale(cliente,'IdFiscaleIVA');
@@ -630,8 +650,32 @@ function leggiFatturaXML(testo){
   // una fattura con voci escluse dal contributo (spese, per dire) ha i
   // due numeri diversi, e scambiarli faceva fallire i controlli di
   // quadratura su un documento sano.
-  const imponibile=righe.reduce((s,r)=>s+r.importo,0);
-  const imponibileCassa=cassa?numTag(cassa,'ImponibileCassa'):0;
+  const righeSomma=righe.reduce((s,r)=>s+r.importo,0);
+  // Quando sono piu' di uno si applicano IN SEQUENZA: la seconda
+  // percentuale sta su quello che resta dopo la prima. Con un solo
+  // sconto — il caso di tutti i giorni — non cambia nulla.
+  let corrente=righeSomma;
+  const sconti=scontiEl.map(x=>{
+    const perc=tagLocale(x,'Percentuale')?numTag(x,'Percentuale'):null;
+    const imp=tagLocale(x,'Importo')?numTag(x,'Importo'):null;
+    // Importo e Percentuale sono alternativi: quando c'e' l'importo
+    // vale quello, perche' e' il numero che l'emittente ha scritto.
+    const grezzo=imp!==null?imp:(perc!==null?corrente*perc/100:0);
+    const sc=String(testoTag(x,'Tipo')||'').toUpperCase()==='SC';
+    const valore=(sc?-1:1)*grezzo;
+    corrente+=valore;
+    return {tipo:sc?'SC':'MG',percentuale:perc,importo:imp,valore};
+  });
+  const sconto=sconti.reduce((a,x)=>a+x.valore,0);
+  const imponibile=righeSomma+sconto;
+  const imponibileCassa=casse.length?casse[0].base:0;
+  // Gli importi NON assoggettati a IVA: e' su quelli che si misura la
+  // soglia del bollo. Si prendono dai riepiloghi ad aliquota zero;
+  // senza riepiloghi si ripiega sul documento intero, ma solo quando
+  // non c'e' imposta.
+  const baseEsente=riepiloghi.length
+    ? riepiloghi.filter(r=>!(r.aliquota>0)).reduce((a,r)=>a+r.imponibile,0)
+    : (imposta>0?0:imponibile);
   return {
     numero:testoTag(gen,'Numero'),
     data:testoTag(gen,'Data'),
@@ -641,9 +685,8 @@ function leggiFatturaXML(testo){
     clienteNome:testoTag(cliente,'Denominazione')||
       [testoTag(cliente,'Nome'),testoTag(cliente,'Cognome')].filter(Boolean).join(' '),
     fornitoreRegime:testoTag(fornitore,'RegimeFiscale'),
-    righe,imponibile,imponibileCassa,
-    rivalsaAliquota:cassa?numTag(cassa,'AlCassa'):0,
-    rivalsaImporto:cassa?numTag(cassa,'ImportoContributoCassa'):0,
+    righe,imponibile,righeSomma,sconti,sconto,imponibileCassa,casse,
+    rivalsaAliquota,rivalsaImporto,
     bolloVirtuale:bollo?testoTag(bollo,'BolloVirtuale')==='SI':false,
     bolloImporto:bollo?numTag(bollo,'ImportoBollo'):0,
     // ImportoTotaleDocumento e' facoltativo: assente non vuol dire
@@ -651,7 +694,11 @@ function leggiFatturaXML(testo){
     // torna» ogni fattura che non lo espone, e mostrava 0,00 a schermo.
     totale:numTag(gen,'ImportoTotaleDocumento'),
     totaleDichiarato:!!tagLocale(gen,'ImportoTotaleDocumento'),
-    imposta,riepiloghi,
+    imposta,riepiloghi,baseEsente,
+    // L'arrotondamento sposta il TOTALE del documento, non l'imponibile:
+    // senza leggerlo, una fattura arrotondata di un centesimo risultava
+    // col «totale che non torna».
+    arrotondamento:numTag(gen,'Arrotondamento'),
     // L'imponibile autorevole viene dai riepiloghi, non dalle righe.
     imponibileRiepilogo:riepiloghi.length?riepiloghi.reduce((a,r)=>a+r.imponibile,0):null,
     rate,
@@ -696,8 +743,19 @@ function clientePerFattura(f){
   const n=normaNome(f&&f.clienteNome);
   if(n){
     const perNome=(data.clients||[]).filter(c=>normaNome(c.name)===n);
-    if(perNome.length===1)return {cliente:perNome[0],come:'nome'};
-    if(perNome.length>1)return {cliente:null,come:'omonimi'};
+    // Il ripiego sul nome vale finche' non SMENTISCE una partita IVA
+    // gia' scritta in anagrafica. Se la scheda che si chiama come la
+    // fattura ne ha un'altra, non e' quel soggetto: sono due enti
+    // distinti con la stessa ragione sociale, e abbinarli vorrebbe dire
+    // confrontare la fattura con le ore di un altro cliente.
+    const contrari=perNome.filter(c=>{
+      const v=String(c.vat_number||'').replace(/\s/g,'');
+      return !!p&&!!v&&v!==p;
+    });
+    const buoni=perNome.filter(c=>contrari.indexOf(c)<0);
+    if(buoni.length===1)return {cliente:buoni[0],come:'nome'};
+    if(buoni.length>1)return {cliente:null,come:'omonimi'};
+    if(contrari.length)return {cliente:null,come:'pivaContraria',contrari};
   }
   return {cliente:null,come:null};
 }
@@ -775,6 +833,9 @@ function confrontaFattura(f){
   else if(!cliente&&ab.come==='omonimi')
     nota('blocco','Più clienti con lo stesso nome',
       `${f.clienteNome} corrisponde a piu' di un cliente. Scrivi la partita IVA nella scheda del cliente giusto, cosi' l'abbinamento diventa certo.`);
+  else if(!cliente&&ab.come==='pivaContraria')
+    nota('blocco','Il nome combacia, la partita IVA no',
+      `${f.clienteNome} ha lo stesso nome di ${ab.contrari.map(c=>clientName(c.id)+' (P.IVA '+c.vat_number+')').join(', ')}, ma la fattura e' intestata alla P.IVA ${f.clientePiva}: sono soggetti distinti. Abbinarli vorrebbe dire confrontare questa fattura con le ore di un altro cliente. Crea la scheda del cliente giusto, o correggi la partita IVA.`);
   else if(!cliente)
     nota('blocco','Cliente non riconosciuto',
       `La fattura e' intestata a ${f.clienteNome||'?'} (P.IVA ${f.clientePiva||'assente'}), che non corrisponde a nessun cliente. Scrivi quella partita IVA nella scheda del cliente, oppure allinea il nome.`);
@@ -793,11 +854,27 @@ function confrontaFattura(f){
   // vale righe + rivalsa. Non in tutti i documenti pero': esiste anche
   // la convenzione in cui non concorre. Si accettano entrambe, e si
   // segnala solo se non torna in nessuno dei due modi.
-  const righePiuRivalsa=sommaRighe+f.rivalsaImporto;
+  // Lo sconto (o la maggiorazione) di documento sta fra la somma delle
+  // righe e l'imponibile del riepilogo: ignorarlo faceva risultare «non
+  // torna» una fattura corretta, e l’errore fermava tutto il resto.
+  const sconto=Number(f.sconto||0);
+  const dopoSconto=sommaRighe+sconto;
+  const dettSconto=sconto
+    ? ` ${sconto<0?'meno':'piu\u2019'} ${fmtEUR(Math.abs(sconto))} di ${sconto<0?'sconto':'maggiorazione'} in piede fanno ${fmtEUR(dopoSconto)},`
+    : '';
+  const righePiuRivalsa=dopoSconto+f.rivalsaImporto;
   if(f.imponibileRiepilogo!==null&&
-     !vicini(sommaRighe,f.imponibileRiepilogo)&&!vicini(righePiuRivalsa,f.imponibileRiepilogo))
+     !vicini(dopoSconto,f.imponibileRiepilogo)&&!vicini(righePiuRivalsa,f.imponibileRiepilogo)){
     nota('blocco','La fattura non torna con se stessa',
-      `Le righe sommano ${fmtEUR(sommaRighe)}${f.rivalsaImporto>0?' ('+fmtEUR(righePiuRivalsa)+' con la rivalsa)':''}, ma i riepiloghi dichiarano ${fmtEUR(f.imponibileRiepilogo)} di imponibile.`);
+      `Le righe sommano ${fmtEUR(sommaRighe)},${dettSconto}${f.rivalsaImporto>0?' '+fmtEUR(righePiuRivalsa)+' con la rivalsa,':''} ma i riepiloghi dichiarano ${fmtEUR(f.imponibileRiepilogo)} di imponibile.`);
+    // E qui si ferma. Tutto quello che viene dopo — il totale, la
+    // rivalsa, gli importi mese per mese — si appoggia a questi stessi
+    // numeri: proseguire vorrebbe dire dare la colpa ai consuntivi
+    // usando una fattura che non quadra nemmeno con se' stessa.
+    nota('nota','Il confronto coi tuoi dati si ferma qui',
+      'Finche\u2019 la fattura non torna al suo interno, confrontarla col consuntivo produrrebbe scostamenti che vengono dal documento, non dall\u2019app. Controlla il file e ricaricalo.');
+    return {esiti,cliente,mesi:[],abbinamento:ab.come};
+  }
   // Il bollo puo' essere addebitato al cliente oppure no: «virtuale»
   // dice come si paga, non a chi tocca. Quindi si accettano entrambe le
   // quadrature, e si blocca solo se non torna in nessuno dei due modi.
@@ -811,7 +888,7 @@ function confrontaFattura(f){
   const baseTotale=f.imponibileRiepilogo!==null
     ? (vicini(righePiuRivalsa,f.imponibileRiepilogo)?f.imponibileRiepilogo:f.imponibileRiepilogo+f.rivalsaImporto)
     : righePiuRivalsa;
-  const senzaBollo=baseTotale+f.imposta;
+  const senzaBollo=baseTotale+f.imposta+Number(f.arrotondamento||0);
   const conBollo=senzaBollo+f.bolloImporto;
   const bolloAddebitato=f.bolloImporto>0&&vicini(conBollo,f.totale);
   // E un totale non dichiarato non e' un totale a zero: e' facoltativo.
@@ -823,10 +900,21 @@ function confrontaFattura(f){
       `E' un campo facoltativo: la quadratura del totale non si puo' verificare. Le righe sommano ${fmtEUR(sommaRighe)}.`);
   // La rivalsa si verifica sulla SUA base, che non e' per forza
   // l'imponibile della fattura.
-  const baseRivalsa=f.imponibileCassa||f.imponibile;
-  if(f.rivalsaAliquota>0&&!vicini(baseRivalsa*f.rivalsaAliquota/100,f.rivalsaImporto))
-    nota('scostamento','La rivalsa non torna con la sua aliquota',
-      `${fmtNum(f.rivalsaAliquota,2)}% di ${fmtEUR(baseRivalsa)} farebbe ${fmtEUR(baseRivalsa*f.rivalsaAliquota/100)}, in fattura c'e' ${fmtEUR(f.rivalsaImporto)}.`);
+  // E cassa per cassa, perche' con piu' blocchi ognuno ha la sua
+  // aliquota sulla sua base: sommare prima di dividere darebbe
+  // un'aliquota media che non sta scritta in nessun documento.
+  const casse=(f.casse&&f.casse.length)?f.casse
+    :((f.rivalsaImporto||f.rivalsaAliquota)
+      ?[{aliquota:f.rivalsaAliquota,importo:f.rivalsaImporto,base:f.imponibileCassa}]:[]);
+  casse.forEach((c,i)=>{
+    const base=c.base||f.imponibile;
+    if(c.aliquota>0&&!vicini(base*c.aliquota/100,c.importo))
+      nota('scostamento','La rivalsa non torna con la sua aliquota'+(casse.length>1?' \u00b7 '+(c.tipo||'cassa '+(i+1)):''),
+        `${fmtNum(c.aliquota,2)}% di ${fmtEUR(base)} farebbe ${fmtEUR(base*c.aliquota/100)}, in fattura c'e' ${fmtEUR(c.importo)}.`);
+  });
+  if(casse.length>1)
+    nota('nota','Pi\u00f9 contributi previdenziali in fattura',
+      `${casse.length} blocchi cassa: ${casse.map(c=>(c.tipo||'cassa')+' '+fmtNum(c.aliquota,2)+'% '+fmtEUR(c.importo)).join(' \u00b7 ')}. Nella quadratura entra la somma, ${fmtEUR(f.rivalsaImporto)}; il raffronto con la configurazione, che ha una sola aliquota, qui non si fa.`);
 
   // 3. La rivalsa concorda con la configurazione? Va guardato in
   //    entrambi i versi: c'e' e non dovrebbe, oppure manca e dovrebbe.
@@ -842,6 +930,25 @@ function confrontaFattura(f){
   else if(f.rivalsaAliquota>0&&Math.abs(f.rivalsaAliquota-alConf)>0.005)
     nota('scostamento','Aliquota di rivalsa diversa da quella configurata',
       `In fattura ${fmtNum(f.rivalsaAliquota,2)}%, in Configurazione fiscale ${fmtNum(alConf,2)}%.`);
+
+  // 3-bis. Il bollo, nei due versi come la rivalsa, con una cautela: e'
+  //        dovuto solo sopra i 77,47 € di importi non assoggettati a
+  //        IVA, e senza quella soglia ogni fatturina esente
+  //        risulterebbe «senza il bollo che dovrebbe avere».
+  //        Un'impostazione mai salvata non e' una scelta: in quel caso
+  //        non si dichiara nessuno scostamento.
+  const bolloConf=ts.stamp_duty_enabled;
+  const bolloConfImporto=Number(ts.stamp_duty_amount??2);
+  const esente=Number(f.baseEsente??(f.imposta>0?0:f.imponibile));
+  if(f.bolloImporto>0&&bolloConf===false)
+    nota('scostamento','Bollo in fattura ma disattivato in configurazione',
+      `La fattura espone ${fmtEUR(f.bolloImporto)} di imposta di bollo, mentre in Configurazione fiscale la marca da bollo e' spenta.`);
+  else if(!(f.bolloImporto>0)&&bolloConf===true&&esente>BOLLO_SOGLIA)
+    nota('scostamento','Bollo attivo in configurazione ma assente in fattura',
+      `In Configurazione fiscale la marca da bollo e' attiva a ${fmtEUR(bolloConfImporto)}, e la fattura ha ${fmtEUR(esente)} non assoggettati a IVA: sopra i ${fmtEUR(BOLLO_SOGLIA)} il bollo e' dovuto. In fattura non ce n'e'.`);
+  else if(f.bolloImporto>0&&bolloConf!==false&&!vicini(f.bolloImporto,bolloConfImporto))
+    nota('scostamento','Importo del bollo diverso da quello configurato',
+      `In fattura ${fmtEUR(f.bolloImporto)}, in Configurazione fiscale ${fmtEUR(bolloConfImporto)}.`);
 
   // 4. Il confronto col consuntivo, PER MESE e non per riga. Una
   //    fattura puo' avere piu' righe sullo stesso mese — progetti
@@ -931,8 +1038,9 @@ function schedaFatturaLetta(r){
 <div class="desc" style="margin-top:4px">${esc(f.clienteNome||'')}${f.clientePiva?' · P.IVA '+esc(f.clientePiva):''}${r.cliente?' → <b>'+esc(clientName(r.cliente.id))+'</b>':''}</div>
 <div class="kpiGrid three" style="margin-top:14px">
 <div><span>Imponibile</span><strong>${fmtEUR(f.imponibile)}</strong></div>
-<div><span>Rivalsa ${fmtNum(f.rivalsaAliquota,0)}%</span><strong>${fmtEUR(f.rivalsaImporto)}</strong></div>
+<div><span>Rivalsa ${f.casse&&f.casse.length>1?'('+f.casse.length+' casse)':fmtNum(f.rivalsaAliquota,0)+'%'}</span><strong>${fmtEUR(f.rivalsaImporto)}</strong></div>
 <div><span>Totale</span><strong>${fmtEUR(f.totale)}</strong></div></div>
+${f.sconto?`<div class="metricLine" style="margin-top:10px">Righe ${fmtEUR(f.righeSomma)} <span class="dot">\u00b7</span> ${f.sconto<0?'sconto':'maggiorazione'} di documento ${fmtEUR(Math.abs(f.sconto))} <span class="dot">\u00b7</span> imponibile ${fmtEUR(f.imponibile)}</div>`:''}
 <div class="metricLine" style="margin-top:12px">${f.scadenza?'Da saldare entro il '+esc(fmtDMY(f.scadenza)):'Senza scadenza indicata'}${f.bolloImporto>0?' <span class="dot">·</span> bollo '+fmtEUR(f.bolloImporto)+(f.bolloVirtuale?' virtuale':''):''}</div></div>
 <h2>Le righe</h2><div class="list">${righe||'<div class="empty">Nessuna riga.</div>'}</div>
 <h2>Il confronto coi tuoi dati</h2>
