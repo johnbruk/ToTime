@@ -133,6 +133,14 @@ assert.match(appNode.innerHTML, /Indietro/);
 listeners.input[0]({ target: { closest: selector => selector === '.form' } });
 window.go('billing');
 assert.match(appNode.innerHTML, /Fatturazione e incassi/);
-assert.match(appNode.innerHTML, /Totale fatturazione mese/);
+// La scheda si chiamava «Totale fatturazione mese» e non diceva di che
+// mese ne' di cosa fosse fatta. Adesso il titolo porta il mese e il
+// numero si scompone sotto, e questi tre controlli tengono in piedi i
+// tre blocchi della pagina: cosa devo fare, cosa aspetto, come va
+// l'anno. Erano quattro schede impilate con «da fatturare» ripetuto due
+// volte su basi diverse.
+assert.match(appNode.innerHTML, /Da fatturare/);
+assert.match(appNode.innerHTML, /Da incassare/);
+assert.match(appNode.innerHTML, /Maturato e previsione/);
 
 console.log('navigation regression test passed');

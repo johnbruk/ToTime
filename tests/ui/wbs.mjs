@@ -39,7 +39,25 @@ console.log('\n=== A. Dove la gerarchia esiste ===');
 await pg.evaluate(()=>window.go('dailyForm'));await pg.waitForTimeout(350);
 const campi=await pg.evaluate(()=>[...document.querySelectorAll('#app form.form [name]')].map(e=>e.name));
 ok(campi.includes('engagement_id')&&campi.includes('wbs_id'),'il modulo mostra commessa e WBS',campi.join(', '));
-ok(!campi.includes('activity_id'),'e non chiede piu\' l\'attivita\' sciolta');
+// La regola era «in gerarchia non si chiede l'attivita' sciolta», e
+// valeva finche' ogni commessa ne portava una. Qui NESSUNA delle tre
+// commesse ha un'attivita' collegata: il salvataggio partiva col campo
+// vuoto, e un database che lo pretende rifiutava nominando un campo che
+// a schermo non c'era. Non si riusciva piu' a registrare il lavoro.
+// Quindi quel che conta non e' che il campo manchi, ma che compaia
+// ESATTAMENTE quando la commessa non decide da se'.
+const wbsSenzaAttivita=await pg.evaluate(()=>{
+  const w=(window.__stores.wbs_items||[]).find(x=>x.id===document.querySelector('[name=wbs_id]')?.value);
+  return !w||!w.activity_id;
+});
+const attVisibile=await pg.evaluate(()=>{
+  const s=document.querySelector('#app form.form [name=activity_id]');
+  return !!s&&!(s.closest('.field')&&s.closest('.field').hidden);
+});
+ok(wbsSenzaAttivita,'questa commessa non porta un\'attivita\' con se\'');
+ok(attVisibile===wbsSenzaAttivita,
+   'e allora il tipo di attivita\' si puo\' scegliere, invece di partire vuoto',
+   'commessa senza attivita\': '+wbsSenzaAttivita+' \u00b7 campo visibile: '+attVisibile);
 const opts=async n=>pg.evaluate(x=>[...document.querySelectorAll(`[name="${x}"] option`)].map(o=>o.value).filter(Boolean),n);
 // Un livello con una scelta sola si sceglie da se' e non compare: qui
 // c'e' un progetto solo e una commessa sola, quindi il modulo non deve

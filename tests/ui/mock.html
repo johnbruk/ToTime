@@ -61,6 +61,11 @@ function makeChain(table){
           return {data:null,error:{message:'duplicate key value violates unique constraint "wbs_items_engagement_activity_code_key"'}};
         if(table==='app_settings'&&rows().some(x=>x.setting_key===r.setting_key))
           return {data:null,error:{message:'duplicate key value violates unique constraint "app_settings_user_id_setting_key_key"'}};
+        // il NOT NULL di un database vecchio: activity_id obbligatoria
+        // da prima che la gerarchia prendesse il suo posto
+        for(const col of (window.__nonNulle||[]))
+          if(r[col]===null||r[col]===undefined)
+            return {data:null,error:{message:'null value in column "'+col+'" of relation "'+table+'" violates not-null constraint'}};
       }
       const scritte=[];
       arr.forEach(r=>{const riga={id:'n'+(++seq),...r};rows().push(riga);scritte.push(riga);

@@ -40,7 +40,25 @@ console.log('\n=== A. Impegno continuativo ===');
 await pg.evaluate(()=>window.go('tmForm'));await pg.waitForTimeout(600);
 let c=await campi();
 ok(c.includes('wbs_id'),'il modulo chiede su cosa registrare',c.join(', '));
-ok(!c.includes('activity_id'),'e non l\'attività sciolta di prima');
+// La regola era «in gerarchia non si chiede l'attivita' sciolta», e
+// valeva finche' ogni commessa ne portava una. Anche l'incarico
+// continuativo scrive activity_id con la stessa riga del consuntivo
+// singolo: dove la commessa non la porta, generava righe col campo
+// vuoto e un database che lo pretende le rifiutava tutte. Quindi il
+// campo c'e', e quel che conta e' che compaia ESATTAMENTE quando la
+// commessa non decide da se'.
+const wbsSenzaAtt=await pg.evaluate(()=>{
+  const v=document.querySelector('[name=wbs_id]')?.value;
+  const w=(window.__stores.wbs_items||[]).find(x=>x.id===v);
+  return !w||!w.activity_id;
+});
+const attVisibile=await pg.evaluate(()=>{
+  const s=document.querySelector('#app form.form [name=activity_id]');
+  return !!s&&!(s.closest('.field')&&s.closest('.field').hidden);
+});
+ok(attVisibile===wbsSenzaAtt,
+   'il tipo di attivita\' si chiede solo dove la commessa non lo da\'',
+   'commessa senza attivita\': '+wbsSenzaAtt+' \u00b7 campo visibile: '+attVisibile);
 const scelto=await pg.evaluate(()=>document.querySelector('#app [name="wbs_id"]')?.value||'');
 ok(scelto==='w10','con la voce già scelta: ce n\'è una sola',scelto||'vuota');
 const primaTm=(await store('timesheet_entries')).length;

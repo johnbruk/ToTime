@@ -60,7 +60,7 @@ async function cambiaFatturaPianificato(v){
 }
 function settingValue(key){return data.appSettings?.find(s=>s.setting_key===key)?.setting_value}
 function loadThemeFromSettings(){const val=settingValue('theme'); if(typeof val==='string' && ['light','dark','auto'].includes(val)){state.theme=val} applyTheme()}
-async function saveThemeChoice(theme){state.theme=theme;applyTheme();const existing=data.appSettings?.find(s=>s.setting_key==='theme');const payload={setting_key:'theme',setting_value:theme};let res;if(existing)res=await updateResilient('app_settings',payload,existing.id);else res=await insertResilient('app_settings',payload);if(res.error)return setMsg(res.error.message,7000);await reload();state.view='appearance';setMsg('Tema aggiornato.',3000)}
+async function saveThemeChoice(theme){state.theme=theme;applyTheme();const existing=data.appSettings?.find(s=>s.setting_key==='theme');const payload={setting_key:'theme',setting_value:theme};let res;if(existing)res=await updateResilient('app_settings',payload,existing.id);else res=await insertResilient('app_settings',payload);if(res.error)return setMsg(motivoLeggibile(res.error),7000);await reload();state.view='appearance';setMsg('Tema aggiornato.',3000)}
 
 function monthLabel(m){const [y,mo]=m.split('-').map(Number);return `${monthNames[mo-1]} ${y}`}
 function periodParts(m=state.month){const [year,month]=m.split('-').map(Number);return {year,month}}
@@ -282,6 +282,7 @@ async function runResilient(makeCall,payload,dropKeys){
 const MIGRAZIONE_DI={
   trip_id:'2026-10-06_trasferte.sql',
   vehicle_id:'2026-10-06_veicoli-e-chilometrica.sql',
+  vat_number:'2026-10-08_partita-iva-cliente.sql',
   from_place:'2026-10-06_veicoli-e-chilometrica.sql',
   to_place:'2026-10-06_veicoli-e-chilometrica.sql',
   round_trip:'2026-10-06_veicoli-e-chilometrica.sql',
@@ -294,8 +295,10 @@ const NOME_COLONNA={
   trip_id:'la trasferta',vehicle_id:'il veicolo',from_place:'la partenza',
   to_place:'l\u2019arrivo',round_trip:'l\u2019andata e ritorno',
   payment_method:'come l\u2019hai pagata',receipt_kept:'la ricevuta',
+  vat_number:'la partita IVA del cliente',
   receipt_path:'la ricevuta allegata',wbs_id:'la commessa',
-  is_mileage:'il rimborso chilometrico'
+  is_mileage:'il rimborso chilometrico',
+  activity_id:'il tipo di attività',project_id:'il progetto',client_id:'il cliente'
 };
 // Il messaggio da dire quando una scrittura ha dovuto lasciare fuori
 // dei campi: cosa non e' stato salvato, e quale migrazione lo sistema.
@@ -322,7 +325,7 @@ function fmtDays(hours){return fmtNum(Number(hours||0)/8,2)}
 function metricLine(hours,amount){return `${fmtNum(hours,1)} h <span class="dot">·</span> ${fmtDays(hours)} gg/u <span class="dot">·</span> ${fmtEUR(amount)}`}
 function amountLine(label,amount){return `${esc(label)} <span class="dot">·</span> ${fmtEUR(amount)}`}
 function dateIT(v){if(!v)return'';const s=String(v);return `${s.slice(8,10)}/${s.slice(5,7)}`}
-function viewLabel(v){return ({tripNew:'Nuova trasferta',tripEdit:'Modifica trasferta',home:'Dashboard',timesheet:'Timesheet',billing:'Fatturazione',billingDetail:'Dettaglio fattura',tax:'Profilo fiscale',taxPayments:'Pagamenti fiscali',taxPaymentEdit:'Pagamento fiscale',annualMonths:'Consuntivato annuale',annualInvoices:'Elenco fatture',settings:'Configurazione',clients:'Clienti',clientEdit:'Cliente',projects:'Progetti',projectEdit:'Progetto',activities:'Attività',activityEdit:'Attività',expenseCategories:'Voci spesa',vehicles:'Veicoli',vehicleEdit:'Veicolo',policyRimborsi:'Policy rimborsi',expenseCategoryEdit:'Voce spesa',invoiceTemplates:'Template fattura',invoiceTemplateEdit:'Template fattura',appearance:'Aspetto',exportTimesheet:'Export timesheet',dailyForm:'Consuntivo giornaliero',dailyEdit:'Consuntivo giornaliero',monthlyForm:'Compenso mensile',monthlyEdit:'Compenso mensile',manualForm:'Consuntivo manuale',manualEdit:'Consuntivo manuale',expenseForm:'Spesa trasferta',expenseEdit:'Spesa trasferta'})[v]||'schermata precedente'}
+function viewLabel(v){return ({tripNew:'Nuova trasferta',tripEdit:'Modifica trasferta',home:'Dashboard',timesheet:'Timesheet',billing:'Fatturazione',billingDetail:'Dettaglio fattura',fatturaCarica:'Carica fattura emessa',tax:'Profilo fiscale',taxPayments:'Pagamenti fiscali',taxPaymentEdit:'Pagamento fiscale',annualMonths:'Consuntivato annuale',annualInvoices:'Elenco fatture',settings:'Configurazione',clients:'Clienti',clientEdit:'Cliente',projects:'Progetti',projectEdit:'Progetto',activities:'Attività',activityEdit:'Attività',expenseCategories:'Voci spesa',vehicles:'Veicoli',vehicleEdit:'Veicolo',policyRimborsi:'Policy rimborsi',expenseCategoryEdit:'Voce spesa',invoiceTemplates:'Template fattura',invoiceTemplateEdit:'Template fattura',appearance:'Aspetto',exportTimesheet:'Export timesheet',dailyForm:'Consuntivo giornaliero',dailyEdit:'Consuntivo giornaliero',monthlyForm:'Compenso mensile',monthlyEdit:'Compenso mensile',manualForm:'Consuntivo manuale',manualEdit:'Consuntivo manuale',expenseForm:'Spesa trasferta',expenseEdit:'Spesa trasferta'})[v]||'schermata precedente'}
 // Fuori dal browser — i test di modulo girano in Node con un document
 // finto e ridotto — alcune funzioni del DOM non ci sono. Chiederle di
 // sicuro faceva esplodere l'avvio dell'app invece di proteggerlo.
@@ -528,6 +531,635 @@ function groupSummary(){
   // quindi nessun totale di fattura si muove.
   expenseRows().filter(expIsPie).forEach(e=>{const k=`${e.client_id}|${e.project_id||''}|expense_report`; if(!map[k]) map[k]={client_id:e.client_id,project_id:e.project_id,type:'expense_report',label:'Spese a pi\u00e8 di lista',hours:null,amount:0,items:[]}; map[k].amount+=Number(e.amount||0); map[k].items.push(e)});
   return Object.values(map).sort((a,b)=>`${clientName(a.client_id)}|${projectName(a.project_id)||''}|${a.type}`.localeCompare(`${clientName(b.client_id)}|${projectName(b.project_id)||''}|${b.type}`));
+}
+// ============ LA FATTURA EMESSA E' LA VERITA' ============
+//
+// Fin qui l'app PROPONEVA i dati per la fattura. Ma la fattura, una
+// volta emessa e trasmessa allo SdI, e' quella che fa fede: se i due
+// non concordano, a sbagliare e' il consuntivo, non il documento.
+// Quindi si carica la fattura, si legge, e si dice dove l'app non
+// tornava.
+//
+// Si legge l'XML della fattura elettronica, non il PDF. L'XML ha i
+// campi gia' separati e certificati; il PDF andrebbe interpretato da un
+// testo impaginato, e si romperebbe al primo cambio di layout del
+// fornitore.
+//
+// I nomi dei tag si cercano per nome LOCALE: l'XML usa un prefisso di
+// namespace sulla radice (p:FatturaElettronica) e nessuno sui figli, e
+// altri emittenti lo mettono dappertutto. Cercare 'Numero' funziona in
+// entrambi i casi; cercare 'p:Numero' no.
+function tagLocale(nodo,nome){
+  if(!nodo)return null;
+  const tutti=nodo.getElementsByTagName('*');
+  for(let i=0;i<tutti.length;i++){
+    const t=tutti[i];
+    if((t.localName||t.nodeName.split(':').pop())===nome)return t;
+  }
+  return null;
+}
+function tuttiLocali(nodo,nome){
+  const out=[];
+  if(!nodo)return out;
+  const tutti=nodo.getElementsByTagName('*');
+  for(let i=0;i<tutti.length;i++){
+    const t=tutti[i];
+    if((t.localName||t.nodeName.split(':').pop())===nome)out.push(t);
+  }
+  return out;
+}
+const testoTag=(nodo,nome)=>{const t=tagLocale(nodo,nome);return t?(t.textContent||'').trim():''};
+const numTag=(nodo,nome)=>{const v=testoTag(nodo,nome);return v?Number(v):0};
+// Il mese che una riga fattura sta dentro la sua descrizione:
+// «Consulenza - Marzo 2026 | Giorni: 5,5». Non e' un campo dello
+// standard, e' una convenzione di chi emette: quindi si legge, ma non
+// si inventa. Se non si riconosce, la riga resta senza mese e lo dice.
+function meseDaDescrizione(d){
+  const t=String(d||'');
+  const m=monthNames.findIndex(n=>new RegExp('\\b'+n+'\\b','i').test(t));
+  const anno=(t.match(/\b(20\d{2})\b/)||[])[1];
+  if(m<0||!anno)return null;
+  return anno+'-'+String(m+1).padStart(2,'0');
+}
+// E i giorni, quando ci sono: «| Giorni: 5,5».
+function giorniDaDescrizione(d){
+  const m=String(d||'').match(/Giorni:\s*([0-9]+(?:[.,][0-9]+)?)/i);
+  return m?Number(m[1].replace(',','.')):null;
+}
+function leggiFatturaXML(testo){
+  const doc=new DOMParser().parseFromString(String(testo||''),'application/xml');
+  if(tagLocale(doc,'parsererror')||!tagLocale(doc,'FatturaElettronicaBody'))
+    return {errore:'Non sembra una fattura elettronica: manca FatturaElettronicaBody.'};
+  // Un file FatturaPA puo' contenere piu' fatture. Leggerne una sola e
+  // dire che e' andata bene significa nascondere le altre: numeri,
+  // righe e totali che nessuno vedrebbe mai. Finche' non c'e' una
+  // schermata che le mostri tutte, si rifiuta il file e si dice perche'.
+  const corpi=tuttiLocali(doc,'FatturaElettronicaBody');
+  if(corpi.length>1)
+    return {errore:`Il file contiene ${corpi.length} fatture. Caricane una alla volta: leggerne una sola e dire che \u00e8 andata bene nasconderebbe le altre.`};
+  const body=corpi[0];
+  const head=tagLocale(doc,'FatturaElettronicaHeader');
+  const cliente=tagLocale(head,'CessionarioCommittente');
+  const fornitore=tagLocale(head,'CedentePrestatore');
+  const gen=tagLocale(body,'DatiGeneraliDocumento');
+  // Le casse previdenziali sono PIU' DI UNA quando l'emittente espone
+  // sia la cassa di categoria sia il contributo integrativo. Tenendo
+  // solo la prima, la rivalsa risultava piu' bassa del vero: la
+  // quadratura dell'imponibile falliva su un documento sano, e il
+  // confronto si fermava dando la colpa alla fattura.
+  const casse=tuttiLocali(gen,'DatiCassaPrevidenziale').map(c=>({
+    tipo:testoTag(c,'TipoCassa'),aliquota:numTag(c,'AlCassa'),
+    importo:numTag(c,'ImportoContributoCassa'),base:numTag(c,'ImponibileCassa')}));
+  const rivalsaImporto=casse.reduce((a,c)=>a+c.importo,0);
+  // Un'aliquota sola si puo' mostrare e verificare; con piu' casse non
+  // esiste «l'aliquota della fattura», e farne una media direbbe una
+  // percentuale che non sta scritta in nessun documento.
+  const rivalsaAliquota=casse.length===1?casse[0].aliquota:0;
+  const bollo=tagLocale(gen,'DatiBollo');
+  // Sconti e maggiorazioni di DOCUMENTO: abbassano (Tipo SC) o alzano
+  // (MG) l'imponibile del riepilogo rispetto alla somma delle righe.
+  // Senza leggerli, una fattura con uno sconto in piede risultava «non
+  // torna con se stessa» pur essendo corretta.
+  // Quelli di RIGA non si toccano: lo standard li vuole gia' compresi
+  // in PrezzoTotale, e sommarli di nuovo li conterebbe due volte.
+  const scontiEl=tuttiLocali(gen,'ScontoMaggiorazione');
+  // Le rate: una fattura puo' avere piu' scadenze. Tenere solo la prima
+  // e presentarla come LA scadenza della fattura nasconde le altre.
+  const rate=tuttiLocali(body,'DettaglioPagamento').map(p=>({
+    scadenza:testoTag(p,'DataScadenzaPagamento'),
+    importo:numTag(p,'ImportoPagamento'),
+    iban:testoTag(p,'IBAN')}));
+  const pag=tagLocale(body,'DettaglioPagamento');
+  // I riepiloghi sono la fonte autorevole dell'imponibile e dell'IVA.
+  // Senza leggerli, il controllo «la fattura torna con se stessa»
+  // confrontava le righe con la somma delle righe stesse: non poteva
+  // fallire mai, pur essendo annunciato a schermo.
+  const riepiloghi=tuttiLocali(body,'DatiRiepilogo').map(r=>({
+    aliquota:numTag(r,'AliquotaIVA'),natura:testoTag(r,'Natura'),
+    imponibile:numTag(r,'ImponibileImporto'),imposta:numTag(r,'Imposta'),
+    // Ogni riepilogo ha un suo arrotondamento, che per lo standard
+    // CONCORRE al suo ImponibileImporto. E' un campo diverso
+    // dall'Arrotondamento di documento, che sposta il totale: 99,99 di
+    // righe piu' 0,01 di arrotondamento fanno 100,00 di imponibile, e
+    // senza leggerlo la fattura risultava guasta per un centesimo.
+    arrotondamento:numTag(r,'Arrotondamento')}));
+  const imposta=riepiloghi.reduce((a,r)=>a+r.imposta,0);
+  const arrotondamentoRiepiloghi=riepiloghi.reduce((a,r)=>a+r.arrotondamento,0);
+  const idCliente=tagLocale(cliente,'IdFiscaleIVA');
+  const idFornitore=tagLocale(fornitore,'IdFiscaleIVA');
+  const righe=tuttiLocali(body,'DettaglioLinee').map(l=>{
+    const descrizione=testoTag(l,'Descrizione');
+    return {numero:numTag(l,'NumeroLinea'),descrizione,
+      quantita:numTag(l,'Quantita'),prezzoUnitario:numTag(l,'PrezzoUnitario'),
+      importo:numTag(l,'PrezzoTotale'),
+      mese:meseDaDescrizione(descrizione),giorni:giorniDaDescrizione(descrizione)};
+  });
+  // L'imponibile della fattura e' la somma delle sue righe. NON e'
+  // ImponibileCassa, che e' solo la parte su cui si calcola la rivalsa:
+  // una fattura con voci escluse dal contributo (spese, per dire) ha i
+  // due numeri diversi, e scambiarli faceva fallire i controlli di
+  // quadratura su un documento sano.
+  const righeSomma=righe.reduce((s,r)=>s+r.importo,0);
+  // Quando sono piu' di uno si applicano IN SEQUENZA: la seconda
+  // percentuale sta su quello che resta dopo la prima. Con un solo
+  // sconto — il caso di tutti i giorni — non cambia nulla.
+  let corrente=righeSomma;
+  const sconti=scontiEl.map(x=>{
+    const perc=tagLocale(x,'Percentuale')?numTag(x,'Percentuale'):null;
+    const imp=tagLocale(x,'Importo')?numTag(x,'Importo'):null;
+    // Importo e Percentuale sono alternativi: quando c'e' l'importo
+    // vale quello, perche' e' il numero che l'emittente ha scritto.
+    const grezzo=imp!==null?imp:(perc!==null?corrente*perc/100:0);
+    const sc=String(testoTag(x,'Tipo')||'').toUpperCase()==='SC';
+    const valore=(sc?-1:1)*grezzo;
+    corrente+=valore;
+    return {tipo:sc?'SC':'MG',percentuale:perc,importo:imp,valore};
+  });
+  const sconto=sconti.reduce((a,x)=>a+x.valore,0);
+  const imponibile=righeSomma+sconto;
+  const imponibileCassa=casse.length?casse[0].base:0;
+  // Gli importi su cui si misura la soglia del bollo. NON e' «tutto
+  // quello che ha IVA zero»: l'inversione contabile (N6.*) e il difetto
+  // di territorialita' (N2.1) hanno aliquota zero ma il bollo non lo
+  // scontano, e pretenderlo avrebbe segnalato come mancante un bollo
+  // che non e' dovuto. Valgono le nature che l'Agenzia considera
+  // assoggettate. Senza riepiloghi non si giudica: zero, e si tace.
+  const baseEsente=riepiloghi
+    .filter(r=>!(r.aliquota>0)&&NATURE_BOLLO.indexOf(String(r.natura||'').toUpperCase())>=0)
+    .reduce((a,r)=>a+r.imponibile,0);
+  return {
+    numero:testoTag(gen,'Numero'),
+    data:testoTag(gen,'Data'),
+    tipo:testoTag(gen,'TipoDocumento'),
+    divisa:testoTag(gen,'Divisa'),
+    // IdPaese e IdCodice sono due campi: tenere solo il secondo rende
+    // un DE123456789 indistinguibile da un IT123456789.
+    clientePaese:idCliente?testoTag(idCliente,'IdPaese'):'',
+    clientePiva:idCliente?testoTag(idCliente,'IdCodice'):'',
+    clienteNome:testoTag(cliente,'Denominazione')||
+      [testoTag(cliente,'Nome'),testoTag(cliente,'Cognome')].filter(Boolean).join(' '),
+    fornitoreRegime:testoTag(fornitore,'RegimeFiscale'),
+    fornitorePaese:idFornitore?testoTag(idFornitore,'IdPaese'):'',
+    fornitorePiva:idFornitore?testoTag(idFornitore,'IdCodice'):'',
+    fornitoreNome:testoTag(fornitore,'Denominazione')||
+      [testoTag(fornitore,'Nome'),testoTag(fornitore,'Cognome')].filter(Boolean).join(' '),
+    righe,imponibile,righeSomma,sconti,sconto,imponibileCassa,casse,
+    rivalsaAliquota,rivalsaImporto,
+    bolloVirtuale:bollo?testoTag(bollo,'BolloVirtuale')==='SI':false,
+    bolloImporto:bollo?numTag(bollo,'ImportoBollo'):0,
+    // ImportoTotaleDocumento e' facoltativo: assente non vuol dire
+    // zero. Trattarlo come zero faceva risultare «totale che non
+    // torna» ogni fattura che non lo espone, e mostrava 0,00 a schermo.
+    totale:numTag(gen,'ImportoTotaleDocumento'),
+    totaleDichiarato:!!tagLocale(gen,'ImportoTotaleDocumento'),
+    imposta,riepiloghi,baseEsente,arrotondamentoRiepiloghi,
+    // L'arrotondamento sposta il TOTALE del documento, non l'imponibile:
+    // senza leggerlo, una fattura arrotondata di un centesimo risultava
+    // col «totale che non torna».
+    arrotondamento:numTag(gen,'Arrotondamento'),
+    // L'imponibile autorevole viene dai riepiloghi, non dalle righe.
+    imponibileRiepilogo:riepiloghi.length?riepiloghi.reduce((a,r)=>a+r.imponibile,0):null,
+    rate,
+    scadenza:pag?testoTag(pag,'DataScadenzaPagamento'):'',
+    iban:pag?testoTag(pag,'IBAN'):'',
+  };
+}
+// Il confronto. Non interessa cosa c'e' nella fattura — quello si vede
+// aprendola — ma DOVE l'app non tornava con lei. Ogni scostamento e'
+// una riga, con la sua gravita': «blocco» va guardato prima di allineare
+// niente, «nota» e' informazione.
+//
+// Nessun numero viene toccato qui: questa funzione guarda e basta.
+// L'abbinamento del cliente. La partita IVA e' il modo certo, ma e' un
+// campo che l'anagrafica ha acquisito solo adesso: finche' non lo si
+// riempie, nessuna fattura troverebbe il suo cliente e tutti i
+// confronti resterebbero fermi. Quindi si ripiega sul nome — e si dice
+// che e' un ripiego, perche' due clienti possono chiamarsi uguale.
+// Le sigle societarie si tolgono PRIMA di appiattire la punteggiatura:
+// «Acme S.r.l.» diventava «acme s r l», e a quel punto la sigla non si
+// riconosceva piu'. Il cliente salvato come «Acme SRL» diventava
+// «acme», i due non combaciavano, e un cliente vero risultava
+// sconosciuto.
+function normaNome(v){
+  return String(v||'').toLowerCase()
+    .replace(/\bs\s*\.?\s*r\s*\.?\s*l\s*\.?s?\b/g,' ')
+    .replace(/\bs\s*\.?\s*p\s*\.?\s*a\s*\.?\b/g,' ')
+    .replace(/\bs\s*\.?\s*n\s*\.?\s*c\s*\.?\b/g,' ')
+    .replace(/\bs\s*\.?\s*a\s*\.?\s*s\s*\.?\b/g,' ')
+    .replace(/[^a-z0-9]+/g,' ').trim();
+}
+// Due partite IVA combaciano se combacia l'identificativo intero,
+// oppure se quella salvata e' un numero nudo — che si intende
+// italiano — e il documento e' italiano.
+function pivaCombacia(salvata,paese,codice){
+  const r=v=>String(v||'').replace(/\s/g,'').toUpperCase();
+  const v=r(salvata),c=r(codice),p=r(paese)||'IT';
+  if(!v||!c)return null;
+  if(v===p+c)return true;
+  if(!/^[A-Z]{2}/.test(v))return p==='IT'&&v===c;
+  return false;
+}
+function clientePerFattura(f){
+  const ripulisci=v=>String(v||'').replace(/\s/g,'').toUpperCase();
+  const p=ripulisci(f&&f.clientePiva);
+  const combacia=c=>pivaCombacia(c.vat_number,f&&f.clientePaese,f&&f.clientePiva)===true;
+  if(p){
+    // Niente impedisce a due schede di avere la stessa partita IVA: il
+    // database non ha un vincolo e il modulo non lo rifiuta. Sceglierne
+    // una vorrebbe dire attribuire gli scostamenti al cliente sbagliato.
+    const perPiva=(data.clients||[]).filter(combacia);
+    if(perPiva.length===1)return {cliente:perPiva[0],come:'piva'};
+    if(perPiva.length>1)return {cliente:null,come:'pivaDoppia'};
+  }
+  const n=normaNome(f&&f.clienteNome);
+  if(n){
+    const perNome=(data.clients||[]).filter(c=>normaNome(c.name)===n);
+    // Il ripiego sul nome vale finche' non SMENTISCE una partita IVA
+    // gia' scritta in anagrafica. Se la scheda che si chiama come la
+    // fattura ne ha un'altra, non e' quel soggetto: sono due enti
+    // distinti con la stessa ragione sociale, e abbinarli vorrebbe dire
+    // confrontare la fattura con le ore di un altro cliente.
+    const contrari=perNome.filter(c=>!!p&&!!ripulisci(c.vat_number)&&!combacia(c));
+    const buoni=perNome.filter(c=>contrari.indexOf(c)<0);
+    if(buoni.length===1)return {cliente:buoni[0],come:'nome'};
+    if(buoni.length>1)return {cliente:null,come:'omonimi'};
+    if(contrari.length)return {cliente:null,come:'pivaContraria',contrari};
+  }
+  return {cliente:null,come:null};
+}
+// Tenuta per chi la usa gia': l'abbinamento per sola partita IVA.
+function clientePerPiva(piva){
+  const p=String(piva||'').replace(/\s/g,'');
+  if(!p)return null;
+  return (data.clients||[]).find(c=>String(c.vat_number||'').replace(/\s/g,'')===p)||null;
+}
+// I giorni consuntivati di un cliente in un mese, per il confronto con
+// quelli fatturati. Si contano solo le ore gia' lavorate: il pianificato
+// non e' ancora lavoro.
+// I giorni, con le ore standard di OGNI riga. Dividere il monte ore per
+// 8 fisse dava scostamenti falsi su chi ha la giornata diversa: 7,5 ore
+// con standard 7,5 sono un giorno pieno dappertutto nell'app, e qui
+// diventavano 0,94.
+// Le ore su una commessa non fatturabile non vanno in fattura: lo dice
+// gia' prospettoProgetto, che per quelle azzera il da fatturare.
+// Contandole qui, una fattura emessa correttamente risultava corta di
+// tutto il lavoro interno.
+function rigaFatturabile(e){
+  const w=e&&e.wbs_id?wbsById(e.wbs_id):null;
+  return !w||w.billable!==false;
+}
+// Il pianificato entra o no secondo l'impostazione «Fattura anche il
+// pianificato», che e' la stessa che usa groupSummary per comporre la
+// proposta. Escluderlo sempre voleva dire che una fattura emessa DA
+// QUELLA PROPOSTA, con l'impostazione accesa, risultava sempre piu'
+// alta del consuntivo: uno scostamento che veniva dall'app, non da te.
+function rigaDaConfrontare(e){return !isPlanned(e)||fatturaPianificato()}
+function oreDelMese(clientId,mese){
+  return (data.entries||[]).filter(e=>
+    e.client_id===clientId && String(e.entry_date||'').startsWith(mese) &&
+    rigaDaConfrontare(e) && rigaFatturabile(e));
+}
+function pianificatoNelMese(clientId,mese){
+  return (data.entries||[]).some(e=>
+    e.client_id===clientId && String(e.entry_date||'').startsWith(mese) &&
+    isPlanned(e) && rigaFatturabile(e));
+}
+function giorniConsuntivati(clientId,mese){
+  return oreDelMese(clientId,mese).reduce((s,e)=>s+dailyDays(e),0);
+}
+function importoConsuntivato(clientId,mese){
+  const g=oreDelMese(clientId,mese).reduce((s,e)=>s+dailyAmount(e),0);
+  const mens=(data.monthly||[]).filter(e=>
+    e.client_id===clientId && (String(e.year)+'-'+String(e.month).padStart(2,'0'))===mese
+  ).reduce((s,e)=>s+Number(e.amount||0),0);
+  const man=(data.manualEntries||[]).filter(e=>
+    e.client_id===clientId && String(e.entry_date||'').startsWith(mese) && rigaDaConfrontare(e)
+  ).reduce((s,e)=>s+Number(e.amount||0),0);
+  return g+mens+man;
+}
+function rimborsiDelMese(clientId,mese){
+  return (data.travelExpenses||[]).filter(e=>
+    e.client_id===clientId && String(e.expense_date||'').startsWith(mese) && expIsInvoice(e)
+  ).reduce((s,e)=>s+Number(e.amount||0),0);
+}
+const vicini=(a,b)=>Math.abs(Number(a||0)-Number(b||0))<0.005;
+function confrontaFattura(f){
+  const esiti=[];
+  const nota=(liv,titolo,dettaglio)=>esiti.push({liv,titolo,dettaglio});
+  if(f.errore){nota('blocco','Non si riesce a leggere la fattura',f.errore);return {esiti,cliente:null,mesi:[]}}
+
+  // 0. Prima di tutto: e' un documento che questo confronto sa trattare?
+  //    Una nota di credito ha gli importi positivi e il segno glielo da'
+  //    il tipo: confrontarla come una fattura direbbe che hai fatturato
+  //    quello che invece hai stornato.
+  if(f.tipo&&f.tipo!=='TD01'){
+    nota('blocco','Tipo di documento non trattato',
+      `Questo e' un documento ${esc(f.tipo)}${f.tipo==='TD04'?' (nota di credito)':''}. Il confronto sa leggere solo le fatture TD01: su un documento di segno opposto direbbe il contrario del vero.`);
+    return {esiti,cliente:null,mesi:[]};
+  }
+  if(f.divisa&&f.divisa!=='EUR'){
+    nota('blocco','Valuta diversa dall’euro',
+      `La fattura e' in ${esc(f.divisa)}. I consuntivi sono in euro: confrontare i numeri senza convertirli darebbe scostamenti inventati.`);
+    return {esiti,cliente:null,mesi:[]};
+  }
+
+  // 0-bis. L'HAI EMESSA TU?
+  //
+  //   Questa schermata confronta una fattura TUA coi tuoi consuntivi.
+  //   Una fattura RICEVUTA da un fornitore — pescata per sbaglio dalla
+  //   stessa cartella, che e' dove stanno tutte — ha la stessa forma e
+  //   si lascia leggere uguale: il confronto partiva lo stesso e
+  //   produceva scostamenti dall'aria autorevole su un documento di un
+  //   altro. La partita IVA di chi emette sta nel file, la tua sta nel
+  //   profilo: basta guardarle.
+  //
+  //   Se il profilo non ha la partita IVA non si blocca niente: un dato
+  //   mai scritto non e' una smentita.
+  const miaPiva=((data.profiles||[])[0]||{}).vat_number;
+  const emessaDaTe=pivaCombacia(miaPiva,f.fornitorePaese,f.fornitorePiva);
+  if(emessaDaTe===false){
+    nota('blocco','Questa fattura non l’hai emessa tu',
+      `La emette ${f.fornitoreNome||'un altro soggetto'} con la P.IVA ${f.fornitorePaese||''}${f.fornitorePiva||'?'}, mentre la tua e' ${miaPiva}. E' una fattura che hai RICEVUTO: confrontarla coi tuoi consuntivi darebbe scostamenti su un documento che non e' tuo. Qui si caricano le fatture che hai emesso.`);
+    return {esiti,cliente:null,mesi:[]};
+  }
+  if(emessaDaTe===null&&f.fornitorePiva)
+    nota('nota','Non si e’ potuto verificare che la fattura sia tua',
+      `In Account non c'e' la tua partita IVA, quindi non si puo' confrontare con quella di chi emette (${f.fornitorePiva}). Scrivila, e caricando una fattura ricevuta per sbaglio l'app se ne accorgerebbe.`);
+
+  // 1. Di chi e'.
+  const ab=clientePerFattura(f);
+  const cliente=ab.cliente;
+  if(!cliente&&ab.come==='pivaDoppia')
+    nota('blocco','Pi\u00f9 clienti con la stessa partita IVA',
+      `La P.IVA ${f.clientePiva} compare su piu' di una scheda cliente. Finche' resta cos\u00ec, i confronti finirebbero sul cliente sbagliato: tienila su una sola.`);
+  else if(!cliente&&ab.come==='omonimi')
+    nota('blocco','Più clienti con lo stesso nome',
+      `${f.clienteNome} corrisponde a piu' di un cliente. Scrivi la partita IVA nella scheda del cliente giusto, cosi' l'abbinamento diventa certo.`);
+  else if(!cliente&&ab.come==='pivaContraria')
+    nota('blocco','Il nome combacia, la partita IVA no',
+      `${f.clienteNome} ha lo stesso nome di ${ab.contrari.map(c=>clientName(c.id)+' (P.IVA '+c.vat_number+')').join(', ')}, ma la fattura e' intestata alla P.IVA ${f.clientePiva}: sono soggetti distinti. Abbinarli vorrebbe dire confrontare questa fattura con le ore di un altro cliente. Crea la scheda del cliente giusto, o correggi la partita IVA.`);
+  else if(!cliente)
+    nota('blocco','Cliente non riconosciuto',
+      `La fattura e' intestata a ${f.clienteNome||'?'} (P.IVA ${f.clientePiva||'assente'}), che non corrisponde a nessun cliente. Scrivi quella partita IVA nella scheda del cliente, oppure allinea il nome.`);
+  else if(ab.come==='nome')
+    nota('nota','Cliente riconosciuto dal nome, non dalla partita IVA',
+      `Abbinato a ${clientName(cliente.id)} perche' il nome combacia. Scrivendo la P.IVA ${f.clientePiva||''} nella sua scheda, l'abbinamento diventa certo.`);
+
+  // 2. La fattura torna con se' stessa?
+  const sommaRighe=f.righe.reduce((s,r)=>s+Number(r.importo||0),0);
+  // Il confronto va fatto contro i RIEPILOGHI, che sono la fonte
+  // autorevole. Confrontando le righe con l'imponibile — che e' esso
+  // stesso la somma delle righe — il controllo non poteva fallire mai,
+  // pur essendo annunciato a schermo come fatto.
+  // Attenzione all'aritmetica della FatturaPA: nel riepilogo il
+  // contributo cassa CONCORRE all'imponibile, quindi ImponibileImporto
+  // vale righe + rivalsa. Non in tutti i documenti pero': esiste anche
+  // la convenzione in cui non concorre. Si accettano entrambe, e si
+  // segnala solo se non torna in nessuno dei due modi.
+  // Lo sconto (o la maggiorazione) di documento sta fra la somma delle
+  // righe e l'imponibile del riepilogo: ignorarlo faceva risultare «non
+  // torna» una fattura corretta, e l’errore fermava tutto il resto.
+  const sconto=Number(f.sconto||0);
+  const dopoSconto=sommaRighe+sconto+Number(f.arrotondamentoRiepiloghi||0);
+  const dettSconto=sconto
+    ? ` ${sconto<0?'meno':'piu\u2019'} ${fmtEUR(Math.abs(sconto))} di ${sconto<0?'sconto':'maggiorazione'} in piede fanno ${fmtEUR(dopoSconto)},`
+    : '';
+  const righePiuRivalsa=dopoSconto+f.rivalsaImporto;
+  if(f.imponibileRiepilogo!==null&&
+     !vicini(dopoSconto,f.imponibileRiepilogo)&&!vicini(righePiuRivalsa,f.imponibileRiepilogo)){
+    nota('blocco','La fattura non torna con se stessa',
+      `Le righe sommano ${fmtEUR(sommaRighe)},${dettSconto}${f.rivalsaImporto>0?' '+fmtEUR(righePiuRivalsa)+' con la rivalsa,':''} ma i riepiloghi dichiarano ${fmtEUR(f.imponibileRiepilogo)} di imponibile.`);
+    // E qui si ferma. Tutto quello che viene dopo — il totale, la
+    // rivalsa, gli importi mese per mese — si appoggia a questi stessi
+    // numeri: proseguire vorrebbe dire dare la colpa ai consuntivi
+    // usando una fattura che non quadra nemmeno con se' stessa.
+    nota('nota','Il confronto coi tuoi dati si ferma qui',
+      'Finche\u2019 la fattura non torna al suo interno, confrontarla col consuntivo produrrebbe scostamenti che vengono dal documento, non dall\u2019app. Controlla il file e ricaricalo.');
+    return {esiti,cliente,mesi:[],abbinamento:ab.come};
+  }
+  // Il bollo puo' essere addebitato al cliente oppure no: «virtuale»
+  // dice come si paga, non a chi tocca. Quindi si accettano entrambe le
+  // quadrature, e si blocca solo se non torna in nessuno dei due modi.
+  // L'IVA fa parte del totale documento. L'app non serve solo
+  // forfettari: in regime ordinario o semplificato una fattura da
+  // 1.000 + 220 di IVA risultava «non quadrata» solo perche' l'imposta
+  // non veniva sommata.
+  // Il totale: si parte dall'imponibile del riepilogo quando c'e',
+  // perche' la rivalsa li' e' gia' dentro; altrimenti dalle righe piu'
+  // la rivalsa. Poi l'IVA, che in regime ordinario fa parte del totale.
+  const baseTotale=f.imponibileRiepilogo!==null
+    ? (vicini(righePiuRivalsa,f.imponibileRiepilogo)?f.imponibileRiepilogo:f.imponibileRiepilogo+f.rivalsaImporto)
+    : righePiuRivalsa;
+  const senzaBollo=baseTotale+f.imposta+Number(f.arrotondamento||0);
+  const conBollo=senzaBollo+f.bolloImporto;
+  const bolloAddebitato=f.bolloImporto>0&&vicini(conBollo,f.totale);
+  // E un totale non dichiarato non e' un totale a zero: e' facoltativo.
+  if(f.totaleDichiarato&&!vicini(senzaBollo,f.totale)&&!bolloAddebitato)
+    nota('blocco','Il totale non torna',
+      `${fmtEUR(f.imponibile)} di righe + ${fmtEUR(f.rivalsaImporto)} di rivalsa${f.imposta>0?' + '+fmtEUR(f.imposta)+' di IVA':''} fanno ${fmtEUR(senzaBollo)}${f.bolloImporto>0?', o '+fmtEUR(conBollo)+' col bollo':''}, ma il totale documento e' ${fmtEUR(f.totale)}.`);
+  if(!f.totaleDichiarato)
+    nota('nota','La fattura non dichiara un totale documento',
+      `E' un campo facoltativo: la quadratura del totale non si puo' verificare. Le righe sommano ${fmtEUR(sommaRighe)}.`);
+  // La rivalsa si verifica sulla SUA base, che non e' per forza
+  // l'imponibile della fattura.
+  // E cassa per cassa, perche' con piu' blocchi ognuno ha la sua
+  // aliquota sulla sua base: sommare prima di dividere darebbe
+  // un'aliquota media che non sta scritta in nessun documento.
+  const casse=(f.casse&&f.casse.length)?f.casse
+    :((f.rivalsaImporto||f.rivalsaAliquota)
+      ?[{aliquota:f.rivalsaAliquota,importo:f.rivalsaImporto,base:f.imponibileCassa}]:[]);
+  casse.forEach((c,i)=>{
+    const base=c.base||f.imponibile;
+    if(c.aliquota>0&&!vicini(base*c.aliquota/100,c.importo))
+      nota('scostamento','La rivalsa non torna con la sua aliquota'+(casse.length>1?' \u00b7 '+(c.tipo||'cassa '+(i+1)):''),
+        `${fmtNum(c.aliquota,2)}% di ${fmtEUR(base)} farebbe ${fmtEUR(base*c.aliquota/100)}, in fattura c'e' ${fmtEUR(c.importo)}.`);
+  });
+  if(casse.length>1)
+    nota('nota','Pi\u00f9 contributi previdenziali in fattura',
+      `${casse.length} blocchi cassa: ${casse.map(c=>(c.tipo||'cassa')+' '+fmtNum(c.aliquota,2)+'% '+fmtEUR(c.importo)).join(' \u00b7 ')}. Nella quadratura entra la somma, ${fmtEUR(f.rivalsaImporto)}; il raffronto con la configurazione, che ha una sola aliquota, qui non si fa.`);
+
+  // 2-ter. I mesi che la fattura copre. Si calcolano qui, prima della
+  //        configurazione, perche' rivalsa e bollo di UNA fattura
+  //        stanno nel suo billing_header, che e' per cliente e per
+  //        mese: senza sapere il mese non si saprebbe quale leggere.
+  const perMese={};
+  f.righe.forEach(r=>{
+    if(!r.mese){
+      nota('nota','Riga senza mese riconoscibile',
+        `«${r.descrizione}» non dice a che mese si riferisce: l'aggancio al consuntivo va fatto a mano.`);
+      return;
+    }
+    const m=perMese[r.mese]=perMese[r.mese]||{importo:0,giorni:0,haGiorni:false,righe:0};
+    m.importo+=Number(r.importo||0);
+    m.righe++;
+    if(r.giorni!==null){m.giorni+=r.giorni;m.haGiorni=true}
+  });
+  const mesi=Object.keys(perMese).sort();
+  const senzaMese=f.righe.filter(r=>!r.mese).length;
+
+  // 3. La rivalsa concorda con la configurazione? Va guardato in
+  //    entrambi i versi: c'e' e non dovrebbe, oppure manca e dovrebbe.
+  //    E la configurazione da guardare non e' sempre quella dell'anno:
+  //    billingCalc da' la precedenza al billing_header della singola
+  //    fattura, dove rivalsa e bollo si possono accendere o spegnere
+  //    per quel cliente e quel mese. Confrontando solo le impostazioni
+  //    annuali, una fattura emessa ESATTAMENTE come la proposta
+  //    risultava con la rivalsa di troppo, o mancante.
+  const tsAnno=currentTaxSetting(Number(String(f.data||'').slice(0,4))||currentYear());
+  const testata=(cliente&&mesi.length===1)
+    ? (data.billingHeaders||[]).find(h=>h.client_id===cliente.id&&
+        (String(h.year)+'-'+String(h.month).padStart(2,'0'))===mesi[0])
+    : null;
+  const ts=testata?{...tsAnno,
+    inps_recharge_enabled:testata.inps_recharge_enabled ?? tsAnno.inps_recharge_enabled,
+    inps_recharge_rate:testata.inps_recharge_rate ?? tsAnno.inps_recharge_rate,
+    stamp_duty_enabled:testata.stamp_duty_enabled ?? tsAnno.stamp_duty_enabled,
+    stamp_duty_amount:testata.stamp_duty_amount ?? tsAnno.stamp_duty_amount}:tsAnno;
+  const dove=testata?`nella fattura salvata di ${monthLabel(mesi[0])}`:'in Configurazione fiscale';
+  const alConf=Number(ts.inps_recharge_rate||4);
+  const attivaConf=ts.inps_recharge_enabled!==false;
+  if(f.rivalsaImporto>0&&!attivaConf)
+    nota('scostamento','Rivalsa in fattura ma disattivata in configurazione',
+      `La fattura addebita ${fmtEUR(f.rivalsaImporto)} di rivalsa, mentre ${dove} la rivalsa e' spenta.`);
+  else if(!(f.rivalsaImporto>0)&&attivaConf)
+    nota('scostamento','Rivalsa attiva in configurazione ma assente in fattura',
+      `${testata?'Nella fattura salvata di '+monthLabel(mesi[0]):'In Configurazione fiscale'} la rivalsa e' al ${fmtNum(alConf,2)}%, ma la fattura non ne addebita.`);
+  else if(f.rivalsaAliquota>0&&Math.abs(f.rivalsaAliquota-alConf)>0.005)
+    nota('scostamento','Aliquota di rivalsa diversa da quella configurata',
+      `In fattura ${fmtNum(f.rivalsaAliquota,2)}%, ${dove} ${fmtNum(alConf,2)}%.`);
+
+  // 3-bis. Il bollo, nei due versi come la rivalsa, con una cautela: e'
+  //        dovuto solo sopra i 77,47 € di importi non assoggettati a
+  //        IVA, e senza quella soglia ogni fatturina esente
+  //        risulterebbe «senza il bollo che dovrebbe avere».
+  //        Un'impostazione mai salvata non e' una scelta: in quel caso
+  //        non si dichiara nessuno scostamento.
+  const bolloConf=ts.stamp_duty_enabled;
+  const bolloConfImporto=Number(ts.stamp_duty_amount??2);
+  const esente=Number(f.baseEsente||0);
+  if(f.bolloImporto>0&&bolloConf===false)
+    nota('scostamento','Bollo in fattura ma disattivato in configurazione',
+      `La fattura espone ${fmtEUR(f.bolloImporto)} di imposta di bollo, mentre ${dove} la marca da bollo e' spenta.`);
+  else if(!(f.bolloImporto>0)&&bolloConf===true&&esente>BOLLO_SOGLIA)
+    nota('scostamento','Bollo attivo in configurazione ma assente in fattura',
+      `${testata?'Nella fattura salvata di '+monthLabel(mesi[0]):'In Configurazione fiscale'} la marca da bollo e' attiva a ${fmtEUR(bolloConfImporto)}, e la fattura ha ${fmtEUR(esente)} assoggettati al bollo: sopra i ${fmtEUR(BOLLO_SOGLIA)} e' dovuto. In fattura non ce n'e'.`);
+  else if(f.bolloImporto>0&&bolloConf!==false&&!vicini(f.bolloImporto,bolloConfImporto))
+    nota('scostamento','Importo del bollo diverso da quello configurato',
+      `In fattura ${fmtEUR(f.bolloImporto)}, ${dove} ${fmtEUR(bolloConfImporto)}.`);
+
+  // 4. Il confronto col consuntivo, PER MESE e non per riga. Una
+  //    fattura puo' avere piu' righe sullo stesso mese — progetti
+  //    diversi, o la consulenza e le spese separate — e confrontare
+  //    ogni riga col totale del mese produceva uno scostamento falso
+  //    per ognuna di esse.
+  // Se anche UNA riga non dice il suo mese, i mesi riconosciuti non si
+  // confrontano: la riga orfana potrebbe appartenere a uno qualunque di
+  // essi, e il raffronto darebbe un ammanco che viene dalla descrizione
+  // non riconosciuta, non dai tuoi dati. Una riga «Rimborso taxi» senza
+  // mese bastava a far risultare marzo corto di tutte le spese.
+  if(senzaMese&&mesi.length)
+    nota('nota','Il confronto mese per mese non si fa',
+      `${senzaMese===1?'Una riga non dice':senzaMese+' righe non dicono'} a che mese si riferisc${senzaMese===1?'e':'ono'}: potrebbe stare in uno qualunque dei mesi in fattura, quindi confrontarli darebbe scostamenti inventati. Scrivi il mese nella descrizione e ricarica.`);
+  if(cliente&&!senzaMese)mesi.forEach(mese=>{
+    const m=perMese[mese],et=monthLabel(mese);
+    const quante=m.righe>1?` (${m.righe} righe sommate)`:'';
+    if(m.haGiorni){
+      const cons=giorniConsuntivati(cliente.id,mese);
+      if(Math.abs(cons-m.giorni)>0.005)
+        nota('scostamento',`Giorni diversi da quelli consuntivati · ${et}`,
+          `In fattura ${fmtNum(m.giorni,2)} gg${quante}, consuntivati ${fmtNum(cons,2)} gg. ${m.giorni>cons?'Hai fatturato piu’ di quanto risulta lavorato.':'Hai fatturato meno di quanto risulta lavorato.'}`);
+    }
+    const atteso=importoConsuntivato(cliente.id,mese)+rimborsiDelMese(cliente.id,mese);
+    if(!vicini(atteso,m.importo))
+      nota('scostamento',`Importo diverso dal fatturabile · ${et}`,
+        `In fattura ${fmtEUR(m.importo)}${quante}, l'app si aspettava ${fmtEUR(atteso)} (lavoro piu’ rimborsi spese del mese).`);
+  });
+
+  if(cliente&&!senzaMese&&fatturaPianificato()&&mesi.some(m=>pianificatoNelMese(cliente.id,m)))
+    nota('nota','Nelle attese entra anche il pianificato',
+      'Hai acceso «Fattura anche il pianificato», quindi i giorni e gli importi qui sopra comprendono le righe pianificate, come fa la proposta di fattura.');
+
+  // 4-bis. Le rate: dire «da saldare entro il...» indicando solo la
+  //        prima scadenza farebbe credere che valga per l'intero
+  //        importo.
+  if(f.rate&&f.rate.length>1)
+    nota('nota','Pagamento in pi\u00f9 rate',
+      `${f.rate.length} scadenze: ${f.rate.map(r=>(r.scadenza?fmtDMY(r.scadenza):'senza data')+' '+fmtEUR(r.importo)).join(' \u00b7 ')}. La data in alto e' solo la prima.`);
+
+  // 5. Mesi coperti.
+  if(mesi.length>1)
+    nota('nota','La fattura copre piu’ mesi',
+      `${mesi.map(monthLabel).join(', ')}. Oggi una fattura sta su un mese solo: finche’ non cambia il modello, l’aggancio al secondo mese va fatto a mano.`);
+
+  // 6. Rimborsi che l'app si aspettava e in fattura non si vedono.
+  if(cliente)mesi.forEach(m=>{
+    const rb=rimborsiDelMese(cliente.id,m);
+    if(rb>0&&!f.righe.some(r=>r.mese===m&&/spes|rimbors|trasfert/i.test(r.descrizione)))
+      nota('nota',`Rimborsi spese senza una riga propria · ${monthLabel(m)}`,
+        `L’app ha ${fmtEUR(rb)} di spese da riaddebitare in quel mese. Se sono dentro la riga della consulenza va bene; se non sono state fatturate, sono soldi tuoi.`);
+  });
+
+  // 7. Il bollo: chi lo paga si deduce dalla quadratura, non da
+  //    «virtuale».
+  if(f.bolloImporto>0)
+    nota('nota',bolloAddebitato?'Bollo addebitato al cliente':'Bollo a tuo carico',
+      `${fmtEUR(f.bolloImporto)} di imposta di bollo${f.bolloVirtuale?', assolta in modo virtuale':''}${bolloAddebitato?', compresa nel totale della fattura.':', non addebitata al cliente.'}`);
+
+  return {esiti,cliente,mesi,abbinamento:ab.come};
+}
+// La schermata che fa vedere cosa si e' capito, PRIMA di toccare
+// qualunque dato salvato. Qui non si scrive niente: si carica il file,
+// si legge, si confronta, e si guarda. L'allineamento viene dopo, con
+// la sua conferma.
+const LIV={blocco:{t:'Da guardare',c:'orange'},scostamento:{t:'Non torna',c:'orange'},nota:{t:'Nota',c:'gray'}};
+function fatturaCarica(){
+  const r=state.fatturaLetta;
+  return appShell(`<h1>Carica la fattura emessa</h1>
+<p class="sub">Si legge l’XML della fattura elettronica e lo si confronta coi tuoi consuntivi. <b>Non viene salvato niente</b>: questa schermata guarda e basta.</p>
+<div class="card"><div class="field"><label>File della fattura (.xml)</label>
+<input type="file" accept=".xml,text/xml,application/xml" onchange="fatturaFileScelto(this)"></div>
+<div class="desc">Il file resta nel browser: non viene caricato da nessuna parte e non tocca il database.</div></div>
+${r?schedaFatturaLetta(r):''}
+<button type="button" class="secondary" onclick="go('billing')">Torna alla fatturazione</button>`);
+}
+function schedaFatturaLetta(r){
+  const f=r.f;
+  if(f.errore)return `<div class="card"><b>Non si riesce a leggere il file</b><div class="desc" style="margin-top:6px">${esc(f.errore)}</div></div>`;
+  const righe=f.righe.map(l=>`<div class="row"><div></div><div><div class="title">${esc(l.descrizione||'(senza descrizione)')}</div><div class="desc">${l.mese?esc(monthLabel(l.mese)):'<b>mese non riconosciuto</b>'}${l.giorni!==null?' · '+fmtNum(l.giorni,2)+' gg':''} · ${fmtNum(l.quantita,2)} × ${fmtEUR(l.prezzoUnitario)}</div></div><div class="value">${fmtEUR(l.importo)}</div></div>`).join('');
+  const esiti=r.esiti.length
+    ? r.esiti.map(e=>{const L=LIV[e.liv]||LIV.nota;return `<div class="row"><div></div><div><div class="title">${esc(e.titolo)}</div><div class="desc">${esc(e.dettaglio)}</div><span class="tag ${L.c}">${L.t}</span></div><div class="value"></div></div>`}).join('')
+    : '<div class="empty">Tutto torna: nessuno scostamento.</div>';
+  const gravi=r.esiti.filter(e=>e.liv!=='nota').length;
+  return `<div class="card"><b>Fattura ${esc(f.numero||'senza numero')} · ${esc(fmtDMY(f.data)||f.data||'')}</b>
+<div class="desc" style="margin-top:4px">${esc(f.clienteNome||'')}${f.clientePiva?' · P.IVA '+esc(f.clientePiva):''}${r.cliente?' → <b>'+esc(clientName(r.cliente.id))+'</b>':''}</div>
+<div class="kpiGrid three" style="margin-top:14px">
+<div><span>Imponibile</span><strong>${fmtEUR(f.imponibile)}</strong></div>
+<div><span>Rivalsa ${f.casse&&f.casse.length>1?'('+f.casse.length+' casse)':fmtNum(f.rivalsaAliquota,0)+'%'}</span><strong>${fmtEUR(f.rivalsaImporto)}</strong></div>
+<div><span>Totale</span><strong>${fmtEUR(f.totale)}</strong></div></div>
+${f.sconto?`<div class="metricLine" style="margin-top:10px">Righe ${fmtEUR(f.righeSomma)} <span class="dot">\u00b7</span> ${f.sconto<0?'sconto':'maggiorazione'} di documento ${fmtEUR(Math.abs(f.sconto))} <span class="dot">\u00b7</span> imponibile ${fmtEUR(f.imponibile)}</div>`:''}
+<div class="metricLine" style="margin-top:12px">${f.scadenza?'Da saldare entro il '+esc(fmtDMY(f.scadenza)):'Senza scadenza indicata'}${f.bolloImporto>0?' <span class="dot">·</span> bollo '+fmtEUR(f.bolloImporto)+(f.bolloVirtuale?' virtuale':''):''}</div></div>
+<h2>Le righe</h2><div class="list">${righe||'<div class="empty">Nessuna riga.</div>'}</div>
+<h2>Il confronto coi tuoi dati</h2>
+<p class="sub">${gravi?'<b>'+gravi+'</b> cosa'+(gravi>1?'e':'')+' da guardare.':'Niente da segnalare.'}</p>
+<div class="list">${esiti}</div>
+<div class="card"><b>Niente è stato salvato</b><div class="desc" style="margin-top:6px">Questa schermata legge e confronta soltanto. L’allineamento dei dati alla fattura arriverà come passo a parte, con una conferma esplicita.</div></div>`;
+}
+function fatturaFileScelto(input){
+  const file=input&&input.files&&input.files[0];
+  if(!file)return;
+  const reader=new FileReader();
+  reader.onload=()=>{
+    try{
+      const f=leggiFatturaXML(String(reader.result||'').replace(/^﻿/,''));
+      const r=confrontaFattura(f);
+      state.fatturaLetta={f,esiti:r.esiti,cliente:r.cliente,mesi:r.mesi,nome:file.name};
+      render();
+    }catch(e){
+      setMsgLeggero('Non si è potuto leggere il file: '+(e&&e.message||e),9000);
+    }
+  };
+  reader.onerror=()=>setMsgLeggero('Non si è potuto aprire il file.',7000);
+  reader.readAsText(file);
 }
 function renderTemplate(tpl,row){
   const fallback={daily_rate_8h:'Consulenza - [Mese Anno] - Cliente/Progetto: [Progetto] | Giorni: [Giorni]',monthly_flat:'Consulenza - [Mese Anno] - Cliente/Progetto: [Progetto]',manual_entry:'Prestazione professionale - [Mese Anno] - Cliente/Progetto: [Progetto]',travel_expenses:'Spese di trasferta - [Mese Anno] - Cliente/Progetto: [Progetto]'}[row.type]||'[Mese Anno] - [Progetto]';
@@ -747,14 +1379,14 @@ function switchAuthView(v){state.view=v;state.message='';render()}
 function loginView(){return `<div class="authScreen"><div class="authBox"><img class="authLogo" src="${logoWordmark()}" alt="TOTIME"><h1>Accedi al tuo profilo</h1>${state.message?`<p class="small">${esc(state.message)}</p>`:''}<div class="card authCard"><form class="form" onsubmit="signIn(event)"><div class="field"><label>Email</label><input name="email" type="email" placeholder="Inserisci il tuo indirizzo email" autocomplete="email" required></div><div class="field"><label>Password</label><input name="password" type="password" placeholder="Inserisci la tua password" autocomplete="current-password" required></div><a href="#" class="small forgotLink" onclick="event.preventDefault();switchAuthView('forgotPassword')">Password dimenticata?</a><button class="primary">Accedi</button></form></div><p class="sub authSwitch">Non hai un account? <a href="#" onclick="event.preventDefault();switchAuthView('register')">Registrati</a></p></div></div>`}
 function forgotPasswordView(){return `<div class="authScreen"><div class="authBox"><img class="authLogo" src="${logoWordmark()}" alt="TOTIME"><h1>Recupera password</h1><p class="sub">Inserisci l'email del tuo account: ti mandiamo un link per reimpostare la password.</p>${state.message?`<p class="small">${esc(state.message)}</p>`:''}<div class="card authCard"><form class="form" onsubmit="requestPasswordReset(event)"><div class="field"><label>Email</label><input name="email" type="email" placeholder="Inserisci il tuo indirizzo email" autocomplete="email" required></div><button class="primary">Invia link di reset</button></form></div><p class="sub authSwitch">Ricordi la password? <a href="#" onclick="event.preventDefault();switchAuthView('login')">Torna al login</a></p></div></div>`}
 function resetPasswordView(){return `<div class="authScreen"><div class="authBox"><img class="authLogo" src="${logoWordmark()}" alt="TOTIME"><h1>Imposta nuova password</h1><p class="sub">Scegli una nuova password per il tuo account TOTIME.</p>${state.message?`<p class="small">${esc(state.message)}</p>`:''}<div class="card authCard"><form class="form" onsubmit="updatePassword(event)"><div class="field"><label>Nuova password</label><input name="password" type="password" placeholder="Almeno 6 caratteri" minlength="6" autocomplete="new-password" required></div><button class="primary">Salva nuova password</button></form></div></div></div>`}
-async function requestPasswordReset(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));state.message='Invio link in corso...';render();const {error}=await sb.auth.resetPasswordForEmail(f.email,{redirectTo:new URL('reset.html',location.href).href});if(error)return setMsg(error.message,7000);state.message="Se l'indirizzo esiste riceverai un'email con il link per reimpostare la password. Controlla anche lo spam.";render()}
-async function updatePassword(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));state.message='Salvataggio...';render();const {error}=await sb.auth.updateUser({password:f.password});if(error)return setMsg(error.message,7000);await sb.auth.signOut();state.view='login';state.message='Password aggiornata. Accedi con la nuova password.';render()}
+async function requestPasswordReset(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));state.message='Invio link in corso...';render();const {error}=await sb.auth.resetPasswordForEmail(f.email,{redirectTo:new URL('reset.html',location.href).href});if(error)return setMsg(motivoLeggibile(error),7000);state.message="Se l'indirizzo esiste riceverai un'email con il link per reimpostare la password. Controlla anche lo spam.";render()}
+async function updatePassword(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));state.message='Salvataggio...';render();const {error}=await sb.auth.updateUser({password:f.password});if(error)return setMsg(motivoLeggibile(error),7000);await sb.auth.signOut();state.view='login';state.message='Password aggiornata. Accedi con la nuova password.';render()}
 function registerView(){return `<div class="authScreen"><div class="authBox"><img class="authLogo" src="${logoWordmark()}" alt="TOTIME"><h1>Crea account TOTIME</h1><p class="sub">Inserisci i dati del tuo profilo per collegare configurazioni, consuntivi e fatturazione al tuo account.</p>${state.message?`<p class="small">${esc(state.message)}</p>`:''}<div class="card authCard"><form class="form" onsubmit="signUpDetailed(event)"><div class="field"><label>Nome</label><input name="first_name" autocomplete="given-name" required></div><div class="field"><label>Cognome</label><input name="last_name" autocomplete="family-name" required></div><div class="field"><label>Azienda / Ragione sociale</label><input name="company_name" autocomplete="organization" required></div><div class="field"><label>P.IVA</label><input name="vat_number" inputmode="numeric" autocomplete="off" required></div><div class="field"><label>Email</label><input name="email" type="email" placeholder="Inserisci il tuo indirizzo email" autocomplete="email" required></div><div class="field"><label>Password</label><input name="password" type="password" placeholder="Inserisci la tua password" autocomplete="new-password" minlength="6" required></div><button class="primary">Crea account</button></form></div><p class="sub authSwitch">Hai gia' un account? <a href="#" onclick="event.preventDefault();switchAuthView('login')">Torna al login</a></p></div></div>`}
-async function signIn(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));state.message='Accesso in corso...';render();const {error}=await sb.auth.signInWithPassword({email:f.email,password:f.password});if(error) setMsg(error.message,7000)}
+async function signIn(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));state.message='Accesso in corso...';render();const {error}=await sb.auth.signInWithPassword({email:f.email,password:f.password});if(error) setMsg(motivoLeggibile(error),7000)}
 async function signUpDetailed(ev){
   ev.preventDefault(); const f=Object.fromEntries(new FormData(ev.target)); state.message='Creazione account in corso...'; render();
   const {data:signData,error}=await sb.auth.signUp({email:f.email,password:f.password,options:{data:{first_name:f.first_name,last_name:f.last_name,company_name:f.company_name,vat_number:f.vat_number,email:f.email}}});
-  if(error)return setMsg(error.message,7000);
+  if(error)return setMsg(motivoLeggibile(error),7000);
   if(signData?.user && Array.isArray(signData.user.identities) && signData.user.identities.length===0){
     return setMsg('Questo indirizzo email risulta gia\' registrato. Prova ad accedere oppure usa "Password dimenticata?".',9000);
   }
@@ -916,7 +1548,7 @@ function refreshProjectsForForm(form){
   const blocco=document.getElementById('hierBlock');
   if(blocco){
     blocco.innerHTML=hierAvailable(cli)
-      ? hierFields(cli,'')+'<input type="hidden" name="project_id" value="">'
+      ? hierFields(cli,'','')+'<input type="hidden" name="project_id" value="">'
       : campiSenzaGerarchia(cli);
     if(form.hier_project_id)hierChanged(form,'client');
     return;
@@ -1184,7 +1816,7 @@ async function saveTM(ev){ev.preventDefault();const f=ev.target;const c=clientBy
   const rows=r.days.map(iso=>({entry_date:iso,client_id:f.client_id.value,project_id:(lin?lin.project.id:(f.project_id?f.project_id.value:''))||null,wbs_id:(f.wbs_id&&f.wbs_id.value)||null,activity_id:(lin&&lin.wbs.activity_id?lin.wbs.activity_id:(f.activity_id?f.activity_id.value:''))||null,work_location:site||null,work_site:site||null,work_city:null,description:desc,notes:notes,hours:r.hours,status:(iso>tISO?'planned':'actual'),tm_batch_id:batch,daily_rate_snapshot:Number(c?.daily_rate||0),standard_hours_snapshot:Number(c?.standard_hours||8)}));setMsg('Generazione di '+rows.length+' consuntivi in corso...',6000);render();const res=await insertManyResilient('timesheet_entries',rows);if(res.error)return setMsg(res.error.message,8000);await reload();state.month=r.days[0].slice(0,7);state.view='timesheet';setMsg(rows.length+' consuntivi Time & Material generati.',4500);render();}
 function tmBatches(){const map={};(data.entries||[]).filter(isTM).forEach(e=>{const k=e.tm_batch_id||['nb',e.client_id,e.project_id||'',e.activity_id||'',e.hours,e.description||''].join('|');if(!map[k])map[k]={key:k,client_id:e.client_id,project_id:e.project_id,activity_id:e.activity_id,hours:Number(e.hours||0),desc:e.description,ids:[],dates:[],hoursSum:0};const b=map[k];b.ids.push(e.id);b.dates.push(String(e.entry_date));b.hoursSum+=Number(e.hours||0);});return Object.values(map).map(b=>{b.dates.sort();b.start=b.dates[0];b.end=b.dates[b.dates.length-1];b.days=b.ids.length;b.planned=b.dates.filter(d=>d>todayISO()).length;return b;}).sort((a,b)=>String(b.start).localeCompare(a.start));}
 function tmManage(){const batches=tmBatches();return appShell(`<h1>Incarichi continuativi</h1><p class="sub">Un incarico genera in un colpo solo i consuntivi dei giorni lavorativi di un periodo. Da qui li crei, e puoi eliminare un intero periodo senza toccare i singoli giorni.</p>${batches.length?`<div class="list">${batches.map((b,i)=>`<div class="row"><div></div><div><div class="title">${esc(clientName(b.client_id))}${b.project_id?' / '+esc(projectName(b.project_id)):''}${b.planned?' <span class="tag blue">'+b.planned+' pianif.</span>':''}</div><div class="desc">${esc(activityName(b.activity_id)||'')}${b.desc?' · '+esc(b.desc):''}</div><div class="desc">Dal ${fmtDMY(b.start)} al ${fmtDMY(b.end)} · ${b.days} giorni · ${fmtNum(b.hoursSum,1)} h totali · ${fmtNum(b.hours,2)} h/giorno</div><button class="secondary danger" style="margin-top:10px" onclick="deleteTMBatch(${i})">Elimina intero periodo</button></div><div class="value"></div></div>`).join('')}</div>`:emptyState('Nessun incarico continuativo generato.','+ Crea un incarico continuativo',"go('tmForm')")}<div class="actions"><button class="primary" onclick="go('tmForm')">+ Nuovo incarico continuativo</button><button type="button" class="secondary" onclick="go('timesheet')">Torna al timesheet</button></div>`);}
-async function deleteTMBatch(i){const b=tmBatches()[i];if(!b)return;if(!confirm('Eliminare l\'intero periodo Time & Material?\n'+b.days+' consuntivi dal '+fmtDMY(b.start)+' al '+fmtDMY(b.end)+'.'))return;const {error}=await sb.from('timesheet_entries').delete().in('id',b.ids);if(error)return setMsg(error.message,7000);await reload();setMsg(b.days+' consuntivi Time & Material eliminati.',4000);state.view='tmManage';render();}
+async function deleteTMBatch(i){const b=tmBatches()[i];if(!b)return;if(!confirm('Eliminare l\'intero periodo Time & Material?\n'+b.days+' consuntivi dal '+fmtDMY(b.start)+' al '+fmtDMY(b.end)+'.'))return;const {error}=await sb.from('timesheet_entries').delete().in('id',b.ids);if(error)return setMsg(motivoLeggibile(error),7000);await reload();setMsg(b.days+' consuntivi Time & Material eliminati.',4000);state.view='tmManage';render();}
 /* ---------- Salvare e passare al giorno dopo ----------
    Compilare una settimana significa ripetere lo stesso consuntivo su
    cinque giorni. Senza questo si torna all'elenco, si cerca il giorno
@@ -1222,14 +1854,14 @@ async function dopoIlSalvataggio(f){
   setMsg('Salvato. Ora '+fmtDMY(iso)+'.',4000);
 }
 function prefillDate(){const v=state.editType;return (typeof v==='string'&&v.length===10&&v.charAt(4)==='-')?v:new Date().toISOString().slice(0,10)}
-function dailyForm(){const clients=dailyClients();const pre=state.prefill||{};const selected=(pre.client_id&&clients.some(c=>c.id===pre.client_id))?pre.client_id:(clients[0]?.id||'');return appShell(`<h1>Consuntivo giornaliero</h1><p class="sub">Ore effettivamente lavorate, valorizzate secondo tariffa (tariffa oraria = tariffa giornaliera / 8h).</p>${clients.length?`<form class="form" onsubmit="saveDaily(event)"><div class="field"><label>Data</label><input name="entry_date" type="date" required value="${pre.dataVuota?'':prefillDate()}">${pre.dataVuota?'<div class="small">Copia di un consuntivo esistente: scegli la data.</div>':''}</div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)">${clients.map(c=>`<option value="${c.id}"${c.id===selected?' selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div id="hierBlock">${hierAvailable(selected)?hierFields(selected,pre.wbs_id||'')+'<input type="hidden" name="project_id" value="'+esc(pre.project_id||'')+'">':campiSenzaGerarchia(selected,pre.project_id||'',pre.activity_id||'')}</div><details class="moreFields"><summary>Altri dettagli (sede, luogo, descrizione)</summary><div class="field"><label>Sede</label><select name="work_site">${sediOptions(pre.work_site||SEDE_DEFAULT)}</select></div><div class="field"><label>Luogo/Città</label><input name="work_city" value="${esc(pre.work_city||'')}" placeholder="Es. Verona, Milano, Canicattì"></div><div class="field"><label>Descrizione</label><textarea name="description">${esc(pre.description||'')}</textarea></div></details><div class="field"><label>Ore consuntivate</label><input name="hours" type="number" step="0.25" value="${pre.hours!=null?esc(String(pre.hours)):'8'}"></div><div class="field"><label>Note</label><textarea name="notes" placeholder="Note interne opzionali"></textarea></div><div class="actions"><button class="primary" data-busy="Salvataggio…">Salva</button><button type="button" class="secondary" onclick="salvaEVai(this,1)">Salva e vai al giorno dopo ›</button><button type="button" class="secondary" onclick="go('home')">Annulla</button></div></form>
+function dailyForm(){const clients=dailyClients();const pre=state.prefill||{};const selected=(pre.client_id&&clients.some(c=>c.id===pre.client_id))?pre.client_id:(clients[0]?.id||'');return appShell(`<h1>Consuntivo giornaliero</h1><p class="sub">Ore effettivamente lavorate, valorizzate secondo tariffa (tariffa oraria = tariffa giornaliera / 8h).</p>${clients.length?`<form class="form" onsubmit="saveDaily(event)"><div class="field"><label>Data</label><input name="entry_date" type="date" required value="${pre.dataVuota?'':prefillDate()}">${pre.dataVuota?'<div class="small">Copia di un consuntivo esistente: scegli la data.</div>':''}</div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)">${clients.map(c=>`<option value="${c.id}"${c.id===selected?' selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div id="hierBlock">${hierAvailable(selected)?hierFields(selected,pre.wbs_id||'',pre.activity_id||'')+'<input type="hidden" name="project_id" value="'+esc(pre.project_id||'')+'">':campiSenzaGerarchia(selected,pre.project_id||'',pre.activity_id||'')}</div><details class="moreFields"><summary>Altri dettagli (sede, luogo, descrizione)</summary><div class="field"><label>Sede</label><select name="work_site">${sediOptions(pre.work_site||SEDE_DEFAULT)}</select></div><div class="field"><label>Luogo/Città</label><input name="work_city" value="${esc(pre.work_city||'')}" placeholder="Es. Verona, Milano, Canicattì"></div><div class="field"><label>Descrizione</label><textarea name="description">${esc(pre.description||'')}</textarea></div></details><div class="field"><label>Ore consuntivate</label><input name="hours" type="number" step="0.25" value="${pre.hours!=null?esc(String(pre.hours)):'8'}"></div><div class="field"><label>Note</label><textarea name="notes" placeholder="Note interne opzionali"></textarea></div><div class="actions"><button class="primary" data-busy="Salvataggio…">Salva</button><button type="button" class="secondary" onclick="salvaEVai(this,1)">Salva e vai al giorno dopo ›</button><button type="button" class="secondary" onclick="go('home')">Annulla</button></div></form>
       <div class="altriCompensi"><b>Ti serve un altro tipo di compenso?</b>
         <button type="button" onclick="goForDay('manualForm')">Compenso una tantum ›</button>
         <button type="button" onclick="goForDay('monthlyForm')">Compenso mensile ›</button>
       </div>`:`<div class="card">Crea prima un cliente con tariffa giornaliera in Configurazione.</div>`}`)}
-async function saveDaily(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));if(!guardDay(f.entry_date))return;const c=clientById(f.client_id);const lin=f.wbs_id?wbsLineage(f.wbs_id):null;if(hierAvailable(f.client_id)&&!f.wbs_id)return setMsg('Scegli su quale attività della commessa registrare le ore.',5000);const payload={entry_date:f.entry_date,client_id:f.client_id,project_id:(lin?lin.project.id:f.project_id)||null,activity_id:(lin&&lin.wbs.activity_id?lin.wbs.activity_id:f.activity_id)||null,wbs_id:f.wbs_id||null,work_location:[norm(f.work_site),norm(f.work_city)].filter(Boolean).join(' - ')||null,work_site:norm(f.work_site)||null,work_city:norm(f.work_city)||null,description:f.description||null,notes:f.notes||null,hours:Number(f.hours||0),daily_rate_snapshot:Number(c?.daily_rate||0),standard_hours_snapshot:Number(c?.standard_hours||8)};const {error}=await insertResilient('timesheet_entries',payload);if(error)return setMsg(error.message,7000);await reload();await dopoIlSalvataggio(f)}
+async function saveDaily(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));if(!guardDay(f.entry_date))return;const c=clientById(f.client_id);const lin=f.wbs_id?wbsLineage(f.wbs_id):null;if(hierAvailable(f.client_id)&&!f.wbs_id)return setMsg('Scegli su quale attività della commessa registrare le ore.',5000);const payload={entry_date:f.entry_date,client_id:f.client_id,project_id:(lin?lin.project.id:f.project_id)||null,activity_id:(lin&&lin.wbs.activity_id?lin.wbs.activity_id:f.activity_id)||null,wbs_id:f.wbs_id||null,work_location:[norm(f.work_site),norm(f.work_city)].filter(Boolean).join(' - ')||null,work_site:norm(f.work_site)||null,work_city:norm(f.work_city)||null,description:f.description||null,notes:f.notes||null,hours:Number(f.hours||0),daily_rate_snapshot:Number(c?.daily_rate||0),standard_hours_snapshot:Number(c?.standard_hours||8)};const {error}=await insertResilient('timesheet_entries',payload);if(error)return setMsg(motivoLeggibile(error),7000);await reload();await dopoIlSalvataggio(f)}
 function dailyEdit(){const e=data.entries.find(x=>x.id===state.edit);if(!e)return timesheet();const clients=dailyClients();return appShell(`<h1>Modifica consuntivo</h1><form class="form" onsubmit="saveDailyEdit(event)"><div class="field"><label>Data</label><input name="entry_date" type="date" value="${esc(e.entry_date)}"></div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)">${clients.map(c=>`<option value="${c.id}" ${c.id===e.client_id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div id="hierBlock">${hierAvailable(e.client_id)?hierFields(e.client_id,e.wbs_id||'')+'<input type="hidden" name="project_id" value="'+(e.project_id||'')+'">':campiSenzaGerarchia(e.client_id,e.project_id||'',e.activity_id||'')}</div><div class="field"><label>Sede</label><select name="work_site">${sediOptions(e.work_site==null?SEDE_DEFAULT:e.work_site)}</select></div><div class="field"><label>Luogo/Città</label><input name="work_city" value="${esc(e.work_city||'')}" placeholder="Es. Verona, Milano, Canicattì"></div><div class="field"><label>Descrizione</label><textarea name="description">${esc(e.description||'')}</textarea></div><div class="field"><label>Ore consuntivate</label><input name="hours" type="number" step="0.25" value="${Number(e.hours||0)}"></div><div class="field"><label>Note</label><textarea name="notes">${esc(e.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary" onclick="salvaEVai(this,1)">Salva e vai al giorno dopo ›</button><button type="button" class="secondary" onclick="salvaEVai(this,-1)">‹ Salva e vai al giorno prima</button><button type="button" class="secondary" onclick="duplicateDaily('${e.id}')">Duplica</button><button type="button" class="secondary danger" onclick="deleteDaily('${e.id}')">Elimina</button><button type="button" class="secondary" onclick="go('timesheet')">Annulla</button></div></form>`)}
-async function saveDailyEdit(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));if(!guardDay(f.entry_date))return;const c=clientById(f.client_id);const lin=f.wbs_id?wbsLineage(f.wbs_id):null;if(hierAvailable(f.client_id)&&!f.wbs_id)return setMsg('Scegli su quale attività della commessa registrare le ore.',5000);const payload={entry_date:f.entry_date,client_id:f.client_id,project_id:(lin?lin.project.id:f.project_id)||null,activity_id:(lin&&lin.wbs.activity_id?lin.wbs.activity_id:f.activity_id)||null,wbs_id:f.wbs_id||null,work_location:[norm(f.work_site),norm(f.work_city)].filter(Boolean).join(' - ')||null,work_site:norm(f.work_site)||null,work_city:norm(f.work_city)||null,description:f.description||null,notes:f.notes||null,hours:Number(f.hours||0),daily_rate_snapshot:Number(c?.daily_rate||0),standard_hours_snapshot:Number(c?.standard_hours||8)};const {error}=await updateResilient('timesheet_entries',payload,state.edit);if(error)return setMsg(error.message,7000);await reload();state.edit=null;await dopoIlSalvataggio(f)}
+async function saveDailyEdit(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));if(!guardDay(f.entry_date))return;const c=clientById(f.client_id);const lin=f.wbs_id?wbsLineage(f.wbs_id):null;if(hierAvailable(f.client_id)&&!f.wbs_id)return setMsg('Scegli su quale attività della commessa registrare le ore.',5000);const payload={entry_date:f.entry_date,client_id:f.client_id,project_id:(lin?lin.project.id:f.project_id)||null,activity_id:(lin&&lin.wbs.activity_id?lin.wbs.activity_id:f.activity_id)||null,wbs_id:f.wbs_id||null,work_location:[norm(f.work_site),norm(f.work_city)].filter(Boolean).join(' - ')||null,work_site:norm(f.work_site)||null,work_city:norm(f.work_city)||null,description:f.description||null,notes:f.notes||null,hours:Number(f.hours||0),daily_rate_snapshot:Number(c?.daily_rate||0),standard_hours_snapshot:Number(c?.standard_hours||8)};const {error}=await updateResilient('timesheet_entries',payload,state.edit);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.edit=null;await dopoIlSalvataggio(f)}
 // Duplicare non scrive piu' di nascosto su oggi: apre il modulo gia'
 // pieno con la data vuota, cosi' la data la si sceglie apposta. Prima
 // scriveva dritto nel database e, non portandosi dietro la voce su cui
@@ -1243,25 +1875,25 @@ function duplicateDaily(idv){
     work_site:e.work_site||SEDE_DEFAULT,work_city:e.work_city||'',description:e.description||''}});
   setMsg('Copia pronta: scegli la data e salva.',4500);
 }
-async function deleteDaily(idv){if(!confirm('Eliminare questo consuntivo?'))return;const {error}=await sb.from('timesheet_entries').delete().eq('id',idv);if(error)return setMsg(error.message,7000);await reload();state.view='timesheet';render()}
+async function deleteDaily(idv){if(!confirm('Eliminare questo consuntivo?'))return;const {error}=await sb.from('timesheet_entries').delete().eq('id',idv);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='timesheet';render()}
 
 function monthlyForm(){const clients=monthlyClients();const selected=clients[0]?.id||'';return appShell(`<h1>Compenso mensile</h1>${clients.length?`<form class="form" onsubmit="saveMonthly(event)"><div class="field"><label>Mese</label><input name="month" type="month" value="${state.month}"></div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)">${clients.map(c=>`<option value="${c.id}"${c.id===selected?' selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Cliente/Progetto</label><select name="project_id">${projectOptions(selected)}</select></div><div class="field"><label>Descrizione</label><textarea name="description"></textarea></div><div class="field"><label>Importo</label><input name="amount" type="number" step="0.01" value="0"></div><div class="field"><label>Note</label><textarea name="notes" placeholder="Note interne opzionali"></textarea></div><div class="actions"><button class="primary" data-busy="Salvataggio…">Salva</button><button type="button" class="secondary" onclick="go('home')">Annulla</button></div></form>`:`<div class="card">Crea prima un cliente una tantum mensile in Configurazione.</div>`}`)}
-async function saveMonthly(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const [year,month]=String(f.month||state.month).split('-').map(Number);const payload={year,month,client_id:f.client_id,project_id:f.project_id||null,description:f.description||null,notes:f.notes||null,amount:Number(f.amount||0)};const {error}=await insertResilient('monthly_compensations',payload);if(error)return setMsg(error.message,7000);await reload();state.view='timesheet';render()}
+async function saveMonthly(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const [year,month]=String(f.month||state.month).split('-').map(Number);const payload={year,month,client_id:f.client_id,project_id:f.project_id||null,description:f.description||null,notes:f.notes||null,amount:Number(f.amount||0)};const {error}=await insertResilient('monthly_compensations',payload);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='timesheet';render()}
 function monthlyEdit(){const m=data.monthly.find(x=>x.id===state.edit);if(!m)return timesheet();const clients=monthlyClients();const mm=`${m.year}-${String(m.month).padStart(2,'0')}`;return appShell(`<h1>Modifica compenso mensile</h1><form class="form" onsubmit="saveMonthlyEdit(event)"><div class="field"><label>Mese</label><input name="month" type="month" value="${mm}"></div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)">${clients.map(c=>`<option value="${c.id}" ${c.id===m.client_id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Cliente/Progetto</label><select name="project_id">${projectOptions(m.client_id,m.project_id||'')}</select></div><div class="field"><label>Descrizione</label><textarea name="description">${esc(m.description||'')}</textarea></div><div class="field"><label>Importo</label><input name="amount" type="number" step="0.01" value="${Number(m.amount||0)}"></div><div class="field"><label>Note</label><textarea name="notes">${esc(m.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary" onclick="duplicateMonthly('${m.id}')">Duplica</button><button type="button" class="secondary danger" onclick="deleteMonthly('${m.id}')">Elimina</button><button type="button" class="secondary" onclick="go('timesheet')">Annulla</button></div></form>`)}
-async function saveMonthlyEdit(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const [year,month]=String(f.month||state.month).split('-').map(Number);const payload={year,month,client_id:f.client_id,project_id:f.project_id||null,description:f.description||null,notes:f.notes||null,amount:Number(f.amount||0)};const {error}=await updateResilient('monthly_compensations',payload,state.edit);if(error)return setMsg(error.message,7000);await reload();state.view='timesheet';state.edit=null;render()}
-async function duplicateMonthly(idv){const m=data.monthly.find(x=>x.id===idv);if(!m)return;const {year,month}=periodParts();const copy={year,month,client_id:m.client_id,project_id:m.project_id,description:m.description,notes:m.notes,amount:m.amount};const {error}=await insertResilient('monthly_compensations',copy);if(error)return setMsg(error.message,7000);await reload();state.view='timesheet';render()}
-async function deleteMonthly(idv){if(!confirm('Eliminare questo compenso mensile?'))return;const {error}=await sb.from('monthly_compensations').delete().eq('id',idv);if(error)return setMsg(error.message,7000);await reload();state.view='timesheet';render()}
+async function saveMonthlyEdit(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const [year,month]=String(f.month||state.month).split('-').map(Number);const payload={year,month,client_id:f.client_id,project_id:f.project_id||null,description:f.description||null,notes:f.notes||null,amount:Number(f.amount||0)};const {error}=await updateResilient('monthly_compensations',payload,state.edit);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='timesheet';state.edit=null;render()}
+async function duplicateMonthly(idv){const m=data.monthly.find(x=>x.id===idv);if(!m)return;const {year,month}=periodParts();const copy={year,month,client_id:m.client_id,project_id:m.project_id,description:m.description,notes:m.notes,amount:m.amount};const {error}=await insertResilient('monthly_compensations',copy);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='timesheet';render()}
+async function deleteMonthly(idv){if(!confirm('Eliminare questo compenso mensile?'))return;const {error}=await sb.from('monthly_compensations').delete().eq('id',idv);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='timesheet';render()}
 
 function manualForm(){const clients=activeClients();const selected=clients[0]?.id||'';return appShell(`<h1>Compenso una tantum</h1>${clients.length?`<form class="form" onsubmit="saveManual(event)"><div class="field"><label>Data</label><input name="entry_date" type="date" value="${prefillDate()}"></div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)">${clients.map(c=>`<option value="${c.id}"${c.id===selected?' selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div id="hierBlock">${hierAvailable(selected)?hierFields(selected,'')+'<input type="hidden" name="project_id" value="">':campiSenzaGerarchia(selected)}</div><details class="moreFields"><summary>Altri dettagli (sede, luogo, descrizione)</summary><div class="field"><label>Sede</label><select name="work_site">${sediOptions()}</select></div><div class="field"><label>Luogo/Città</label><input name="work_city"></div><div class="field"><label>Descrizione</label><textarea name="description"></textarea></div></details><div class="field"><label>Importo manuale</label><input name="amount" type="number" step="0.01" value="0"></div><div class="field"><label>Note</label><textarea name="notes"></textarea></div><div class="actions"><button class="primary" data-busy="Salvataggio…">Salva</button><button type="button" class="secondary" onclick="go('home')">Annulla</button></div></form>`:`<div class="card">Crea prima un cliente in Configurazione.</div>`}`)}
 async function saveManual(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));if(!guardDay(f.entry_date))return;const lin=f.wbs_id?wbsLineage(f.wbs_id):null;
   if(hierAvailable(f.client_id)&&!f.wbs_id)return setMsg('Scegli su cosa registrare: progetto e commessa.',5000);
-  const payload={entry_date:f.entry_date,client_id:f.client_id,project_id:(lin?lin.project.id:f.project_id)||null,wbs_id:f.wbs_id||null,activity_id:(lin&&lin.wbs.activity_id?lin.wbs.activity_id:f.activity_id)||null,work_site:norm(f.work_site)||null,work_city:norm(f.work_city)||null,description:f.description||null,amount:Number(f.amount||0),notes:f.notes||null};const {error}=await insertResilient('manual_entries',payload,['wbs_id']);if(error)return setMsg(error.message,7000);await reload();state.view='timesheet';render()}
+  const payload={entry_date:f.entry_date,client_id:f.client_id,project_id:(lin?lin.project.id:f.project_id)||null,wbs_id:f.wbs_id||null,activity_id:(lin&&lin.wbs.activity_id?lin.wbs.activity_id:f.activity_id)||null,work_site:norm(f.work_site)||null,work_city:norm(f.work_city)||null,description:f.description||null,amount:Number(f.amount||0),notes:f.notes||null};const {error}=await insertResilient('manual_entries',payload,['wbs_id']);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='timesheet';render()}
 function manualEdit(){const e=data.manualEntries.find(x=>x.id===state.edit);if(!e)return timesheet();const clients=activeClients();return appShell(`<h1>Modifica compenso una tantum</h1><form class="form" onsubmit="saveManualEdit(event)"><div class="field"><label>Data</label><input name="entry_date" type="date" value="${esc(e.entry_date)}"></div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)">${clients.map(c=>`<option value="${c.id}" ${c.id===e.client_id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div id="hierBlock">${hierAvailable(e.client_id)?hierFields(e.client_id,e.wbs_id||'')+'<input type="hidden" name="project_id" value="'+(e.project_id||'')+'">':campiSenzaGerarchia(e.client_id,e.project_id||'',e.activity_id||'')}</div><div class="field"><label>Sede</label><select name="work_site">${sediOptions(e.work_site==null?SEDE_DEFAULT:e.work_site)}</select></div><div class="field"><label>Luogo/Città</label><input name="work_city" value="${esc(e.work_city||'')}"></div><div class="field"><label>Descrizione</label><textarea name="description">${esc(e.description||'')}</textarea></div><div class="field"><label>Importo manuale</label><input name="amount" type="number" step="0.01" value="${Number(e.amount||0)}"></div><div class="field"><label>Note</label><textarea name="notes">${esc(e.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary" onclick="duplicateManual('${e.id}')">Duplica</button><button type="button" class="secondary danger" onclick="deleteManual('${e.id}')">Elimina</button><button type="button" class="secondary" onclick="go('timesheet')">Annulla</button></div></form>`)}
 async function saveManualEdit(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));if(!guardDay(f.entry_date))return;const lin=f.wbs_id?wbsLineage(f.wbs_id):null;
   if(hierAvailable(f.client_id)&&!f.wbs_id)return setMsg('Scegli su cosa registrare: progetto e commessa.',5000);
-  const payload={entry_date:f.entry_date,client_id:f.client_id,project_id:(lin?lin.project.id:f.project_id)||null,wbs_id:f.wbs_id||null,activity_id:(lin&&lin.wbs.activity_id?lin.wbs.activity_id:f.activity_id)||null,work_site:norm(f.work_site)||null,work_city:norm(f.work_city)||null,description:f.description||null,amount:Number(f.amount||0),notes:f.notes||null};const {error}=await updateResilient('manual_entries',payload,state.edit,['wbs_id']);if(error)return setMsg(error.message,7000);await reload();state.view='timesheet';state.edit=null;render()}
-async function duplicateManual(idv){const e=data.manualEntries.find(x=>x.id===idv);if(!e)return;const copy={entry_date:new Date().toISOString().slice(0,10),client_id:e.client_id,project_id:e.project_id,activity_id:e.activity_id,wbs_id:e.wbs_id||null,work_site:e.work_site,work_city:e.work_city,description:e.description,amount:e.amount,notes:e.notes};const {error}=await insertResilient('manual_entries',copy,['wbs_id']);if(error)return setMsg(error.message,7000);await reload();state.view='timesheet';render()}
-async function deleteManual(idv){if(!confirm('Eliminare questo consuntivo manuale?'))return;const {error}=await sb.from('manual_entries').delete().eq('id',idv);if(error)return setMsg(error.message,7000);await reload();state.view='timesheet';render()}
+  const payload={entry_date:f.entry_date,client_id:f.client_id,project_id:(lin?lin.project.id:f.project_id)||null,wbs_id:f.wbs_id||null,activity_id:(lin&&lin.wbs.activity_id?lin.wbs.activity_id:f.activity_id)||null,work_site:norm(f.work_site)||null,work_city:norm(f.work_city)||null,description:f.description||null,amount:Number(f.amount||0),notes:f.notes||null};const {error}=await updateResilient('manual_entries',payload,state.edit,['wbs_id']);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='timesheet';state.edit=null;render()}
+async function duplicateManual(idv){const e=data.manualEntries.find(x=>x.id===idv);if(!e)return;const copy={entry_date:new Date().toISOString().slice(0,10),client_id:e.client_id,project_id:e.project_id,activity_id:e.activity_id,wbs_id:e.wbs_id||null,work_site:e.work_site,work_city:e.work_city,description:e.description,amount:e.amount,notes:e.notes};const {error}=await insertResilient('manual_entries',copy,['wbs_id']);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='timesheet';render()}
+async function deleteManual(idv){if(!confirm('Eliminare questo consuntivo manuale?'))return;const {error}=await sb.from('manual_entries').delete().eq('id',idv);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='timesheet';render()}
 
 // Le trasferte fra cui scegliere: quelle del mese piu' quella gia'
 // agganciata alla spesa, che puo' stare in un mese diverso.
@@ -1557,7 +2189,7 @@ function campiQuandoDove(v={},nuova=false){
 // nonostante la bonifica di settembre.
 function campiCommessaSpesa(clientId,v={}){
   if(hierAvailable(clientId))
-    return hierFields(clientId,v.wbs_id||'')+`<input type="hidden" name="project_id" value="${esc(v.project_id||'')}">`;
+    return hierFields(clientId,v.wbs_id||'',v.activity_id||'')+`<input type="hidden" name="project_id" value="${esc(v.project_id||'')}">`;
   return `<div class="field"><label>Cliente/Progetto</label><select name="project_id">${projectOptions(clientId,v.project_id||'')}</select></div>`;
 }
 function clienteSpesaCambiato(form){
@@ -1915,7 +2547,7 @@ async function saveExpenseEdit(ev){
   const avviso=avvisoScartate(res);
   if(avviso)setMsg(avviso,12000);
 }
-async function duplicateExpense(idv){const e=data.travelExpenses.find(x=>x.id===idv);if(!e)return;const copy={expense_date:new Date().toISOString().slice(0,10),client_id:e.client_id,project_id:e.project_id,wbs_id:e.wbs_id||null,trip_id:e.trip_id||null,vehicle_id:e.vehicle_id||null,payment_method:e.payment_method||null,receipt_kept:!!e.receipt_kept,receipt_path:null,from_place:e.from_place||null,to_place:e.to_place||null,round_trip:!!e.round_trip,expense_category_id:e.expense_category_id,work_site:e.work_site,work_city:e.work_city,description:e.description,quantity:e.quantity,unit_rate:e.unit_rate,amount:e.amount,reimbursement_type:expType(e),reimbursable:expType(e)!=='own',notes:e.notes};const {error}=await insertResilient('travel_expenses',copy,DROP_SPESA);if(error)return setMsg(error.message,7000);await reload();state.view='expenses';render()}
+async function duplicateExpense(idv){const e=data.travelExpenses.find(x=>x.id===idv);if(!e)return;const copy={expense_date:new Date().toISOString().slice(0,10),client_id:e.client_id,project_id:e.project_id,wbs_id:e.wbs_id||null,trip_id:e.trip_id||null,vehicle_id:e.vehicle_id||null,payment_method:e.payment_method||null,receipt_kept:!!e.receipt_kept,receipt_path:null,from_place:e.from_place||null,to_place:e.to_place||null,round_trip:!!e.round_trip,expense_category_id:e.expense_category_id,work_site:e.work_site,work_city:e.work_city,description:e.description,quantity:e.quantity,unit_rate:e.unit_rate,amount:e.amount,reimbursement_type:expType(e),reimbursable:expType(e)!=='own',notes:e.notes};const {error}=await insertResilient('travel_expenses',copy,DROP_SPESA);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='expenses';render()}
 // Eliminare la spesa deve portarsi via anche la ricevuta: un
 // documento fiscale irraggiungibile nel bucket non e' «cancellato», e
 // chi elimina la spesa si aspetta che se ne vada tutto.
@@ -2469,7 +3101,7 @@ async function deleteSelected(){
   for(const kind of Object.keys(byKind)){
     const table=SEL_TABLES[kind];if(!table)continue;
     const {error}=await sb.from(table).delete().in('id',byKind[kind]);
-    if(error)return setMsg(error.message,7000);
+    if(error)return setMsg(motivoLeggibile(error),7000);
     done+=byKind[kind].length;
   }
   clearSel();
@@ -2488,9 +3120,81 @@ return `<div ${rowAttrs('expense',r.id)}><div class="date">${selBox('expense',r.
 
 function annualSummaryCard(){const y=currentYear();const at=annualTotals(y);return `<div class="card cardLink" onclick="openAnnualMonths()" role="button" title="Dettaglio consuntivato mese per mese"><b>Annuale ${y} <span class="cardLinkArrow">›</span></b><div class="kpiGrid three" style="margin-top:14px"><div><span>Consuntivato</span><strong>${fmtEUR(at.consuntivato)}</strong></div><div><span>Fatturato</span><strong>${fmtEUR(at.fatturato)}</strong></div><div><span>Incassato</span><strong>${fmtEUR(at.incassato)}</strong></div></div><div class="metricLine" style="margin-top:12px">Da incassare <span class="dot">·</span> ${fmtEUR(at.daIncassare)}</div></div>`}
 function billingGroupsByClient(){const lines=groupSummary();const by={};lines.forEach(l=>{if(!by[l.client_id])by[l.client_id]={client_id:l.client_id,lines:[],baseTotal:0,total:0,hours:0,pAmount:0,pHours:0};by[l.client_id].lines.push(l);by[l.client_id].baseTotal+=Number(l.amount||0);by[l.client_id].hours+=Number(l.hours||0);by[l.client_id].pAmount+=Number(l.pAmount||0);by[l.client_id].pHours+=Number(l.pHours||0)});Object.values(by).forEach(g=>{const header=headerForClient(g.client_id)||{};g.calc=billingCalc(g,header);g.total=g.calc.total});return Object.values(by).sort((a,b)=>clientName(a.client_id).localeCompare(clientName(b.client_id)))}
-function billingMonthlyView(){const {year,month}=periodParts();const md=annualMonthData(year);const m=md[month-1]||{};const fat=m.fatturato||0;const inc=m.incassato||0;const daInc=Math.max(0,fat-inc);const daFat=Math.max(0,(m.fatturabile||0)-(m.fatturatoBase||0));return `<div class="card"><b>Vista mensile · ${monthLabel(state.month)}</b><div class="kpiGrid" style="margin-top:14px"><div><span>Fatturato mese</span><strong>${fmtEUR(fat)}</strong></div><div><span>Incassato mese</span><strong>${fmtEUR(inc)}</strong></div></div><div class="metricLine" style="margin-top:12px">Da fatturare ${fmtEUR(daFat)} <span class="dot">·</span> Da incassare ${fmtEUR(daInc)}</div></div>`}
-function billingAnnualView(){const year=currentYear();const at=annualTotals(year);return `<div class="card"><b>Vista annuale · ${year}</b><div class="kpiGrid" style="margin-top:14px"><div><span>Fatturato anno</span><strong>${fmtEUR(at.fatturato)}</strong></div><div><span>Incassato anno</span><strong>${fmtEUR(at.incassato)}</strong></div></div><div class="metricLine" style="margin-top:12px">Da fatturare ${fmtEUR(at.daFatturare)} <span class="dot">·</span> Da incassare ${fmtEUR(at.daIncassare)}</div><div class="grid" style="margin-top:12px"><button class="secondary" onclick="openAnnualInvoices('issued')">Fatture emesse ›</button><button class="secondary" onclick="openAnnualInvoices('collected')">Incassi ›</button></div></div>`}
-function billing(){const groups=billingGroupsByClient();const total=groups.reduce((s,g)=>s+g.total,0);return appShell(`<h1>Fatturazione e incassi</h1>${monthSelector()}<div class="rigaPian"><label><input type="checkbox" ${fatturaPianificato()?'checked':''} onchange="cambiaFatturaPianificato(this.checked)"> Fattura anche il pianificato</label></div><div class="card"><b>Totale fatturazione mese</b><div class="amount" style="margin-top:8px">${fmtEUR(total)}</div><div class="sub">Include eventuale rivalsa INPS 4% e marca da bollo se attive.</div></div><div class="list">${groups.map(g=>{const st=headerStatus(g.client_id);return `<div class="row" onclick="openBillingClient('${g.client_id}')"><div></div><div><div class="title">${esc(clientName(g.client_id))}</div><div class="metricLine">${metricLine(g.hours,g.total)}</div><div class="desc">Base ${fmtEUR(g.calc.subtotal)} · Rivalsa ${fmtEUR(g.calc.inpsAmount)} · Bollo ${fmtEUR(g.calc.stampAmount)}</div><span class="tag ${statusClass(st)}">${statusLabel(st)}</span></div><div class="value">›</div></div>`}).join('')||emptyState('Nessuna riga fatturabile in questo mese.','+ Registra un consuntivo','newEntryChoice()')}</div><h2>Riepilogo</h2>${previsioneRicaviCard()}${billingMonthlyView()}${billingAnnualView()}${forfettarioBarCard()}
+// ─── La pagina di fatturazione ──────────────────────────
+//
+// Com'era: quattro schede di riepilogo impilate sotto un titolo solo,
+// dove «fatturato» e «da fatturare» comparivano DUE VOLTE CIASCUNO, su
+// basi diverse (con o senza rivalsa INPS) e periodi diversi (il mese o
+// l'anno) — e da nessuna parte era scritto quale fosse quale. Cinque
+// numeri, due nomi, nessuna spiegazione: a colpo d'occhio sembravano
+// errori dell'app, e andavano ricostruiti a mente ogni volta.
+//
+// Com'e': tre blocchi, nell'ordine in cui servono.
+//   1. QUESTO MESE — quanto fatturare e a chi. E' l'azione.
+//   2. LA CASSA    — emesso, incassato, atteso. Qui gli importi
+//                    COMPRENDONO rivalsa e bollo: sono soldi che
+//                    entrano sul conto.
+//   3. L'ANNO      — maturato e previsione. Qui sono AL NETTO della
+//                    rivalsa: misurano il lavoro, non l'incasso.
+//
+// Le due basi non si incontrano mai nella stessa colonna. Mescolarle
+// — ed e' la prima cosa che avevo provato a fare — produce un
+// prospetto le cui righe non sommano: 27.315,60 di fatturato con
+// rivalsa piu' 4.754,25 da fatturare senza non fanno la previsione.
+// E la differenza fra le due basi sta scritta in pagina, invece di
+// essere lasciata indovinare.
+function billingMeseCard(groups,total){
+  const base=groups.reduce((s,g)=>s+Number(g.calc.subtotal||0),0);
+  const riv=groups.reduce((s,g)=>s+Number(g.calc.inpsAmount||0),0);
+  const bol=groups.reduce((s,g)=>s+Number(g.calc.stampAmount||0),0);
+  const pian=groups.reduce((s,g)=>s+Number(g.pAmount||0),0);
+  // Il totale si scompone sempre nei suoi pezzi: «include eventuale
+  // rivalsa se attiva» obbligava ad andare a vedere se lo fosse.
+  const pezzi=[`${fmtEUR(base)} di compensi e spese`];
+  if(riv>0)pezzi.push(`${fmtEUR(riv)} di rivalsa INPS`);
+  if(bol>0)pezzi.push(`${fmtEUR(bol)} di bollo`);
+  return `<div class="card"><b>Da fatturare · ${monthLabel(state.month)}</b>
+<div class="amount" style="margin-top:8px">${fmtEUR(total)}</div>
+<div class="metricLine" style="margin-top:6px">${pezzi.join(' <span class="dot">·</span> ')}</div>
+${pian>0?`<div class="metricLine" style="margin-top:6px"><span class="tag blue">Pianificato</span> ${fmtEUR(pian)} dei ${fmtEUR(base)} di base: giorni a calendario, non ancora lavorati.</div>`:''}
+<div class="rigaPian"><label><input type="checkbox" ${fatturaPianificato()?'checked':''} onchange="cambiaFatturaPianificato(this.checked)"> Fattura anche il pianificato</label></div></div>`;
+}
+function billingCassaCard(){
+  const year=currentYear();const at=annualTotals(year);
+  const {month}=periodParts();const md=annualMonthData(year)[month-1]||{};
+  const aperte=(data.billingHeaders||[]).filter(h=>Number(h.year)===year&&h.status==='invoice_issued').length;
+  return `<div class="card"><b>Da incassare</b>
+<div class="amount" style="margin-top:8px">${fmtEUR(at.daIncassare)}</div>
+<div class="metricLine" style="margin-top:6px">${fmtEUR(at.fatturato)} fatturato nel ${year} <span class="dot">·</span> ${fmtEUR(at.incassato)} già incassato${aperte?' <span class="dot">·</span> '+aperte+' fattur'+(aperte===1?'a aperta':'e aperte'):''}</div>
+<div class="desc" style="margin-top:8px">Questi importi <b>comprendono</b> la rivalsa INPS e la marca da bollo, perché sono denaro che entra sul conto.</div>
+<div class="metricLine" style="margin-top:10px">In ${monthLabel(state.month)}: ${fmtEUR(md.fatturato||0)} fatturato <span class="dot">·</span> ${fmtEUR(md.incassato||0)} incassato</div>
+<div class="grid" style="margin-top:12px"><button class="secondary" onclick="openAnnualInvoices('issued')">Fatture emesse ›</button><button class="secondary" onclick="openAnnualInvoices('collected')">Incassi ›</button></div></div>`;
+}
+function billingAnnoCard(){
+  const year=currentYear();const at=annualTotals(year);const f=forecastCalc(year);
+  const riga=(t,d,v,forte)=>`<div class="row"><div></div><div><div class="title">${forte?'<b>'+t+'</b>':t}</div><div class="desc">${d}</div></div><div class="value">${forte?'<b>'+fmtEUR(v)+'</b>':fmtEUR(v)}</div></div>`;
+  // Quando si e' fatturato PIU' del maturato, «ancora da fatturare» e'
+  // zero e le righe non tornerebbero: l'eccedenza si mostra per quello
+  // che e', invece di sparire.
+  const anticipo=Math.max(0,at.fatturatoBase-at.fatturabile);
+  return `<div class="card"><b>Maturato e previsione ${year}</b>
+<div class="desc" style="margin-top:2px">Qui gli importi sono <b>al netto</b> della rivalsa INPS e del bollo, perché misurano il lavoro e non l'incasso: è per questo che «già fatturato» qui è ${fmtEUR(at.fatturatoBase)} mentre nella cassa qui sopra il fatturato è ${fmtEUR(at.fatturato)}.</div>
+<div class="list" style="box-shadow:none;margin:12px 0 0">
+${riga('Già fatturato','compensi e spese già finiti in fattura',at.fatturatoBase)}
+${anticipo>0
+  ? riga('− Fatturato in anticipo','emesso oltre quello che risulta maturato',anticipo)
+  : riga('+ Ancora da fatturare','maturato quest’anno e non ancora in fattura',at.daFatturare)}
+${riga('= Maturato nel '+year,'lavoro e spese dell’anno, fatturati o no',at.fatturabile,true)}
+${f.pianificato>0?riga('+ Pianificato','giorni già a calendario, non ancora lavorati',f.pianificato):''}
+${f.pianificato>0?riga('= Previsione ricavi '+year,'se tutto il pianificato si realizza',f.ricavi,true):''}
+</div></div>`;
+}
+function billing(){const groups=billingGroupsByClient();const total=groups.reduce((s,g)=>s+g.total,0);return appShell(`<h1>Fatturazione e incassi</h1>${monthSelector()}
+${billingMeseCard(groups,total)}
+<div class="list">${groups.map(g=>{const st=headerStatus(g.client_id);return `<div class="row" onclick="openBillingClient('${g.client_id}')"><div></div><div><div class="title">${esc(clientName(g.client_id))}</div><div class="metricLine">${metricLine(g.hours,g.total)}</div><div class="desc">Base ${fmtEUR(g.calc.subtotal)} · Rivalsa ${fmtEUR(g.calc.inpsAmount)} · Bollo ${fmtEUR(g.calc.stampAmount)}</div><span class="tag ${statusClass(st)}">${statusLabel(st)}</span></div><div class="value">›</div></div>`}).join('')||emptyState('Nessuna riga fatturabile in questo mese.','+ Registra un consuntivo','newEntryChoice()')}</div>
+<div class="miniActions"><button type="button" class="miniBtn" onclick="go('fatturaCarica')" title="Carica l’XML di una fattura già emessa e confrontalo coi consuntivi">⤒ Carica fattura emessa</button></div>
+<h2>La cassa</h2>${billingCassaCard()}${forfettarioBarCard()}
+<h2>L’anno</h2>${billingAnnoCard()}
     <div class="list"><div class="row" onclick="go('reportEconomico')"><div></div>
       <div><div class="title">Report economico</div>
       <div class="desc">Ricavi, costi e margine, mese per mese.</div></div><div class="chev">›</div></div></div>`)}
@@ -2525,7 +3229,7 @@ function billingDetailView(){const clientId=state.edit;const group=billingGroups
     if(l.type==='travel_expenses'){(l.items||[]).forEach(e=>items.push({title:expenseCategoryName(e.expense_category_id),desc:'Rimborso in fattura'+(e.work_city?' · '+e.work_city:''),metric:amountLine(expenseCategoryName(e.expense_category_id),Number(e.amount||0)),fisco:expenseFiscoText(e)}))}
     else{items.push({title:projectName(l.project_id)||'Senza progetto',desc:l.label,metric:l.type==='daily_rate_8h'?metricLine(l.hours,l.amount):amountLine(l.label,l.amount),fisco:fiscoText(l)})}});
   const piedeTot=piede.reduce((s,x)=>s+x.amount,0);const inpsText=renderTemplate(invoiceTemplateByCode('RIVALSA_INPS_4'),{type:'manual_entry',client_id:clientId,project_id:null,amount:calc.inpsAmount,hours:0});const bolloText=renderTemplate(invoiceTemplateByCode('MARCA_BOLLO'),{type:'manual_entry',client_id:clientId,project_id:null,amount:calc.stampAmount,hours:0});return appShell(`<h1>${esc(clientName(clientId))}</h1><p class="sub">Fattura ${monthLabel(state.month)}</p><div class="card"><b>Totale cliente</b><div class="amount" style="margin-top:8px">${fmtEUR(calc.total)}</div><div class="metricLine">Base ${fmtEUR(calc.subtotal)} <span class="dot">·</span> Rivalsa ${fmtEUR(calc.inpsAmount)} <span class="dot">·</span> Bollo ${fmtEUR(calc.stampAmount)}</div>${group.pAmount>0?`<div class="metricLine" style="margin-top:6px"><span class="tag blue">Pianificato</span> ${fmtEUR(group.pAmount)} dei ${fmtEUR(calc.subtotal)} di base${group.pHours>0?` <span class="dot">·</span> ${fmtNum(group.pHours/8,2)} gg/u`:''}</div>`:''}<span class="tag ${statusClass(st)}">${statusLabel(st)}</span></div><h2>Righe Fiscozen</h2><div class="list">${items.map((it,i)=>`<div class="row"><div>${i+1}</div><div><div class="title">${esc(it.title)}</div><div class="desc">${esc(it.desc)}</div><div class="metricLine">${it.metric}</div><div class="copybox" id="copy-${i}">${esc(it.fisco)}</div><button class="secondary" onclick="copyText('${esc(it.fisco).replace(/'/g,'&#39;')}')">Copia descrizione</button></div><div></div></div>`).join('')}${calc.inpsEnabled&&calc.inpsAmount>0?`<div class="row"><div>+</div><div><div class="title">Rivalsa INPS ${fmtNum(calc.inpsRate,2)}%</div><div class="metricLine">${fmtEUR(calc.inpsAmount)}</div><div class="copybox">${esc(inpsText)}</div><button class="secondary" onclick="copyText('${esc(inpsText).replace(/'/g,'&#39;')}')">Copia descrizione</button></div><div></div></div>`:''}${calc.stampEnabled&&calc.stampAmount>0?`<div class="row"><div>+</div><div><div class="title">Marca da bollo</div><div class="metricLine">${fmtEUR(calc.stampAmount)}</div><div class="copybox">${esc(bolloText)}</div><button class="secondary" onclick="copyText('${esc(bolloText).replace(/'/g,'&#39;')}')">Copia descrizione</button></div><div></div></div>`:''}</div>${piede.length?`<h2>Spese a piè di lista</h2><p class="sub">Anticipate da te e <b>da chiedere a parte</b>: non entrano nel totale della fattura, che e' e resta ${fmtEUR(calc.total)}. Sono una partita di giro, quindi la descrizione analitica serve comunque.</p><div class="card"><b>Da farsi rimborsare</b><div class="amount" style="margin-top:8px">${fmtEUR(piedeTot)}</div><small class="desc">${piede.length} ${piede.length===1?'spesa':'spese'}</small></div><div class="list">${piede.map((it,i)=>`<div class="row"><div>·</div><div><div class="title">${esc(it.title)}</div><div class="desc">${it.desc}</div><div class="metricLine">${it.metric}</div><div class="copybox" id="pie-${i}">${esc(it.fisco)}</div><button class="secondary" onclick="copyText('${esc(it.fisco).replace(/'/g,'&#39;')}')">Copia descrizione</button></div><div></div></div>`).join('')}</div>`:''}<h2>Dati fattura / incasso</h2><form class="form" onsubmit="saveBillingHeader(event)"><div class="field"><label>Stato</label><select name="status"><option value="to_invoice" ${st==='to_invoice'?'selected':''}>Da fatturare</option><option value="invoice_issued" ${st==='invoice_issued'?'selected':''}>Fattura emessa</option><option value="collected" ${st==='collected'?'selected':''}>Incassato</option><option value="excluded" ${st==='excluded'?'selected':''}>Escluso</option></select></div><div class="field"><label>Rivalsa INPS</label><select name="inps_recharge_enabled"><option value="true" ${calc.inpsEnabled?'selected':''}>Sì</option><option value="false" ${!calc.inpsEnabled?'selected':''}>No</option></select></div><div class="field"><label>Percentuale rivalsa INPS</label><input name="inps_recharge_rate" type="number" step="0.01" value="${Number(calc.inpsRate||4)}"></div><div class="field"><label>Marca da bollo</label><select name="stamp_duty_enabled"><option value="true" ${calc.stampEnabled?'selected':''}>Sì</option><option value="false" ${!calc.stampEnabled?'selected':''}>No</option></select></div><div class="field"><label>Importo bollo</label><input name="stamp_duty_amount" type="number" step="0.01" value="${Number(calc.stampAmount||0)||Number(currentTaxSetting().stamp_duty_amount||2)}"></div><div class="field"><label>Numero fattura</label><input name="invoice_number" value="${esc(header.invoice_number||'')}"></div><div class="field"><label>Data fattura</label><input name="invoice_date" type="date" value="${esc(header.invoice_date||'')}"></div><div class="field"><label>Data incasso</label><input name="collection_date" type="date" value="${esc(header.collection_date||'')}"></div><div class="field"><label>Importo incassato</label><input name="collected_amount" type="number" step="0.01" value="${Number(header.collected_amount||0)}"></div><div class="field"><label>Note</label><textarea name="notes">${esc(header.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva stato fattura</button><button type="button" class="secondary" onclick="go('billing')">Indietro</button></div></form>`)}
-async function saveBillingHeader(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const clientId=state.edit;const group=billingGroupsByClient().find(g=>g.client_id===clientId);const {year,month}=periodParts();const tempCalc=billingCalc(group,{inps_recharge_enabled:f.inps_recharge_enabled==='true',inps_recharge_rate:Number(f.inps_recharge_rate||4),stamp_duty_enabled:f.stamp_duty_enabled==='true',stamp_duty_amount:Number(f.stamp_duty_amount||0)});const payload={year,month,client_id:clientId,total_amount:Number(tempCalc.subtotal||0),services_amount:tempCalc.services,expenses_amount:tempCalc.expenses,manual_amount:tempCalc.manual,taxable_base_amount:tempCalc.taxableBase,inps_recharge_enabled:tempCalc.inpsEnabled,inps_recharge_rate:tempCalc.inpsRate,inps_recharge_amount:tempCalc.inpsAmount,stamp_duty_enabled:tempCalc.stampEnabled,stamp_duty_amount:tempCalc.stampAmount,invoice_total_amount:tempCalc.total,status:f.status,invoice_number:norm(f.invoice_number)||null,invoice_date:f.invoice_date||null,collection_date:f.collection_date||null,collected_amount:Number(f.collected_amount||0)||null,notes:f.notes||null};const existing=headerForClient(clientId);let error;if(existing){({error}=await updateResilient('billing_headers',payload,existing.id));}else{({error}=await insertResilient('billing_headers',payload));}if(error)return setMsg(error.message,7000);await reload();state.view='billingDetail';state.edit=clientId;render()}
+async function saveBillingHeader(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const clientId=state.edit;const group=billingGroupsByClient().find(g=>g.client_id===clientId);const {year,month}=periodParts();const tempCalc=billingCalc(group,{inps_recharge_enabled:f.inps_recharge_enabled==='true',inps_recharge_rate:Number(f.inps_recharge_rate||4),stamp_duty_enabled:f.stamp_duty_enabled==='true',stamp_duty_amount:Number(f.stamp_duty_amount||0)});const payload={year,month,client_id:clientId,total_amount:Number(tempCalc.subtotal||0),services_amount:tempCalc.services,expenses_amount:tempCalc.expenses,manual_amount:tempCalc.manual,taxable_base_amount:tempCalc.taxableBase,inps_recharge_enabled:tempCalc.inpsEnabled,inps_recharge_rate:tempCalc.inpsRate,inps_recharge_amount:tempCalc.inpsAmount,stamp_duty_enabled:tempCalc.stampEnabled,stamp_duty_amount:tempCalc.stampAmount,invoice_total_amount:tempCalc.total,status:f.status,invoice_number:norm(f.invoice_number)||null,invoice_date:f.invoice_date||null,collection_date:f.collection_date||null,collected_amount:Number(f.collected_amount||0)||null,notes:f.notes||null};const existing=headerForClient(clientId);let error;if(existing){({error}=await updateResilient('billing_headers',payload,existing.id));}else{({error}=await insertResilient('billing_headers',payload));}if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='billingDetail';state.edit=clientId;render()}
 function copyText(txt){const cleaned=document.createElement('textarea');cleaned.innerHTML=txt;const val=cleaned.value;navigator.clipboard?.writeText(val).then(()=>setMsg('Descrizione copiata.')).catch(()=>prompt('Copia descrizione:',val))}
 
 
@@ -2585,7 +3289,7 @@ function projectionCard(){const p=projectionCalc(currentYear());return `<div cla
 
 function tax(){const year=currentYear();const c=annualTaxCalc(year);const ts=c.settings;return appShell(`<div class="screenTitle">Fiscalità</div><p class="sub">Stima regime forfettario per l'anno ${year}. Valori configurabili, da verificare con il consulente fiscale.</p>${projectionCard()}${previsioneTasseCard()}<div class="card"><b>Stima tasse forfettario</b><div class="list" style="box-shadow:none;margin-bottom:0"><div class="row"><div></div><div><div class="title">ATECO ${esc(ts.ateco_code||'')}</div><div class="desc">${esc(ts.ateco_description||'')}</div></div><div></div></div><div class="row"><div></div><div><div class="title">Incassato anno</div><div class="desc">base di calcolo provvisoria</div></div><div class="value">${fmtEUR(c.revenue)}</div></div><div class="row"><div></div><div><div class="title">Reddito forfettario lordo</div><div class="desc">coefficiente ${fmtNum(ts.profitability_coefficient,2)}%</div></div><div class="value">${fmtEUR(c.forfaitIncome)}</div></div><div class="row" onclick="go('taxPayments')"><div></div><div><div class="title">Contributi INPS pagati</div><div class="desc">tocca per gestire i pagamenti fiscali registrati</div></div><div class="value">${fmtEUR(c.paidContrib)}</div></div><div class="row"><div></div><div><div class="title">Imponibile fiscale stimato</div><div class="desc">reddito forfettario - contributi</div></div><div class="value">${fmtEUR(c.taxable)}</div></div><div class="row"><div></div><div><div class="title">Imposta sostitutiva stimata</div><div class="desc">aliquota ${fmtNum(ts.substitute_tax_rate,2)}%</div></div><div class="value">${fmtEUR(c.substituteTax)}</div></div><div class="row"><div></div><div><div class="title">Netto stimato dopo imposta</div><div class="desc">incassato - contributi - imposta</div></div><div class="value">${fmtEUR(c.net)}</div></div></div></div><button class="secondary" style="margin-bottom:12px" onclick="go('tasseFuture')">◷ Tasse future · scadenze previste ›</button><div class="grid"><button class="secondary" onclick="go('taxPayments')">Pagamenti fiscali (INPS) ›</button><button class="secondary" onclick="go('taxSettings')">Configurazione fiscale ›</button></div>`)}
 function taxSettings(){const year=currentYear();const c=annualTaxCalc(year);const ts=c.settings;return appShell(`<div class="screenTitle">Configurazione fiscale</div><p class="sub">ATECO, regime, aliquote e parametri della stima. Il cruscotto imposte è nella voce Tassazione.</p><form class="form" onsubmit="saveTaxSettings(event)"><h2>ATECO, regime e tasse</h2><p class="sub">Determinano il calcolo delle tasse sul tuo codice ATECO.</p><div class="field"><label>Anno fiscale</label><input name="fiscal_year" type="number" value="${year}"></div><div class="field"><label>Regime fiscale</label><select name="regime"><option value="forfettario" ${ts.regime==='forfettario'?'selected':''}>Forfettario</option><option value="ordinario" ${ts.regime==='ordinario'?'selected':''}>Ordinario</option><option value="semplificato" ${ts.regime==='semplificato'?'selected':''}>Semplificato</option></select></div><div class="field"><label>Codice ATECO</label><input name="ateco_code" value="${esc(ts.ateco_code||'')}"></div><div class="field"><label>Descrizione ATECO</label><input name="ateco_description" value="${esc(ts.ateco_description||'')}"></div><div class="field"><label>Coefficiente redditività %</label><input name="profitability_coefficient" type="number" step="0.01" value="${Number(ts.profitability_coefficient||67)}"></div><div class="field"><label>Aliquota imposta sostitutiva %</label><input name="substitute_tax_rate" type="number" step="0.01" value="${Number(ts.substitute_tax_rate||5)}"></div><div class="field"><label>Limite ricavi annuo forfettario</label><input name="annual_revenue_limit" type="number" step="0.01" value="${Number(ts.annual_revenue_limit||85000)}"></div><div class="field"><label>Data avvio attività</label><input name="activity_start_date" type="date" value="${esc(ts.activity_start_date||DEFAULT_DEFAULT_ACTIVITY_START_DATE)}"></div><h2>Rimborsi spese e reddito</h2><p class="sub">Dal 1° gennaio 2025 i rimborsi <b>analitici</b> di vitto, alloggio, viaggio e trasporto, pagati con strumenti <b>tracciabili</b> e addebitati voce per voce in fattura, non concorrono al reddito né alla soglia degli 85.000 € (D.Lgs. 192/2024 sull'art. 54 TUIR, tracciabilità dalla L. 207/2024). <b>Sull'applicazione al regime forfettario la dottrina è però divisa</b>: la norma non richiama espressamente la legge 190/2014 e manca un chiarimento. Perciò la scelta è tua, da fare con il commercialista: l'app non la prende per te.</p><div class="card"><div class="themeChoice"><button type="button" class="${rimborsiFuoriReddito()?'':'active'}" onclick="cambiaRimborsiFuoriReddito('no')"><b>Li conto come compensi</b><span>Prudente, ed è quello che l'app ha sempre fatto: i rimborsi entrano nei ricavi e nella stima delle imposte. Nessun numero si muove.</span></button><button type="button" class="${rimborsiFuoriReddito()?'active':''}" onclick="cambiaRimborsiFuoriReddito('si')"><b>Fuori dal reddito, regola 2025</b><span>I rimborsi analitici tracciabili, con ricevuta e già incassati, escono dalla base imponibile della stima. Il rimborso chilometrico resta compenso in ogni caso, perché è forfettario.</span></button></div>${(()=>{const sc=scomposizioneRimborsi(year);if(!sc.totale)return '';return `<div class="metricLine" style="margin-top:14px">Rimborsi in fattura ${year}: <b>${fmtEUR(sc.totale)}</b></div><div class="desc" style="margin-top:6px">di cui <b>${fmtEUR(sc.analitici)}</b> analitici che reggono il requisito${sc.chilometrici?` · <b>${fmtEUR(sc.chilometrici)}</b> chilometrici, compenso comunque`:''}${sc.senzaRequisiti?` · <b>${fmtEUR(sc.senzaRequisiti)}</b> senza i requisiti (contanti, ricevuta mancante o mese non ancora incassato)`:''}.</div>`})()}</div><h2>Rivalsa INPS e marca da bollo</h2><p class="sub">Voci aggiuntive da esporre in fattura oltre al compenso.</p><div class="field"><label>Gestione previdenziale</label><input name="inps_management" value="${esc(ts.inps_management||'gestione_separata')}"></div><div class="field"><label>Aliquota INPS Gestione Separata %</label><input name="inps_gs_rate" type="number" step="0.01" value="${Number(ts.inps_gs_rate??26.07)}"></div><div class="field"><label>Rivalsa INPS</label><select name="inps_recharge_enabled"><option value="true" ${ts.inps_recharge_enabled?'selected':''}>Sì</option><option value="false" ${!ts.inps_recharge_enabled?'selected':''}>No</option></select></div><div class="field"><label>Percentuale rivalsa INPS</label><input name="inps_recharge_rate" type="number" step="0.01" value="${Number(ts.inps_recharge_rate||4)}"></div><div class="field"><label>Marca da bollo</label><select name="stamp_duty_enabled"><option value="true" ${ts.stamp_duty_enabled?'selected':''}>Sì</option><option value="false" ${!ts.stamp_duty_enabled?'selected':''}>No</option></select></div><div class="field"><label>Importo marca da bollo</label><input name="stamp_duty_amount" type="number" step="0.01" value="${Number(ts.stamp_duty_amount||2)}"></div><details class="moreFields"><summary>Proiezione annua (avanzato)</summary><p class="sub">Parametri opzionali per affinare la stima "Prudente / Base / Ottimistico".</p><div class="field"><label>Includi mese corrente nella proiezione</label><select name="projection_include_current_month"><option value="true" ${ts.projection_include_current_month!==false?'selected':''}>Sì</option><option value="false" ${ts.projection_include_current_month===false?'selected':''}>No</option></select></div><div class="field"><label>Mesi esclusi dalla proiezione</label><input name="projection_excluded_months" placeholder="es. 1,8" value="${esc(parseExcludedMonths(ts.projection_excluded_months).join(','))}"></div><div class="field"><label>Fattore scenario prudente</label><input name="projection_prudent_factor" type="number" step="0.01" value="${Number(ts.projection_prudent_factor??0.85)}"></div><div class="field"><label>Fattore scenario ottimistico</label><input name="projection_optimistic_factor" type="number" step="0.01" value="${Number(ts.projection_optimistic_factor??1.10)}"></div><div class="field"><label>Soglia rischio basso %</label><input name="risk_low_threshold" type="number" step="0.01" value="${Number(ts.risk_low_threshold??70)}"></div><div class="field"><label>Soglia rischio medio %</label><input name="risk_medium_threshold" type="number" step="0.01" value="${Number(ts.risk_medium_threshold??90)}"></div><div class="field"><label>Soglia rischio alto %</label><input name="risk_high_threshold" type="number" step="0.01" value="${Number(ts.risk_high_threshold??100)}"></div></details><div class="field"><label>Note</label><textarea name="notes">${esc(ts.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva configurazione fiscale</button><button type="button" class="secondary" onclick="go('settings')">Indietro</button></div></form>`)}
-async function saveTaxSettings(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const year=Number(f.fiscal_year||currentYear());const payload={fiscal_year:year,regime:f.regime,ateco_code:norm(f.ateco_code)||null,ateco_description:norm(f.ateco_description)||null,profitability_coefficient:Number(f.profitability_coefficient||0),substitute_tax_rate:Number(f.substitute_tax_rate||0),inps_management:norm(f.inps_management)||null,inps_gs_rate:Number(f.inps_gs_rate||26.07),inps_recharge_enabled:f.inps_recharge_enabled==='true',inps_recharge_rate:Number(f.inps_recharge_rate||0),stamp_duty_enabled:f.stamp_duty_enabled==='true',stamp_duty_amount:Number(f.stamp_duty_amount||0),annual_revenue_limit:Number(f.annual_revenue_limit||0),activity_start_date:f.activity_start_date||null,projection_method:'weighted_average',projection_include_current_month:f.projection_include_current_month==='true',projection_excluded_months:parseExcludedMonths(f.projection_excluded_months),projection_prudent_factor:Number(f.projection_prudent_factor||0.85),projection_optimistic_factor:Number(f.projection_optimistic_factor||1.10),risk_low_threshold:Number(f.risk_low_threshold||70),risk_medium_threshold:Number(f.risk_medium_threshold||90),risk_high_threshold:Number(f.risk_high_threshold||100),notes:f.notes||null};const existing=data.taxSettings.find(t=>Number(t.fiscal_year)===year);let res;if(existing)res=await updateResilient('tax_settings',payload,existing.id);else res=await insertResilient('tax_settings',payload);if(res.error)return setMsg(res.error.message,7000);await reload();state.view='tax';setMsg('Configurazione fiscale aggiornata.',4000)}
+async function saveTaxSettings(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const year=Number(f.fiscal_year||currentYear());const payload={fiscal_year:year,regime:f.regime,ateco_code:norm(f.ateco_code)||null,ateco_description:norm(f.ateco_description)||null,profitability_coefficient:Number(f.profitability_coefficient||0),substitute_tax_rate:Number(f.substitute_tax_rate||0),inps_management:norm(f.inps_management)||null,inps_gs_rate:Number(f.inps_gs_rate||26.07),inps_recharge_enabled:f.inps_recharge_enabled==='true',inps_recharge_rate:Number(f.inps_recharge_rate||0),stamp_duty_enabled:f.stamp_duty_enabled==='true',stamp_duty_amount:Number(f.stamp_duty_amount||0),annual_revenue_limit:Number(f.annual_revenue_limit||0),activity_start_date:f.activity_start_date||null,projection_method:'weighted_average',projection_include_current_month:f.projection_include_current_month==='true',projection_excluded_months:parseExcludedMonths(f.projection_excluded_months),projection_prudent_factor:Number(f.projection_prudent_factor||0.85),projection_optimistic_factor:Number(f.projection_optimistic_factor||1.10),risk_low_threshold:Number(f.risk_low_threshold||70),risk_medium_threshold:Number(f.risk_medium_threshold||90),risk_high_threshold:Number(f.risk_high_threshold||100),notes:f.notes||null};const existing=data.taxSettings.find(t=>Number(t.fiscal_year)===year);let res;if(existing)res=await updateResilient('tax_settings',payload,existing.id);else res=await insertResilient('tax_settings',payload);if(res.error)return setMsg(motivoLeggibile(res.error),7000);await reload();state.view='tax';setMsg('Configurazione fiscale aggiornata.',4000)}
 
 function inpsGsCalc(year=currentYear()){
   const ts=currentTaxSetting(year);
@@ -2612,9 +3316,9 @@ function taxPaymentTypeOptions(selected=''){return ['inps','imposta_sostitutiva'
 function taxPayments(){const year=currentYear();const pre=state.prefill||{};const rows=data.taxPayments.filter(p=>Number(p.fiscal_year)===year).sort((a,b)=>String(b.payment_date||'').localeCompare(String(a.payment_date||'')));const totalPaid=rows.filter(p=>p.status==='paid').reduce((s,p)=>s+Number(p.amount||0),0);return appShell(`<h1>Pagamenti fiscali</h1><p class="sub">Contributi INPS e altri versamenti fiscali per l'anno ${year}. I pagamenti INPS "Pagato" vengono dedotti in Fiscalità dall'imponibile stimato.</p>${inpsGsCard()}<div class="card"><b>Totale pagato ${year}</b><div class="amount" style="margin-top:8px">${fmtEUR(totalPaid)}</div></div><form class="form" onsubmit="addTaxPayment(event)"${pre.payment_type?' id="moduloPagamento"':''}><div class="field"><label>Anno fiscale</label><input name="fiscal_year" type="number" value="${Number(pre.fiscal_year||year)}"></div><div class="field"><label>Tipo pagamento</label><select name="payment_type">${taxPaymentTypeOptions(pre.payment_type||'inps')}</select></div><div class="field"><label>Data pagamento</label><input name="payment_date" type="date" value="${new Date().toISOString().slice(0,10)}"></div><div class="field"><label>Importo</label><input name="amount" type="number" step="0.01" value="${Number(pre.amount||0)}"></div><div class="field"><label>Stato</label><select name="status"><option value="paid" ${pre.status!=='planned'?'selected':''}>Pagato</option><option value="planned" ${pre.status==='planned'?'selected':''}>Pianificato</option></select></div><div class="field"><label>Note</label><textarea name="notes">${esc(pre.notes||'')}</textarea></div><button class="primary">${pre.payment_type?'Registra il versamento':'Aggiungi pagamento'}</button></form><div class="list">${rows.map(p=>`<div class="row" onclick="editTaxPayment('${p.id}')"><div></div><div><div class="title">${esc(taxPaymentTypeLabel(p.payment_type))}</div><div class="desc">${dateIT(p.payment_date)} · ${p.status==='paid'?'Pagato':'Pianificato'}</div></div><div class="value">${fmtEUR(p.amount||0)}</div></div>`).join('')||emptyForm('Nessun pagamento registrato per questo anno.')}</div><button type="button" class="secondary" onclick="go('tax')">Indietro</button>`)}
 function editTaxPayment(id){navigateTo('taxPaymentEdit',{edit:id})}
 function taxPaymentEdit(){const p=data.taxPayments.find(x=>x.id===state.edit);if(!p)return taxPayments();return appShell(`<h1>Modifica pagamento</h1><form class="form" onsubmit="saveTaxPayment(event)"><div class="field"><label>Anno fiscale</label><input name="fiscal_year" type="number" value="${Number(p.fiscal_year||currentYear())}"></div><div class="field"><label>Tipo pagamento</label><select name="payment_type">${taxPaymentTypeOptions(p.payment_type||'inps')}</select></div><div class="field"><label>Data pagamento</label><input name="payment_date" type="date" value="${esc(p.payment_date||'')}"></div><div class="field"><label>Importo</label><input name="amount" type="number" step="0.01" value="${Number(p.amount||0)}"></div><div class="field"><label>Stato</label><select name="status"><option value="paid" ${p.status==='paid'?'selected':''}>Pagato</option><option value="planned" ${p.status==='planned'?'selected':''}>Pianificato</option></select></div><div class="field"><label>Note</label><textarea name="notes">${esc(p.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteTaxPayment('${p.id}')">Elimina</button><button type="button" class="secondary" onclick="go('taxPayments')">Annulla</button></div></form>`)}
-async function addTaxPayment(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const payload={fiscal_year:Number(f.fiscal_year||currentYear()),payment_type:f.payment_type,payment_date:f.payment_date||null,amount:Number(f.amount||0),status:f.status,notes:f.notes||null};const {error}=await insertResilient('tax_payments',payload);if(error)return setMsg(error.message,7000);await reload();state.view='taxPayments';render()}
-async function saveTaxPayment(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const payload={fiscal_year:Number(f.fiscal_year||currentYear()),payment_type:f.payment_type,payment_date:f.payment_date||null,amount:Number(f.amount||0),status:f.status,notes:f.notes||null};const {error}=await updateResilient('tax_payments',payload,state.edit);if(error)return setMsg(error.message,7000);await reload();state.view='taxPayments';state.edit=null;render()}
-async function deleteTaxPayment(idv){if(!confirm('Eliminare questo pagamento fiscale?'))return;const {error}=await sb.from('tax_payments').delete().eq('id',idv);if(error)return setMsg(error.message,7000);await reload();state.view='taxPayments';render()}
+async function addTaxPayment(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const payload={fiscal_year:Number(f.fiscal_year||currentYear()),payment_type:f.payment_type,payment_date:f.payment_date||null,amount:Number(f.amount||0),status:f.status,notes:f.notes||null};const {error}=await insertResilient('tax_payments',payload);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='taxPayments';render()}
+async function saveTaxPayment(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const payload={fiscal_year:Number(f.fiscal_year||currentYear()),payment_type:f.payment_type,payment_date:f.payment_date||null,amount:Number(f.amount||0),status:f.status,notes:f.notes||null};const {error}=await updateResilient('tax_payments',payload,state.edit);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='taxPayments';state.edit=null;render()}
+async function deleteTaxPayment(idv){if(!confirm('Eliminare questo pagamento fiscale?'))return;const {error}=await sb.from('tax_payments').delete().eq('id',idv);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='taxPayments';render()}
 
 function costsForYear(year=currentYear()){return data.travelExpenses.filter(e=>String(e.expense_date||'').startsWith(String(year)+'-')&&expIsOwn(e))}
 function expensesForYear(year=currentYear()){return data.travelExpenses.filter(e=>String(e.expense_date||'').startsWith(String(year)+'-'))}
@@ -2624,6 +3328,12 @@ function netMarginMonthlyList(year){const vals=netMarginByMonth(year);const md=a
 function balanceMarginBars(year){return monthBars(annualMonthData(year).map(m=>m.compensi-m.costi))}
 function homeBalanceCharts(){const year=currentYear();const c=annualTaxCalc(year);const bo=bolloCalc(year);const ex=billingExtras(year);const gsRate=Number(c.settings.inps_gs_rate??26.07)/100;const inpsDovuto=c.forfaitIncome*gsRate;const imposta=c.substituteTax;const margine=(c.compensi+ex.rivalsa)-c.costi-bo.aCarico;const utileNetto=margine-inpsDovuto-imposta;return `<div class="card cardLink" onclick="go('balance')" role="button" title="Apri il Bilancio ${year}"><b>Ripartizione ricavi ${year} <span class="cardLinkArrow">›</span></b><div class="desc" style="margin-top:2px">Dove vanno i ricavi: spese, contributi, imposte, utile netto</div>${balanceCompositionBar(c.costi+bo.aCarico,inpsDovuto,imposta,utileNetto)}</div><div class="card cardLink" onclick="go('balance')" role="button" title="Apri il Bilancio ${year}"><b>Marginalità netta mensile ${year} <span class="cardLinkArrow">›</span></b><div class="desc" style="margin-top:2px">Utile per mese al netto di spese, contributi e imposte</div>${netMarginMonthlyList(year)}</div>`}
 const BOLLO_SOGLIA=77.47;
+// Le nature che l'Agenzia delle Entrate considera assoggettate al
+// bollo: escluse (N1), non soggette per altri motivi (N2.2), non
+// imponibili per dichiarazione d'intento e per operazioni assimilate
+// all'esportazione (N3.5, N3.6), esenti (N4). Restano fuori
+// l'inversione contabile (N6.*) e la carenza di territorialita' (N2.1).
+const NATURE_BOLLO=['N1','N2.2','N3.5','N3.6','N4'];
 function bolloCalc(year=currentYear()){
   const ts=currentTaxSetting(year);const unit=Number(ts.stamp_duty_amount??2)||2;
   const rows=data.billingHeaders.filter(h=>Number(h.year)===Number(year)&&['invoice_issued','collected'].includes(h.status));
@@ -2789,7 +3499,7 @@ async function annullaPagata(kind,ref,date){
   if(!p)return setMsg('Per questa scadenza non risulta nessun pagamento registrato.',4000);
   if(!confirm('Togliere il segno di pagato? Il versamento registrato verrà eliminato.'))return;
   const {error}=await sb.from('tax_payments').delete().eq('id',p.id);
-  if(error)return setMsg(error.message,7000);
+  if(error)return setMsg(motivoLeggibile(error),7000);
   await reload();render();setMsg('Segno di pagato tolto.',4000);
 }
 const TASSE_VISTE=[['scadenze','Per scadenza'],['riferimento','Per riferimento'],['tempo','Linea del tempo']];
@@ -3036,7 +3746,6 @@ function forecastCalc(year=currentYear()){
   const oneri=inps+imposta;const utileNetto=ricavi-costi-rimborsi-oneri;
   return {ts,consuntivato,rimborsi,fatturabile,pianificato,ricavi,baseImponibile,fuoriReddito,forfait,inps,imposta,oneri,costi,utileNetto,fatturato:at.fatturato,fatturatoBase:at.fatturatoBase,daFatturare:at.daFatturare,limit:Number(ts.annual_revenue_limit||85000),coeff,gsRate,taxRate};
 }
-function previsioneRicaviCard(){const year=currentYear();const f=forecastCalc(year);if(f.pianificato<=0&&f.daFatturare<=0)return '';return `<div class="card"><b>Previsione ricavi ${year}</b><div class="desc" style="margin-top:2px">Fatturabile maturato (lavoro + rimborsi spese) + giorni pianificati futuri.</div><div class="kpiGrid three" style="margin-top:14px"><div><span>Fatturabile</span><strong>${fmtEUR(f.fatturabile)}</strong></div><div><span>Pianificato</span><strong>${fmtEUR(f.pianificato)}</strong></div><div><span>Previsione</span><strong>${fmtEUR(f.ricavi)}</strong></div></div><div class="metricLine" style="margin-top:10px">Consuntivato ${fmtEUR(f.consuntivato)}${f.rimborsi>0?' + '+fmtEUR(f.rimborsi)+' rimborsi spese':''} <span class="dot">·</span> Già fatturato ${fmtEUR(f.fatturatoBase)} <span class="dot">·</span> Da fatturare ${fmtEUR(f.daFatturare)} <span class="dot">·</span> <span class="tag blue">Pianificato</span> ${fmtEUR(f.pianificato)}</div></div>`;}
 function previsioneTasseCard(){const year=currentYear();const f=forecastCalc(year);if(f.ricavi<=0)return '';return `<div class="card"><b>Previsione imposte e contributi ${year}</b><div class="desc" style="margin-top:2px">Stima su base fatturabile + pianificato (competenza), coeff. ${fmtNum(f.coeff*100,0)}%. Le imposte effettive sono su base cassa (incassato).</div><div class="list" style="box-shadow:none;margin:12px 0 0"><div class="row"><div></div><div><div class="title">Base previsione (ricavi)</div><div class="desc">fatturabile ${fmtEUR(f.fatturabile)}${f.rimborsi>0?' (di cui '+fmtEUR(f.rimborsi)+' rimborsi spese)':''} + pianificato ${fmtEUR(f.pianificato)}</div></div><div class="value">${fmtEUR(f.ricavi)}</div></div>${f.fuoriReddito>0?`<div class="row"><div></div><div><div class="title" style="color:var(--red)">− Rimborsi fuori dal reddito</div><div class="desc">regola 2025, come hai scelto in Configurazione fiscale</div></div><div class="value" style="color:var(--red)">${fmtEUR(f.fuoriReddito)}</div></div><div class="row"><div></div><div><div class="title">= Base imponibile</div></div><div class="value">${fmtEUR(f.baseImponibile)}</div></div>`:''}<div class="row"><div></div><div><div class="title">Reddito forfettario</div><div class="desc">coeff. ${fmtNum(f.coeff*100,0)}% sulla base imponibile</div></div><div class="value">${fmtEUR(f.forfait)}</div></div><div class="row"><div></div><div><div class="title" style="color:var(--red)">− Contributi INPS ${fmtNum(f.gsRate*100,2)}%</div></div><div class="value" style="color:var(--red)">${fmtEUR(f.inps)}</div></div><div class="row"><div></div><div><div class="title" style="color:var(--red)">− Imposta sostitutiva ${fmtNum(f.taxRate*100,0)}%</div></div><div class="value" style="color:var(--red)">${fmtEUR(f.imposta)}</div></div><div class="row"><div></div><div><div class="title"><b>= Totale imposte e contributi previsti</b></div></div><div class="value"><b>${fmtEUR(f.oneri)}</b></div></div></div></div>`;}
 function previsioneBilancioCard(){const year=currentYear();const f=forecastCalc(year);if(f.pianificato<=0)return '';return `<div class="card"><b>Previsione bilancio ${year}</b><div class="desc" style="margin-top:2px">Conto economico proiettato con ricavi = fatturabile + pianificato. Stima gestionale.</div><div class="list" style="box-shadow:none;margin:12px 0 0"><div class="row"><div></div><div><div class="title">Ricavi previsti</div><div class="desc">fatturabile + pianificato</div></div><div class="value">${fmtEUR(f.ricavi)}</div></div><div class="row"><div></div><div><div class="title" style="color:var(--red)">− Spese a mio carico</div></div><div class="value" style="color:var(--red)">${fmtEUR(f.costi)}</div></div>${f.rimborsi>0?`<div class="row"><div></div><div><div class="title" style="color:var(--red)">− Spese riaddebitate</div><div class="desc">anticipate e riprese dal cliente: non sono guadagno, quindi escono com’erano entrate</div></div><div class="value" style="color:var(--red)">${fmtEUR(f.rimborsi)}</div></div>`:''}<div class="row"><div></div><div><div class="title" style="color:var(--red)">− Imposte e contributi previsti</div></div><div class="value" style="color:var(--red)">${fmtEUR(f.oneri)}</div></div><div class="row"><div></div><div><div class="title"><b>= Utile netto previsto</b></div></div><div class="value"><b>${fmtEUR(f.utileNetto)}</b></div></div></div></div>`;}
 function balFull(){return settingValue('bal_full')==='1'}
@@ -3281,8 +3990,8 @@ function excelSerialToDate(v){const n=Number(String(v).replace(',','.'));if(!isF
 function parseReimbType(v){const s=String(v||'').toLowerCase().trim();if(!s)return '';if(/expense[_ ]?report|pie|piè|piede|lista/.test(s))return 'expense_report';if(/invoice|fattura/.test(s))return 'invoice';if(/own|carico|costo|proprio|non\s*rimbors/.test(s))return 'own';return ''}
 async function importCostsCsv(ev){const file=ev.target.files?.[0];if(!file)return;const reader=new FileReader();reader.onload=async()=>{try{const text=reader.result.replace(/^﻿/,'').trim();if(!text)return setMsg('CSV vuoto.');const lines=text.split(/\r?\n/).filter(Boolean);const sep=(lines[0].match(/;/g)||[]).length>=(lines[0].match(/,/g)||[]).length?';':',';const headers=parseCsvLine(lines.shift(),sep).map(canonHeader);const get=(row,names)=>{for(const n of names.map(canonHeader)){const i=headers.indexOf(n);if(i>=0)return row[i]||''}return''};let count=0,updated=0,skipped=0;for(const line of lines){const row=parseCsvLine(line,sep);if(!row.some(x=>norm(x))){skipped++;continue}const qty=parseAmount(get(row,['quantita','quantità','quantity','qta']));const unit=parseAmount(get(row,['costo','tariffa x km','tariffa','unit_rate','costo unitario']));let amount=parseAmount(get(row,['totale','total','importo','amount']));if(!amount&&qty&&unit)amount=qty*unit;if(!amount&&unit)amount=unit;if(!amount){skipped++;continue}const dRaw=norm(get(row,['data','date']));const date=toDate(dRaw)||excelSerialToDate(dRaw)||new Date().toISOString().slice(0,10);const note=norm(get(row,['note','notes']));const rimbRaw=norm(get(row,['rimborsabile','reimbursable'])).toLowerCase();const flagYes=['si','sì','yes','true','1','y','x','vero'].includes(rimbRaw);let rt=parseReimbType(get(row,['tipo rimborso','tipo_rimborso','tipo di rimborso','tipo rimborso spesa','rimborso','reimbursement_type','reimbursement type']));if(!rt){const noteL=note.toLowerCase();rt='own';if(/fattura/.test(noteL))rt='invoice';else if(/lista|pie|piè/.test(noteL))rt='expense_report';else if(flagYes)rt='invoice';}const reimbursable=rt!=='own';const catName=norm(get(row,['spesa','categoria','voce','voce spesa','category']))||'Spesa';const cat=await ensureExpenseCategory(catName,reimbursable);const clientNm=norm(get(row,['cliente','client']));let client=null;if(clientNm)client=await ensureClient(clientNm,'daily');const projNm=norm(get(row,['cliente progetto','cliente/progetto','progetto','project']));let project=null;if(client&&projNm)project=await ensureProject(client.id,projNm);const city=norm(get(row,['sede','luogo/citta','luogo/città','citta','città','luogo','work_city','city']));const desc=norm(get(row,['descrizione','description','causale']))||catName;const idv=norm(get(row,['id','import_id','riga','key','chiave']));const payload={expense_date:date,client_id:client?.id||null,project_id:project?.id||null,expense_category_id:cat?.id||null,work_city:city||null,description:desc,quantity:qty||null,unit_rate:unit||null,amount,reimbursement_type:rt,reimbursable,notes:note||null};const key=idv?importKey(['te',idv]):importKey(['te',date,client?.id||'',project?.id||'',cat?.id||'',amount,city]);const {res,updated:u}=await upsertByKey('travel_expenses',data.travelExpenses,payload,key,['reimbursement_type']);if(res.error)throw res.error;if(u)updated++;else count++;}await fetchAll();state.view='costs';setMsg(`Import completato: ${count} inserite, ${updated} aggiornate. Scartate: ${skipped}.`,9000)}catch(e){console.error(e);setMsg('Errore import: '+(e.message||e),9000)}};reader.readAsText(file,'windows-1252')}
 function account(){const p=(data.profiles&&data.profiles[0])||{};const email=session?.user?.email||p.email||'';return appShell(`<h1>Account</h1><p class="sub">I tuoi dati di accesso e contatto.</p><form class="form" onsubmit="saveAccount(event)"><div class="field"><label>Email di accesso</label><input value="${esc(email)}" disabled></div><div class="field"><label>Nome</label><input name="first_name" value="${esc(p.first_name||'')}"></div><div class="field"><label>Cognome</label><input name="last_name" value="${esc(p.last_name||'')}"></div><div class="field"><label>Telefono</label><input name="phone" value="${esc(p.phone||'')}" inputmode="tel" placeholder="+39 ..."></div><div class="field"><label>Azienda / Ragione sociale</label><input name="company_name" value="${esc(p.company_name||'')}"></div><div class="field"><label>P.IVA</label><input name="vat_number" value="${esc(p.vat_number||'')}"></div><button class="primary">Salva dati account</button></form><h2>Cambia password</h2><form class="form" onsubmit="changePassword(event)"><div class="field"><label>Nuova password</label><input name="password" type="password" minlength="6" autocomplete="new-password" placeholder="Almeno 6 caratteri" required></div><div class="field"><label>Conferma nuova password</label><input name="password2" type="password" minlength="6" autocomplete="new-password" required></div><button class="primary">Aggiorna password</button></form><button type="button" class="secondary" onclick="go('settings')" style="margin-top:14px">Indietro</button>`)}
-async function saveAccount(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const p=(data.profiles&&data.profiles[0]);const payload={first_name:norm(f.first_name)||null,last_name:norm(f.last_name)||null,phone:norm(f.phone)||null,company_name:norm(f.company_name)||null,vat_number:norm(f.vat_number)||null};let error;if(p){({error}=await updateResilient('user_profiles',payload,p.id,['phone']));}else{({error}=await insertResilient('user_profiles',{...payload,user_id:session?.user?.id,email:session?.user?.email},['phone']));}if(error)return setMsg(error.message,7000);await reload();state.view='account';setMsg('Dati account aggiornati.',4000)}
-async function changePassword(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));if(f.password!==f.password2)return setMsg('Le due password non coincidono.',6000);state.message='Aggiornamento password...';render();const {error}=await sb.auth.updateUser({password:f.password});if(error)return setMsg(error.message,7000);setMsg('Password aggiornata con successo.',5000)}
+async function saveAccount(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const p=(data.profiles&&data.profiles[0]);const payload={first_name:norm(f.first_name)||null,last_name:norm(f.last_name)||null,phone:norm(f.phone)||null,company_name:norm(f.company_name)||null,vat_number:norm(f.vat_number)||null};let error;if(p){({error}=await updateResilient('user_profiles',payload,p.id,['phone']));}else{({error}=await insertResilient('user_profiles',{...payload,user_id:session?.user?.id,email:session?.user?.email},['phone']));}if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='account';setMsg('Dati account aggiornati.',4000)}
+async function changePassword(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));if(f.password!==f.password2)return setMsg('Le due password non coincidono.',6000);state.message='Aggiornamento password...';render();const {error}=await sb.auth.updateUser({password:f.password});if(error)return setMsg(motivoLeggibile(error),7000);setMsg('Password aggiornata con successo.',5000)}
 function settingsRow(view,icon,title,desc,onclick){return `<div class="row" onclick="${onclick||`go('${view}')`}"><div class="roundIcon blue">${icon}</div><div><div class="title">${title}</div><div class="desc">${desc}</div></div><div>›</div></div>`}
 function settings(){const email=esc(session?.user?.email||'');return appShell(`<div class="screenTitle">Impostazioni</div>
 <h2>Account</h2><div class="list">${settingsRow('account','◔','Profilo e password',email||'Dati di contatto e accesso')}</div>
@@ -3299,7 +4008,7 @@ function appearance(){return appShell(`<div class="screenTitle">Aspetto / Tema</
 function exportTimesheetViewOptions(){const clients=activeClients();const selected=clients[0]?.id||'';return `<div class="field"><label>Mese</label><input name="month" type="month" value="${state.month}"></div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)"><option value="">Tutti i clienti (solo per archivio)</option>${clients.map(c=>`<option value="${c.id}"${c.id===selected?' selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Cliente/Progetto</label><select name="project_id"><option value="">Tutti i progetti</option>${projectOptions(selected)}</select></div><div class="field"><label>Includi importi</label><select name="include_amount"><option value="false">No, solo dettaglio operativo</option><option value="true">Sì, includi importi</option></select></div>`}
 function exportTimesheet(){return appShell(`<div class="screenTitle">Export Timesheet Excel</div><p class="sub">Scarica il dettaglio mensile da inviare al cliente.</p><form class="form" onsubmit="downloadTimesheetExcel(event)">${exportTimesheetViewOptions()}<div class="actions"><button class="primary">Scarica Excel</button><button type="button" class="secondary" onclick="go('settings')">Annulla</button></div></form>`)}
 
-function clients(){return appShell(`<h1>Clienti</h1><form class="form" onsubmit="addClient(event)"><div class="field"><label>Nome cliente</label><input name="name" required></div><div class="field"><label>Codice cliente</label><input name="code" maxlength="5" placeholder="Es. SO" oninput="this.value=normCode(this.value)"><div class="small">Da 2 a 5 lettere o cifre. Entra nel codice di ogni commessa: una volta usato non si cambia piu'.</div></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h">Tariffa giornaliera 8h</option><option value="monthly_flat">Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="0"></div><button class="primary">Aggiungi cliente</button></form>${sortControl('clients')}<div class="list">${sortEntities('clients',data.clients).map(c=>`<div class="row" onclick="${wbsReady()?`openClient('${c.id}')`:`editClient('${c.id}')`}"><div></div><div><div class="title">${esc(c.name)}</div><div class="desc">${c.compensation_type==='daily_rate_8h'?'Tariffa giornaliera 8h · '+fmtEUR(c.daily_rate||0):'Una tantum mensile'} · ${c.active?'Attivo':'Disattivo'}</div></div>${moveBtns('clients',c.id)}</div>`).join('')||emptyForm('Nessun cliente ancora inserito.')}</div>`)}
+function clients(){return appShell(`<h1>Clienti</h1><form class="form" onsubmit="addClient(event)"><div class="field"><label>Nome cliente</label><input name="name" required></div><div class="field"><label>Codice cliente</label><input name="code" maxlength="5" placeholder="Es. SO" oninput="this.value=normCode(this.value)"><div class="small">Da 2 a 5 lettere o cifre. Entra nel codice di ogni commessa: una volta usato non si cambia piu'.</div></div><div class="field"><label>Partita IVA</label><input name="vat_number" inputmode="numeric" placeholder="Es. 11695380961"><div class="small">Serve a riconoscere il cliente quando carichi una fattura emessa: è l’unico abbinamento certo.</div></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h">Tariffa giornaliera 8h</option><option value="monthly_flat">Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="0"></div><button class="primary">Aggiungi cliente</button></form>${sortControl('clients')}<div class="list">${sortEntities('clients',data.clients).map(c=>`<div class="row" onclick="${wbsReady()?`openClient('${c.id}')`:`editClient('${c.id}')`}"><div></div><div><div class="title">${esc(c.name)}</div><div class="desc">${c.compensation_type==='daily_rate_8h'?'Tariffa giornaliera 8h · '+fmtEUR(c.daily_rate||0):'Una tantum mensile'} · ${c.active?'Attivo':'Disattivo'}</div></div>${moveBtns('clients',c.id)}</div>`).join('')||emptyForm('Nessun cliente ancora inserito.')}</div>`)}
 function editClient(id){navigateTo('clientEdit',{edit:id})}
 // \u2500\u2500\u2500 Policy rimborsi: una pagina sua \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 // Stava in fondo al modulo di modifica cliente, una tendina per voce,
@@ -3338,11 +4047,11 @@ async function savePolicy(ev){
   state.view='policyRimborsi';state.edit=id;render();
   setMsg('Policy di '+clientName(id)+' salvata.',4000);
 }
-function clientEdit(){const c=clientById(state.edit);if(!c)return clients();return appShell(`<h1>Modifica cliente</h1><form class="form" onsubmit="saveClient(event)"><div class="field"><label>Nome cliente</label><input name="name" value="${esc(c.name)}" required></div><div class="field"><label>Codice cliente</label><input name="code" maxlength="5" value="${esc(c.code||'')}" oninput="this.value=normCode(this.value)"${projectsOfClient(c.id).some(p=>p.code)?' readonly title="Ha gia\' dei progetti: il codice non si cambia"':''}><div class="small">${projectsOfClient(c.id).some(p=>p.code)?'Bloccato: da questo codice dipendono i codici dei progetti.':'Da 2 a 5 lettere o cifre.'}</div></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h" ${c.compensation_type==='daily_rate_8h'?'selected':''}>Tariffa giornaliera 8h</option><option value="monthly_flat" ${c.compensation_type==='monthly_flat'?'selected':''}>Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="${Number(c.daily_rate||0)}"></div><div class="field"><label>Ore standard giornata</label><input name="standard_hours" type="number" step="0.25" value="${Number(c.standard_hours||8)}"></div><div class="field"><label>Sede operativa (base trasferte)</label><input name="base_city" value="${esc(c.base_city||'')}" placeholder="Es. Milano"></div><div class="field"><label>Attivo</label><select name="active"><option value="true" ${c.active?'selected':''}>Sì</option><option value="false" ${!c.active?'selected':''}>No</option></select></div><h2>Policy rimborsi spese</h2><p class="sub">Per ogni voce di spesa scegli come viene gestita con questo cliente. L'app la proporrà in automatico quando inserisci una spesa.</p><div class="card"><b>Policy rimborsi</b><div class="desc" style="margin-top:4px">Chi paga ogni voce di spesa e fino a quanto. Sta in una pagina sua, così c'è spazio per i limiti.</div><button type="button" class="secondary" style="margin-top:12px" onclick="apriPolicy('${c.id}')">Apri la policy di ${esc(c.name)}</button></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteClient('${c.id}')">Elimina cliente</button><button type="button" class="secondary" onclick="${wbsReady()?`openClient('${c.id}')`:`go('clients')`}">Annulla</button></div></form>`)}
+function clientEdit(){const c=clientById(state.edit);if(!c)return clients();return appShell(`<h1>Modifica cliente</h1><form class="form" onsubmit="saveClient(event)"><div class="field"><label>Nome cliente</label><input name="name" value="${esc(c.name)}" required></div><div class="field"><label>Codice cliente</label><input name="code" maxlength="5" value="${esc(c.code||'')}" oninput="this.value=normCode(this.value)"${projectsOfClient(c.id).some(p=>p.code)?' readonly title="Ha gia\' dei progetti: il codice non si cambia"':''}><div class="small">${projectsOfClient(c.id).some(p=>p.code)?'Bloccato: da questo codice dipendono i codici dei progetti.':'Da 2 a 5 lettere o cifre.'}</div></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h" ${c.compensation_type==='daily_rate_8h'?'selected':''}>Tariffa giornaliera 8h</option><option value="monthly_flat" ${c.compensation_type==='monthly_flat'?'selected':''}>Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="${Number(c.daily_rate||0)}"></div><div class="field"><label>Ore standard giornata</label><input name="standard_hours" type="number" step="0.25" value="${Number(c.standard_hours||8)}"></div><div class="field"><label>Partita IVA</label><input name="vat_number" inputmode="numeric" value="${esc(c.vat_number||'')}" placeholder="Es. 11695380961"><div class="small">Serve a riconoscere il cliente quando carichi una fattura emessa: è l’unico abbinamento certo.</div></div><div class="field"><label>Sede operativa (base trasferte)</label><input name="base_city" value="${esc(c.base_city||'')}" placeholder="Es. Milano"></div><div class="field"><label>Attivo</label><select name="active"><option value="true" ${c.active?'selected':''}>Sì</option><option value="false" ${!c.active?'selected':''}>No</option></select></div><h2>Policy rimborsi spese</h2><p class="sub">Per ogni voce di spesa scegli come viene gestita con questo cliente. L'app la proporrà in automatico quando inserisci una spesa.</p><div class="card"><b>Policy rimborsi</b><div class="desc" style="margin-top:4px">Chi paga ogni voce di spesa e fino a quanto. Sta in una pagina sua, così c'è spazio per i limiti.</div><button type="button" class="secondary" style="margin-top:12px" onclick="apriPolicy('${c.id}')">Apri la policy di ${esc(c.name)}</button></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteClient('${c.id}')">Elimina cliente</button><button type="button" class="secondary" onclick="${wbsReady()?`openClient('${c.id}')`:`go('clients')`}">Annulla</button></div></form>`)}
 async function addClient(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));
   // il codice cliente regge tutta la catena dei codici sotto: se non
   // lo si scrive, dal cliente non si riesce piu' a creare un progetto
-  const payload={name:norm(f.name),code:normCode(f.code)||null,compensation_type:f.compensation_type,daily_rate:Number(f.daily_rate||0),standard_hours:8,active:true};const {error}=await insertResilient('clients',payload,['code']);if(error)return setMsg(error.message,7000);await reload();state.view='clients';render()}
+  const payload={name:norm(f.name),code:normCode(f.code)||null,compensation_type:f.compensation_type,daily_rate:Number(f.daily_rate||0),standard_hours:8,vat_number:norm(f.vat_number)||null,active:true};const res=await insertResilient('clients',payload,['code','vat_number']);if(res.error)return setMsg(motivoLeggibile(res.error),7000);const avviso=avvisoScartate(res);await reload();state.view='clients';render();if(avviso)setMsg(avviso,12000)}
 // Se il modulo non contiene nemmeno un campo della policy, la policy
 // non si tocca. Senza questa riga, salvare il cliente da un modulo
 // senza editor scriverebbe una policy vuota e i limiti sparirebbero
@@ -3362,12 +4071,15 @@ function collectPolicyFromForm(f,esistente){
   });
   return pol;
 }
-async function saveClient(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const policy=collectPolicyFromForm(f,parsePolicy(clientById(state.edit)));const payload={name:norm(f.name),compensation_type:f.compensation_type,daily_rate:Number(f.daily_rate||0),standard_hours:Number(f.standard_hours||8),active:f.active==='true',base_city:norm(f.base_city)||null,expense_policy:policy};
+async function saveClient(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const policy=collectPolicyFromForm(f,parsePolicy(clientById(state.edit)));const payload={name:norm(f.name),compensation_type:f.compensation_type,daily_rate:Number(f.daily_rate||0),standard_hours:Number(f.standard_hours||8),active:f.active==='true',base_city:norm(f.base_city)||null,vat_number:norm(f.vat_number)||null,expense_policy:policy};
   // il codice si scrive solo se il modulo lo ha lasciato modificabile:
   // dove ci sono gia' dei progetti e' bloccato, e non va sovrascritto
   if(f.code!==undefined&&normCode(f.code))payload.code=normCode(f.code);
-  const {error}=await updateResilient('clients',payload,state.edit,['base_city','expense_policy','code']);if(error)return setMsg(error.message,7000);await reload();state.view='clients';state.edit=null;render()}
-async function deleteClient(idv){if(!confirm('Eliminare il cliente? Se esistono consuntivi collegati, il database potrebbe bloccare la cancellazione. In quel caso usa Disattivo.'))return;const {error}=await sb.from('clients').delete().eq('id',idv);if(error)return setMsg(error.message,7000);await reload();state.view='clients';render()}
+  const res=await updateResilient('clients',payload,state.edit,['base_city','expense_policy','code','vat_number']);if(res.error)return setMsg(motivoLeggibile(res.error),7000);await reload();state.view='clients';state.edit=null;render();
+  // Se il database non ha ancora la colonna, la scrittura passa senza
+  // la partita IVA: dire «salvato» e basta farebbe credere che ci sia.
+  const avviso=avvisoScartate(res);if(avviso)setMsg(avviso,12000)}
+async function deleteClient(idv){if(!confirm('Eliminare il cliente? Se esistono consuntivi collegati, il database potrebbe bloccare la cancellazione. In quel caso usa Disattivo.'))return;const {error}=await sb.from('clients').delete().eq('id',idv);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='clients';render()}
 // Elenco di tutti i progetti. Quando la gerarchia c'e' e' di sola
 // consultazione: un progetto si crea dal cliente, perche' il suo
 // codice viene da li' e perche' il passo dopo e' la commessa. La
@@ -3454,15 +4166,15 @@ async function saveProjectFull(ev){
   setMsg('Progetto aggiornato.',3000);
 }
 function projectEditLegacy(p){return appShell(`<h1>Modifica progetto</h1><form class="form" onsubmit="saveProject(event)"><div class="field"><label>Cliente collegato</label><select name="client_id">${data.clients.map(c=>`<option value="${c.id}" ${c.id===p.client_id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Nome progetto / cliente finale</label><input name="name" value="${esc(p.name)}" required></div><div class="field"><label>Attivo</label><select name="active"><option value="true" ${p.active?'selected':''}>Sì</option><option value="false" ${!p.active?'selected':''}>No</option></select></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteProject('${p.id}')">Elimina progetto</button><button type="button" class="secondary" onclick="go('projects')">Annulla</button></div></form>`)}
-async function addProject(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const {error}=await insertResilient('projects',{client_id:f.client_id,name:norm(f.name),active:true});if(error)return setMsg(error.message,7000);await reload();state.view='projects';render()}
-async function saveProject(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const {error}=await updateResilient('projects',{client_id:f.client_id,name:norm(f.name),active:f.active==='true'},state.edit);if(error)return setMsg(error.message,7000);await reload();state.view='projects';state.edit=null;render()}
-async function deleteProject(idv){if(!confirm('Eliminare il progetto? Se esistono consuntivi collegati, il database potrebbe bloccare la cancellazione.'))return;const {error}=await sb.from('projects').delete().eq('id',idv);if(error)return setMsg(error.message,7000);await reload();state.view='projects';render()}
+async function addProject(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const {error}=await insertResilient('projects',{client_id:f.client_id,name:norm(f.name),active:true});if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='projects';render()}
+async function saveProject(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const {error}=await updateResilient('projects',{client_id:f.client_id,name:norm(f.name),active:f.active==='true'},state.edit);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='projects';state.edit=null;render()}
+async function deleteProject(idv){if(!confirm('Eliminare il progetto? Se esistono consuntivi collegati, il database potrebbe bloccare la cancellazione.'))return;const {error}=await sb.from('projects').delete().eq('id',idv);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='projects';render()}
 function activities(){return appShell(`<h1>Attività</h1><form class="form" onsubmit="addActivity(event)"><div class="field"><label>Nome attività</label><input name="name" required></div><button class="primary">Aggiungi attività</button></form>${sortControl('activities')}<div class="list">${sortEntities('activities',data.activities).map(a=>`<div class="row" onclick="editActivity('${a.id}')"><div></div><div><div class="title">${esc(a.name)}</div><div class="desc">${a.active?'Attiva':'Disattiva'}</div></div>${moveBtns('activities',a.id)}</div>`).join('')||emptyForm('Nessuna attività ancora inserita.')}</div>`)}
 function editActivity(id){navigateTo('activityEdit',{edit:id})}
 function activityEdit(){const a=activityById(state.edit);if(!a)return activities();return appShell(`<h1>Modifica attività</h1><form class="form" onsubmit="saveActivity(event)"><div class="field"><label>Nome attività</label><input name="name" value="${esc(a.name)}" required></div><div class="field"><label>Attiva</label><select name="active"><option value="true" ${a.active?'selected':''}>Sì</option><option value="false" ${!a.active?'selected':''}>No</option></select></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteActivity('${a.id}')">Elimina attività</button><button type="button" class="secondary" onclick="go('activities')">Annulla</button></div></form>`)}
-async function addActivity(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const {error}=await insertResilient('activities',{name:norm(f.name),active:true});if(error)return setMsg(error.message,7000);await reload();state.view='activities';render()}
-async function saveActivity(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const {error}=await updateResilient('activities',{name:norm(f.name),active:f.active==='true'},state.edit);if(error)return setMsg(error.message,7000);await reload();state.view='activities';state.edit=null;render()}
-async function deleteActivity(idv){if(!confirm('Eliminare attività? Se usata nei consuntivi, il database potrebbe bloccare la cancellazione.'))return;const {error}=await sb.from('activities').delete().eq('id',idv);if(error)return setMsg(error.message,7000);await reload();state.view='activities';render()}
+async function addActivity(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const {error}=await insertResilient('activities',{name:norm(f.name),active:true});if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='activities';render()}
+async function saveActivity(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const {error}=await updateResilient('activities',{name:norm(f.name),active:f.active==='true'},state.edit);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='activities';state.edit=null;render()}
+async function deleteActivity(idv){if(!confirm('Eliminare attività? Se usata nei consuntivi, il database potrebbe bloccare la cancellazione.'))return;const {error}=await sb.from('activities').delete().eq('id',idv);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='activities';render()}
 
 // \u2500\u2500\u2500 Veicoli e rimborso km \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 // La tariffa non la pesca l'app da nessuna parte: la metti tu. Qui c'e'
@@ -3519,16 +4231,16 @@ async function deleteVehicle(id){
 function expenseCategories(){return appShell(`<h1>Voci di costo / spesa</h1><p class="sub">Ogni voce può essere <b>rimborsabile</b> (la addebiti al cliente in fattura) o <b>non rimborsabile</b> (costo a tuo carico, che riduce il margine).</p><form class="form" onsubmit="addExpenseCategory(event)"><div class="field"><label>Nome voce</label><input name="name" required></div><div class="field"><label>Rimborsabile dal cliente</label><select name="reimbursable"><option value="true">Sì · rimborsabile (in fattura)</option><option value="false">No · costo a mio carico</option></select></div><div class="field"><label>Tipo calcolo</label><select name="calculation_type"><option value="manual_amount">Importo manuale</option><option value="quantity_rate">Quantità × tariffa</option></select></div><div class="field"><label>Unità</label><input name="unit_label" placeholder="km, notte, ticket..."></div><div class="field"><label>È un rimborso chilometrico</label><select name="is_mileage"><option value="false">No</option><option value="true">Sì · chiede veicolo, percorso e km</option></select></div><div class="field"><label>Tariffa default</label><input name="default_unit_rate" type="number" step="0.0001" value="0"></div><button class="primary">Aggiungi voce</button></form>${sortControl('expenseCategories')}<div class="list">${sortEntities('expenseCategories',data.expenseCategories).map(c=>`<div class="row" onclick="editExpenseCategory('${c.id}')"><div></div><div><div class="title">${esc(c.name)}</div><div class="desc">${c.reimbursable===false?'<b>Non rimborsabile (costo)</b>':'Rimborsabile'} · ${c.calculation_type==='quantity_rate'?'Quantità × tariffa':'Importo manuale'} · ${c.active?'Attiva':'Disattiva'}</div></div><div>›</div></div>`).join('')||emptyForm('Nessuna voce di costo o spesa.')}</div>`)}
 function editExpenseCategory(id){navigateTo('expenseCategoryEdit',{edit:id})}
 function expenseCategoryEdit(){const c=expenseCategoryById(state.edit);if(!c)return expenseCategories();return appShell(`<h1>Modifica voce di costo / spesa</h1><form class="form" onsubmit="saveExpenseCategory(event)"><div class="field"><label>Nome voce</label><input name="name" value="${esc(c.name)}" required></div><div class="field"><label>Rimborsabile dal cliente</label><select name="reimbursable"><option value="true" ${c.reimbursable!==false?'selected':''}>Sì · rimborsabile (in fattura)</option><option value="false" ${c.reimbursable===false?'selected':''}>No · costo a mio carico</option></select></div><div class="field"><label>Tipo calcolo</label><select name="calculation_type"><option value="manual_amount" ${c.calculation_type==='manual_amount'?'selected':''}>Importo manuale</option><option value="quantity_rate" ${c.calculation_type==='quantity_rate'?'selected':''}>Quantità × tariffa</option></select></div><div class="field"><label>Unità</label><input name="unit_label" value="${esc(c.unit_label||'')}"></div><div class="field"><label>È un rimborso chilometrico</label><select name="is_mileage"><option value="false" ${eVoceChilometrica(c)?'':'selected'}>No</option><option value="true" ${eVoceChilometrica(c)?'selected':''}>Sì · chiede veicolo, percorso e km</option></select></div><div class="field"><label>Tariffa default</label><input name="default_unit_rate" type="number" step="0.0001" value="${Number(c.default_unit_rate||0)}"></div><div class="field"><label>Macro voce fattura</label><input name="invoice_macro" value="${esc(c.invoice_macro||'Spese di trasferta')}"></div><div class="field"><label>Attiva</label><select name="active"><option value="true" ${c.active?'selected':''}>Sì</option><option value="false" ${!c.active?'selected':''}>No</option></select></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteExpenseCategory('${c.id}')">Elimina</button><button type="button" class="secondary" onclick="go('expenseCategories')">Annulla</button></div></form>`)}
-async function addExpenseCategory(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const payload={name:norm(f.name),calculation_type:f.calculation_type,unit_label:norm(f.unit_label)||null,is_mileage:f.is_mileage==='true',default_unit_rate:Number(f.default_unit_rate||0)||null,invoice_macro:'Spese di trasferta',reimbursable:f.reimbursable!=='false',active:true};const {error}=await insertResilient('expense_categories',payload,['reimbursable','is_mileage']);if(error)return setMsg(error.message,7000);await reload();state.view='expenseCategories';render()}
-async function saveExpenseCategory(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const payload={name:norm(f.name),calculation_type:f.calculation_type,unit_label:norm(f.unit_label)||null,is_mileage:f.is_mileage==='true',default_unit_rate:Number(f.default_unit_rate||0)||null,invoice_macro:norm(f.invoice_macro)||'Spese di trasferta',reimbursable:f.reimbursable!=='false',active:f.active==='true'};const {error}=await updateResilient('expense_categories',payload,state.edit,['reimbursable','is_mileage']);if(error)return setMsg(error.message,7000);await reload();state.view='expenseCategories';state.edit=null;render()}
-async function deleteExpenseCategory(idv){if(!confirm('Eliminare voce spesa? Se usata in spese già inserite, il database potrebbe bloccare la cancellazione.'))return;const {error}=await sb.from('expense_categories').delete().eq('id',idv);if(error)return setMsg(error.message,7000);await reload();state.view='expenseCategories';render()}
+async function addExpenseCategory(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const payload={name:norm(f.name),calculation_type:f.calculation_type,unit_label:norm(f.unit_label)||null,is_mileage:f.is_mileage==='true',default_unit_rate:Number(f.default_unit_rate||0)||null,invoice_macro:'Spese di trasferta',reimbursable:f.reimbursable!=='false',active:true};const {error}=await insertResilient('expense_categories',payload,['reimbursable','is_mileage']);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='expenseCategories';render()}
+async function saveExpenseCategory(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const payload={name:norm(f.name),calculation_type:f.calculation_type,unit_label:norm(f.unit_label)||null,is_mileage:f.is_mileage==='true',default_unit_rate:Number(f.default_unit_rate||0)||null,invoice_macro:norm(f.invoice_macro)||'Spese di trasferta',reimbursable:f.reimbursable!=='false',active:f.active==='true'};const {error}=await updateResilient('expense_categories',payload,state.edit,['reimbursable','is_mileage']);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='expenseCategories';state.edit=null;render()}
+async function deleteExpenseCategory(idv){if(!confirm('Eliminare voce spesa? Se usata in spese già inserite, il database potrebbe bloccare la cancellazione.'))return;const {error}=await sb.from('expense_categories').delete().eq('id',idv);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='expenseCategories';render()}
 
 function invoiceTemplates(){return appShell(`<h1>Template fattura / Fiscozen</h1><p class="sub">Gestisci qui cosa copiare su Fiscozen. I consuntivi non chiedono la voce fattura.</p><form class="form" onsubmit="addInvoiceTemplate(event)"><div class="field"><label>Codice</label><input name="template_code" placeholder="ES. CONSULENZA_CUSTOM" required></div><div class="field"><label>Nome</label><input name="name" required></div><div class="field"><label>Tipo riga</label><select name="entry_type"><option value="daily_rate_8h">Consulenza a ore/gg</option><option value="monthly_flat">Compenso mensile</option><option value="manual_entry">Consuntivo manuale</option><option value="travel_expenses">Spese di trasferta</option></select></div><div class="field"><label>Template testo</label><textarea name="template_text" required>Consulenza - [Mese Anno] - Cliente/Progetto: [Progetto]</textarea></div><button class="primary">Aggiungi template</button></form><div class="list">${data.invoiceTemplates.map(t=>`<div class="row" onclick="editInvoiceTemplate('${t.id}')"><div></div><div><div class="title">${esc(t.name)}</div><div class="desc">${esc(t.entry_type)} · ${esc(t.template_text)}</div></div><div>›</div></div>`).join('')||emptyForm('Nessun template fattura.')}</div>`)}
 function editInvoiceTemplate(id){navigateTo('invoiceTemplateEdit',{edit:id})}
 function invoiceTemplateEdit(){const t=data.invoiceTemplates.find(x=>x.id===state.edit);if(!t)return invoiceTemplates();return appShell(`<h1>Modifica template</h1><form class="form" onsubmit="saveInvoiceTemplate(event)"><div class="field"><label>Codice</label><input name="template_code" value="${esc(t.template_code)}" required></div><div class="field"><label>Nome</label><input name="name" value="${esc(t.name)}" required></div><div class="field"><label>Tipo riga</label><select name="entry_type"><option value="daily_rate_8h" ${t.entry_type==='daily_rate_8h'?'selected':''}>Consulenza a ore/gg</option><option value="monthly_flat" ${t.entry_type==='monthly_flat'?'selected':''}>Compenso mensile</option><option value="manual_entry" ${t.entry_type==='manual_entry'?'selected':''}>Consuntivo manuale</option><option value="travel_expenses" ${t.entry_type==='travel_expenses'?'selected':''}>Spese di trasferta</option></select></div><div class="field"><label>Template testo</label><textarea name="template_text" required>${esc(t.template_text)}</textarea></div><div class="field"><label>Attivo</label><select name="active"><option value="true" ${t.active?'selected':''}>Sì</option><option value="false" ${!t.active?'selected':''}>No</option></select></div><div class="field"><label>Ordine</label><input name="sort_order" type="number" value="${Number(t.sort_order||0)}"></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteInvoiceTemplate('${t.id}')">Elimina</button><button type="button" class="secondary" onclick="go('invoiceTemplates')">Annulla</button></div></form>`)}
-async function addInvoiceTemplate(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const payload={template_code:norm(f.template_code),name:norm(f.name),entry_type:f.entry_type,template_text:f.template_text,active:true,sort_order:99};const {error}=await insertResilient('invoice_templates',payload);if(error)return setMsg(error.message,7000);await reload();state.view='invoiceTemplates';render()}
-async function saveInvoiceTemplate(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const payload={template_code:norm(f.template_code),name:norm(f.name),entry_type:f.entry_type,template_text:f.template_text,active:f.active==='true',sort_order:Number(f.sort_order||0)};const {error}=await updateResilient('invoice_templates',payload,state.edit);if(error)return setMsg(error.message,7000);await reload();state.view='invoiceTemplates';state.edit=null;render()}
-async function deleteInvoiceTemplate(idv){if(!confirm('Eliminare template?'))return;const {error}=await sb.from('invoice_templates').delete().eq('id',idv);if(error)return setMsg(error.message,7000);await reload();state.view='invoiceTemplates';render()}
+async function addInvoiceTemplate(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const payload={template_code:norm(f.template_code),name:norm(f.name),entry_type:f.entry_type,template_text:f.template_text,active:true,sort_order:99};const {error}=await insertResilient('invoice_templates',payload);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='invoiceTemplates';render()}
+async function saveInvoiceTemplate(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const payload={template_code:norm(f.template_code),name:norm(f.name),entry_type:f.entry_type,template_text:f.template_text,active:f.active==='true',sort_order:Number(f.sort_order||0)};const {error}=await updateResilient('invoice_templates',payload,state.edit);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='invoiceTemplates';state.edit=null;render()}
+async function deleteInvoiceTemplate(idv){if(!confirm('Eliminare template?'))return;const {error}=await sb.from('invoice_templates').delete().eq('id',idv);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='invoiceTemplates';render()}
 
 async function ensureClient(name,type,rowRate=0){let c=data.clients.find(x=>x.name.toLowerCase()===name.toLowerCase());if(c)return c;const {data:row,error}=await insertReturningResilient('clients',{name,compensation_type:type==='monthly'?'monthly_flat':'daily_rate_8h',daily_rate:Number(rowRate||0),standard_hours:8,active:true});if(error)throw error;data.clients.push(row);return row}
 async function ensureProject(clientId,name){if(!name)return null;let p=data.projects.find(x=>x.client_id===clientId&&x.name.toLowerCase()===name.toLowerCase());if(p)return p;const {data:row,error}=await insertReturningResilient('projects',{client_id:clientId,name,active:true});if(error)throw error;data.projects.push(row);return row}
@@ -3944,7 +4656,7 @@ async function addEngagementRef(ev){
     engagement_letter:norm(f.engagement_letter)||null,purchase_order:norm(f.purchase_order)||null,
     invoice_reference:norm(f.invoice_reference)||null,valid_from:f.valid_from||null,valid_to:f.valid_to||null,
     reference_type:norm(f.purchase_order)&&!norm(f.engagement_letter)?"purchase_order":"engagement_letter"});
-  if(error)return setMsg(error.message,7000);
+  if(error)return setMsg(motivoLeggibile(error),7000);
   await reload();render();setMsg("Riferimento aggiunto. Lo storico precedente resta.",4000);
 }
 async function addWbs(ev){
@@ -3973,7 +4685,7 @@ async function deleteWbs(id){
   if(wbsUsage(id).tot)return setMsg("Questa attività ha delle registrazioni: si può chiudere, non eliminare.",6000);
   if(!confirm("Eliminare l'attività "+w.code+"? Non è mai stata usata, quindi non si perde nulla."))return;
   const {error}=await sb.from("wbs_items").delete().eq("id",id);
-  if(error)return setMsg(error.message,7000);
+  if(error)return setMsg(motivoLeggibile(error),7000);
   await reload();navigateTo("engagementDetail",{edit:w.engagement_id});
 }
 // Messaggi comprensibili al posto degli errori del database
@@ -4112,6 +4824,13 @@ function motivoLeggibile(e){
     return 'il codice dell\'attività nuova era già usato nella commessa';
   if(/wbs_items_activity_code_format/.test(m))
     return 'il codice dell\'attività nuova non è valido';
+  // Un NOT NULL del database arrivava come testo grezzo: «null value in
+  // column "activity_id" ... violates not-null constraint». A schermo
+  // sembrava che l'app chiedesse un campo obbligatorio che nel modulo
+  // non c'era nemmeno.
+  const vuoto=/null value in column "([^"]+)"/.exec(m);
+  if(vuoto)
+    return 'il database vuole '+(NOME_COLONNA[vuoto[1]]||vuoto[1])+', che qui è rimasto vuoto: scegli un valore nel modulo, oppure lancia la migrazione 2026-10-08_attivita-facoltativa.sql';
   if(/duplicate key value/.test(m))return 'questa riga risulta già inserita';
   if(/violates foreign key/.test(m))
     return 'un collegamento (cliente, progetto o commessa) non esiste più';
@@ -4485,7 +5204,13 @@ function wbsLineage(wbsId){
 function soloUno(lista){return lista.length===1?lista[0].id:''}
 function apertiPrj(clientId){return projectsOfClient(clientId).filter(p=>!p.status||STATI_APERTI.includes(p.status))}
 function apertiEng(projId){return engagementsOfProject(projId).filter(e=>STATI_APERTI.includes(e.status))}
-function hierFields(clientId,wbsId){
+// In gerarchia il modulo mostrava «Attività della commessa», che e'
+// la WBS: un'altra cosa con quasi lo stesso nome. L'attività vera
+// non si poteva scegliere da nessuna parte, quindi se la commessa non
+// ne portava una il salvataggio partiva col campo vuoto — e chi ha il
+// database che la pretende restava bloccato, con un messaggio che
+// nominava un campo invisibile a schermo.
+function hierFields(clientId,wbsId,attSel=''){
   const lin=wbsId?wbsLineage(wbsId):null;
   const prjList=apertiPrj(clientId);
   const prjSel=lin?lin.project.id:soloUno(prjList);
@@ -4493,13 +5218,19 @@ function hierFields(clientId,wbsId){
   const engSel=lin&&lin.engagement?lin.engagement.id:soloUno(engList);
   const wList=engSel?wbsAperte(engSel):[];
   const wSel=wbsId||soloUno(wList);
+  // Se la commessa porta gia' la sua attivita' il campo resta
+  // nascosto: il salvataggio preferisce comunque quella della commessa.
+  const attDallaWbs=wSel&&wbsById(wSel)?wbsById(wSel).activity_id:null;
   return `<div class="field" id="prjField" ${prjList.length<2?'hidden':''}><label>Progetto / cliente finale</label>
       <select name="hier_project_id" onchange="hierChanged(this.form,'project')">${projectOptionsOfClient(clientId,prjSel)}</select></div>
     <div class="field" id="engField" ${engList.length<2?'hidden':''}><label>Commessa</label>
       <select name="engagement_id" onchange="hierChanged(this.form,'engagement')">${prjSel?engagementOptionsOfProject(prjSel,engSel):'<option value="">— prima scegli il progetto —</option>'}</select></div>
     <div class="field" id="wbsField" ${wList.length<2?'hidden':''}><label>Attività della commessa</label>
       <select name="wbs_id" onchange="hierChanged(this.form,'wbs')">${engSel?wbsOptions(engSel,wSel):'<option value="">— prima scegli la commessa —</option>'}</select></div>
-    <div class="small" id="wbsHint">${wSel&&wbsById(wSel)?esc(wbsById(wSel).code)+(wbsById(wSel).billable?'':' · non fatturabile'):'Le ore si registrano sulla commessa. In fattura confluiscono nel progetto.'}</div>`;
+    <div class="small" id="wbsHint">${wSel&&wbsById(wSel)?esc(wbsById(wSel).code)+(wbsById(wSel).billable?'':' · non fatturabile'):'Le ore si registrano sulla commessa. In fattura confluiscono nel progetto.'}</div>
+    <div class="field" id="attField" ${attDallaWbs?'hidden':''}><label>Tipo di attività</label>
+      <select name="activity_id">${activityOptions(attSel)}</select>
+      <div class="small">Serve ai report e ai colori. La «commessa» qui sopra è un'altra cosa: questo lo scegli solo quando la commessa non ne porta già uno.</div></div>`;
 }
 function hierChanged(form,livello){
   if(!form)return;
@@ -4526,6 +5257,15 @@ function hierChanged(form,livello){
     if(form.wbs_id){form.wbs_id.innerHTML=engId?wbsOptions(engId,''):'<option value="">— prima scegli la commessa —</option>';
       if(w.length===1)form.wbs_id.value=w[0].id;}
     mostra('wbsField',w.length>1);
+  }
+  // Il tipo di attivita' si chiede solo quando la commessa non ne
+  // porta uno. hierChanged non ridisegna il blocco, quindi il campo
+  // resta nel modulo e qui si accende o si spegne come gli altri
+  // livelli: toglierlo dal disegno lo renderebbe irraggiungibile a chi
+  // cambia commessa dopo aver aperto il modulo.
+  {
+    const w=form.wbs_id&&form.wbs_id.value?wbsById(form.wbs_id.value):null;
+    mostra('attField',!(w&&w.activity_id));
   }
   const hint=document.getElementById('wbsHint');
   if(hint){
@@ -5045,7 +5785,7 @@ function render(){
       <button type="button" class="primary" onclick="go('home')">Torna alla dashboard</button>`;
   }
 }
-function renderInterno(){document.documentElement.setAttribute('data-view',state.view||'home');if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,reportWbs,reportEconomico,fatturazioneCommessa,engagements,engagementNew,engagementEdit,engagementDetail,projectNew,projectDetail,clientDetail,wbsEdit,importaConsuntivi,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,tripNew,tripEdit,timesheet,griglia,pivot,billing,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,vehicles,vehicleEdit,policyRimborsi,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,balance,taxSettings,tasseFuture,fatturatoDetail,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
+function renderInterno(){document.documentElement.setAttribute('data-view',state.view||'home');if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,reportWbs,reportEconomico,fatturazioneCommessa,engagements,engagementNew,engagementEdit,engagementDetail,projectNew,projectDetail,clientDetail,wbsEdit,importaConsuntivi,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,tripNew,tripEdit,timesheet,griglia,pivot,billing,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,vehicles,vehicleEdit,policyRimborsi,fatturaCarica,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,balance,taxSettings,tasseFuture,fatturatoDetail,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
 
 Object.assign(window,{
   setRep,
@@ -5210,8 +5950,9 @@ Object.assign(window,{
   balance,
   taxSettings,
   fatturatoDetail,
-  billingMonthlyView,
-  billingAnnualView,
+  billingMeseCard,
+  billingCassaCard,
+  billingAnnoCard,
   expensesForYear,
   expenses,
   expenseTypeTag,
@@ -5258,6 +5999,8 @@ Object.assign(window,{
   rimborsiFuoriReddito,
   scomposizioneRimborsi,
   forecastCalc,
+  leggiFatturaXML,confrontaFattura,clientePerPiva,giorniConsuntivati,
+  fatturaCarica,fatturaFileScelto,
   annualTaxCalc,
   cambiaClientePolicy,
   savePolicy,
