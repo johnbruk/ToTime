@@ -721,6 +721,189 @@ console.log('\n=== IL BOLLO SI CONFRONTA CON LA CONFIGURAZIONE, COME LA RIVALSA 
   await pg5.close();
 }
 
+// Una fattura di un mese solo, coerente: serve dove il confronto ha
+// bisogno di sapere A QUALE mese appartiene (la testata salvata).
+const SOLO_MARZO=XML
+  .replace(/<DettaglioLinee>[\s\S]*?Febbraio[\s\S]*?<\/DettaglioLinee>/,'')
+  .replace('<ImportoContributoCassa>119.60','<ImportoContributoCassa>101.20')
+  .replace('<ImponibileCassa>2990.00','<ImponibileCassa>2530.00')
+  .replace('<ImponibileImporto>3109.60','<ImponibileImporto>2631.20')
+  .replace('<ImportoTotaleDocumento>3109.60','<ImportoTotaleDocumento>2631.20');
+
+console.log('\n=== IL PIANIFICATO SEGUE L’IMPOSTAZIONE, NON È ESCLUSO SEMPRE ===');
+{
+  // groupSummary mette il pianificato nella PROPOSTA quando «Fattura
+  // anche il pianificato» è acceso, e lo è per difetto. Escluderlo
+  // sempre dal confronto voleva dire che una fattura emessa proprio da
+  // quella proposta risultava sempre più alta del consuntivo.
+  const seme=`S.timesheet_entries.push({id:'pian',entry_date:'2026-03-10',client_id:'sol',
+    project_id:'p1',activity_id:'a1',hours:8,status:'planned'});`;
+  // la fattura emessa DALLA PROPOSTA: marzo fa 6,5 gg e 2.990 €
+  const conPian=XML
+    .replace('Marzo 2026 | Giorni: 5,5','Marzo 2026 | Giorni: 6,5')
+    .replace('<Quantita>5.50</Quantita>','<Quantita>6.50</Quantita>')
+    .replace('<PrezzoTotale>2530.00','<PrezzoTotale>2990.00')
+    .replace('<ImportoContributoCassa>119.60','<ImportoContributoCassa>138.00')
+    .replace('<ImponibileCassa>2990.00','<ImponibileCassa>3450.00')
+    .replace('<ImponibileImporto>3109.60','<ImponibileImporto>3588.00')
+    .replace('<ImportoTotaleDocumento>3109.60','<ImportoTotaleDocumento>3588.00');
+  const pg=await apri(seme);
+  const r=await confronta(pg,conPian);
+  const g=r.esiti.find(e=>/Giorni diversi/.test(e.titolo));
+  ok(!g,'con l’impostazione accesa il pianificato entra nelle attese: nessuno scostamento',
+     g?g.dettaglio.slice(0,90):'nessuno');
+  ok(r.esiti.some(e=>/entra anche il pianificato/.test(e.titolo)),
+     'e lo dice, invece di lasciarlo scoprire');
+  await pg.close();
+  // Spenta l’impostazione, quella stessa fattura È in eccesso.
+  const pg2=await apri(seme+`S.app_settings.push({id:'sp',setting_key:'fattura_pianificato',setting_value:'false'});`);
+  const r2=await confronta(pg2,conPian);
+  const g2=r2.esiti.find(e=>/Giorni diversi/.test(e.titolo));
+  ok(!!g2,'spenta l’impostazione, lo scostamento compare: l’impostazione si legge davvero',
+     g2?g2.dettaglio.slice(0,90):'nessuno');
+  await pg2.close();
+}
+
+console.log('\n=== LA CONFIGURAZIONE DELLA SINGOLA FATTURA HA LA PRECEDENZA ===');
+{
+  // billingCalc dà la precedenza al billing_header su cliente e mese:
+  // lì rivalsa e bollo si accendono o spengono per quella fattura.
+  // Guardando solo le impostazioni dell’anno, una fattura emessa
+  // ESATTAMENTE come la proposta risultava con la rivalsa di troppo.
+  const testata=`S.billing_headers=[{id:'h1',client_id:'sol',year:2026,month:3,
+    inps_recharge_enabled:true,inps_recharge_rate:4,stamp_duty_enabled:true,stamp_duty_amount:2,
+    status:'invoice_issued'}];`;
+  const pg=await apri(`S.tax_settings[0].inps_recharge_enabled=false;`+testata);
+  const r=await confronta(pg,SOLO_MARZO);
+  ok(r.mesi.length===1,'la fattura copre un mese solo',r.mesi.join(','));
+  ok(!r.esiti.some(e=>/Rivalsa in fattura ma disattivata/.test(e.titolo)),
+     'rivalsa accesa nella fattura salvata: nessun falso allarme, anche se l’anno la dà spenta',
+     r.esiti.map(e=>e.titolo).join(' | '));
+  await pg.close();
+  // E al contrario: la testata la dà spenta, la fattura ce l’ha.
+  const pg2=await apri(testata.replace('inps_recharge_enabled:true','inps_recharge_enabled:false'));
+  const r2=await confronta(pg2,SOLO_MARZO);
+  const sc=r2.esiti.find(e=>/Rivalsa in fattura ma disattivata/.test(e.titolo));
+  ok(!!sc,'e se la fattura salvata la dà spenta, lo scostamento c’è',
+     sc?sc.titolo:r2.esiti.map(e=>e.titolo).join(' | '));
+  ok(!!sc&&/fattura salvata di Marzo/.test(sc.dettaglio),
+     'dicendo che guarda quella, non la configurazione dell’anno',sc?sc.dettaglio.slice(0,120):'');
+  await pg2.close();
+}
+
+console.log('\n=== L’ARROTONDAMENTO DEL RIEPILOGO CONCORRE ALL’IMPONIBILE ===');
+{
+  // È un campo diverso dall’Arrotondamento di documento: questo entra
+  // in ImponibileImporto. Senza leggerlo, un centesimo di
+  // arrotondamento bloccava la fattura come guasta — e adesso che il
+  // blocco ferma tutto il confronto, costa caro.
+  const arr=SOLO_MARZO
+    .replace('<ImponibileImporto>2631.20','<Arrotondamento>0.40</Arrotondamento><ImponibileImporto>2631.60')
+    .replace('<ImportoTotaleDocumento>2631.20','<ImportoTotaleDocumento>2631.60');
+  const pg=await apri();
+  const r=await confronta(pg,arr);
+  ok(Math.abs(r.f.arrotondamentoRiepiloghi-0.4)<0.005,
+     'l’arrotondamento del riepilogo si legge',String(r.f.arrotondamentoRiepiloghi));
+  ok(!r.esiti.some(e=>/non torna con se stessa/.test(e.titolo)),
+     '2.530 + 0,40 + 101,20 = 2.631,60: la fattura quadra',
+     (r.esiti.find(e=>/non torna con se stessa/.test(e.titolo))||{}).dettaglio||'nessuno');
+  await pg.close();
+}
+
+console.log('\n=== IL BOLLO NON LO SCONTA OGNI OPERAZIONE A IVA ZERO ===');
+{
+  // Inversione contabile (N6.*) e carenza di territorialità (N2.1)
+  // hanno aliquota zero ma il bollo non è dovuto: pretenderlo avrebbe
+  // segnalato come mancante un bollo che non deve esserci.
+  const senzaBollo=XML.replace(/<DatiBollo>[\s\S]*?<\/DatiBollo>/,'');
+  const inversione=senzaBollo
+    .replace(/(<DatiRiepilogo>[\s\S]*?)<Natura>N2\.2<\/Natura>/,'$1<Natura>N6.1</Natura>');
+  const pg=await apri();
+  const r=await confronta(pg,inversione);
+  ok(r.f.baseEsente===0,'in inversione contabile la base del bollo è zero',String(r.f.baseEsente));
+  ok(!r.esiti.some(e=>/Bollo attivo in configurazione ma assente/.test(e.titolo)),
+     'e il bollo non si pretende',
+     (r.esiti.find(e=>/Bollo/.test(e.titolo))||{}).titolo||'nessuno');
+  await pg.close();
+  // Mentre su un’operazione esente (N4) il bollo è dovuto e manca.
+  const esente=senzaBollo
+    .replace(/(<DatiRiepilogo>[\s\S]*?)<Natura>N2\.2<\/Natura>/,'$1<Natura>N4</Natura>');
+  const pg2=await apri();
+  const r2=await confronta(pg2,esente);
+  ok(r2.esiti.some(e=>/Bollo attivo in configurazione ma assente/.test(e.titolo)),
+     'su un’operazione esente invece sì: la distinzione è vera, non un modo per tacere',
+     r2.esiti.map(e=>e.titolo).join(' | '));
+  await pg2.close();
+}
+
+console.log('\n=== UNA RIGA SENZA MESE FERMA IL CONFRONTO MENSILE ===');
+{
+  // La riga orfana può appartenere a uno qualunque dei mesi in fattura:
+  // confrontare gli altri darebbe un ammanco che viene dalla
+  // descrizione non riconosciuta, non dai dati.
+  const orfana='<DettaglioLinee><NumeroLinea>3</NumeroLinea><Descrizione>Rimborso taxi</Descrizione><Quantita>1.00</Quantita><PrezzoUnitario>100.00</PrezzoUnitario><PrezzoTotale>100.00</PrezzoTotale><AliquotaIVA>0.00</AliquotaIVA><Natura>N2.2</Natura></DettaglioLinee>';
+  const conOrfana=XML
+    .replace('<DatiRiepilogo>',orfana+'<DatiRiepilogo>')
+    .replace('<ImponibileImporto>3109.60','<ImponibileImporto>3209.60')
+    .replace('<ImportoTotaleDocumento>3109.60','<ImportoTotaleDocumento>3209.60');
+  // l'app si aspetta 100 € di rimborsi a marzo: senza lo stop, marzo
+  // risulterebbe corto esattamente di quei 100 €
+  const pg=await apri(`S.travel_expenses=[{id:'t1',expense_date:'2026-03-20',client_id:'sol',
+    project_id:'p1',expense_category_id:'volo',work_city:'Citta',amount:100,reimbursement_type:'invoice'}];`);
+  const r=await confronta(pg,conOrfana);
+  ok(r.esiti.some(e=>/Riga senza mese riconoscibile/.test(e.titolo)),'dice qual è la riga orfana');
+  const n=r.esiti.find(e=>/non si fa/.test(e.titolo));
+  ok(!!n,'e che per questo il confronto mensile non si fa',n?n.titolo:'nessuno');
+  ok(!r.esiti.some(e=>/Importo diverso|Giorni diversi/.test(e.titolo)),
+     'niente ammanco inventato su marzo',
+     r.esiti.map(e=>e.titolo).join(' | '));
+  await pg.close();
+  // Con il mese scritto nella descrizione, il confronto riparte e torna.
+  const sistemata=conOrfana.replace('Rimborso taxi','Rimborso taxi - Marzo 2026');
+  const pg2=await apri(`S.travel_expenses=[{id:'t1',expense_date:'2026-03-20',client_id:'sol',
+    project_id:'p1',expense_category_id:'volo',work_city:'Citta',amount:100,reimbursement_type:'invoice'}];`);
+  const r2=await confronta(pg2,sistemata);
+  ok(!r2.esiti.some(e=>/non si fa/.test(e.titolo)),'col mese scritto il confronto riparte');
+  ok(!r2.esiti.some(e=>/Importo diverso/.test(e.titolo)),'e torna: 2.530 + 100 è quello che l’app si aspetta',
+     (r2.esiti.find(e=>/Importo diverso/.test(e.titolo))||{}).dettaglio||'nessuno');
+  await pg2.close();
+}
+
+console.log('\n=== LA PARTITA IVA PORTA CON SÉ IL SUO PAESE ===');
+{
+  // Tenere solo IdCodice rende un DE123456789 indistinguibile da un
+  // IT123456789.
+  const pg=await apri(`S.clients[0].vat_number='IT22222222222';`);
+  const r=await confronta(pg,XML);
+  ok(r.cliente==='sol'&&r.abbinamento==='piva',
+     'scritta col prefisso in anagrafica, combacia',`${r.cliente} · ${r.abbinamento}`);
+  await pg.close();
+  const pg2=await apri();
+  const r2=await confronta(pg2,XML);
+  ok(r2.cliente==='sol'&&r2.abbinamento==='piva',
+     'e scritta senza prefisso, come fanno tutti, pure',`${r2.cliente} · ${r2.abbinamento}`);
+  await pg2.close();
+  // Ma lo stesso numero di un ALTRO paese non è lo stesso soggetto.
+  const pg3=await apri(`S.clients[0].vat_number='DE22222222222';`);
+  const r3=await confronta(pg3,XML);
+  ok(r3.cliente===null,'stesso numero ma paese diverso: non abbina',String(r3.cliente));
+  ok(r3.esiti.some(e=>e.liv==='blocco'&&/partita IVA no/.test(e.titolo)),
+     'e lo dice invece di tirare a indovinare',r3.esiti.map(e=>e.titolo).join(' | '));
+  await pg3.close();
+  // E il numero nudo in anagrafica si intende ITALIANO: una fattura
+  // tedesca con quelle stesse cifre non è lo stesso cliente.
+  const tedesca=XML.replace(/(<CessionarioCommittente>[\s\S]*?)<IdPaese>IT<\/IdPaese>/,'$1<IdPaese>DE</IdPaese>');
+  const pg4=await apri();
+  const r4=await confronta(pg4,tedesca);
+  ok(r4.f.clientePaese==='DE','il paese della fattura si legge',String(r4.f.clientePaese));
+  ok(r4.abbinamento!=='piva','il numero nudo non combacia con una fattura straniera',
+     String(r4.abbinamento));
+  ok(r4.cliente===null&&r4.esiti.some(e=>/partita IVA no/.test(e.titolo)),
+     'e non ci si arriva nemmeno dal nome: sono due soggetti',
+     r4.esiti.map(e=>e.titolo).join(' | '));
+  await pg4.close();
+}
+
 await b.close(); srv.close();
 console.log(`\n=== fattura caricata: OK ${pass} · KO ${fail} ===`);
 process.exit(fail?1:0);

@@ -635,8 +635,15 @@ function leggiFatturaXML(testo){
   // fallire mai, pur essendo annunciato a schermo.
   const riepiloghi=tuttiLocali(body,'DatiRiepilogo').map(r=>({
     aliquota:numTag(r,'AliquotaIVA'),natura:testoTag(r,'Natura'),
-    imponibile:numTag(r,'ImponibileImporto'),imposta:numTag(r,'Imposta')}));
+    imponibile:numTag(r,'ImponibileImporto'),imposta:numTag(r,'Imposta'),
+    // Ogni riepilogo ha un suo arrotondamento, che per lo standard
+    // CONCORRE al suo ImponibileImporto. E' un campo diverso
+    // dall'Arrotondamento di documento, che sposta il totale: 99,99 di
+    // righe piu' 0,01 di arrotondamento fanno 100,00 di imponibile, e
+    // senza leggerlo la fattura risultava guasta per un centesimo.
+    arrotondamento:numTag(r,'Arrotondamento')}));
   const imposta=riepiloghi.reduce((a,r)=>a+r.imposta,0);
+  const arrotondamentoRiepiloghi=riepiloghi.reduce((a,r)=>a+r.arrotondamento,0);
   const idCliente=tagLocale(cliente,'IdFiscaleIVA');
   const righe=tuttiLocali(body,'DettaglioLinee').map(l=>{
     const descrizione=testoTag(l,'Descrizione');
@@ -669,18 +676,23 @@ function leggiFatturaXML(testo){
   const sconto=sconti.reduce((a,x)=>a+x.valore,0);
   const imponibile=righeSomma+sconto;
   const imponibileCassa=casse.length?casse[0].base:0;
-  // Gli importi NON assoggettati a IVA: e' su quelli che si misura la
-  // soglia del bollo. Si prendono dai riepiloghi ad aliquota zero;
-  // senza riepiloghi si ripiega sul documento intero, ma solo quando
-  // non c'e' imposta.
-  const baseEsente=riepiloghi.length
-    ? riepiloghi.filter(r=>!(r.aliquota>0)).reduce((a,r)=>a+r.imponibile,0)
-    : (imposta>0?0:imponibile);
+  // Gli importi su cui si misura la soglia del bollo. NON e' «tutto
+  // quello che ha IVA zero»: l'inversione contabile (N6.*) e il difetto
+  // di territorialita' (N2.1) hanno aliquota zero ma il bollo non lo
+  // scontano, e pretenderlo avrebbe segnalato come mancante un bollo
+  // che non e' dovuto. Valgono le nature che l'Agenzia considera
+  // assoggettate. Senza riepiloghi non si giudica: zero, e si tace.
+  const baseEsente=riepiloghi
+    .filter(r=>!(r.aliquota>0)&&NATURE_BOLLO.indexOf(String(r.natura||'').toUpperCase())>=0)
+    .reduce((a,r)=>a+r.imponibile,0);
   return {
     numero:testoTag(gen,'Numero'),
     data:testoTag(gen,'Data'),
     tipo:testoTag(gen,'TipoDocumento'),
     divisa:testoTag(gen,'Divisa'),
+    // IdPaese e IdCodice sono due campi: tenere solo il secondo rende
+    // un DE123456789 indistinguibile da un IT123456789.
+    clientePaese:idCliente?testoTag(idCliente,'IdPaese'):'',
     clientePiva:idCliente?testoTag(idCliente,'IdCodice'):'',
     clienteNome:testoTag(cliente,'Denominazione')||
       [testoTag(cliente,'Nome'),testoTag(cliente,'Cognome')].filter(Boolean).join(' '),
@@ -694,7 +706,7 @@ function leggiFatturaXML(testo){
     // torna» ogni fattura che non lo espone, e mostrava 0,00 a schermo.
     totale:numTag(gen,'ImportoTotaleDocumento'),
     totaleDichiarato:!!tagLocale(gen,'ImportoTotaleDocumento'),
-    imposta,riepiloghi,baseEsente,
+    imposta,riepiloghi,baseEsente,arrotondamentoRiepiloghi,
     // L'arrotondamento sposta il TOTALE del documento, non l'imponibile:
     // senza leggerlo, una fattura arrotondata di un centesimo risultava
     // col «totale che non torna».
@@ -731,12 +743,26 @@ function normaNome(v){
     .replace(/[^a-z0-9]+/g,' ').trim();
 }
 function clientePerFattura(f){
-  const p=String(f&&f.clientePiva||'').replace(/\s/g,'');
+  const ripulisci=v=>String(v||'').replace(/\s/g,'').toUpperCase();
+  const p=ripulisci(f&&f.clientePiva);
+  const piena=ripulisci(f&&f.clientePaese)+p;
+  // Un numero salvato SENZA prefisso di paese si intende italiano: e'
+  // come lo scrive chi ha clienti in Italia, ed e' quello che c'e' in
+  // anagrafica. Quindi vale solo contro una fattura italiana: su una
+  // straniera un IT12345678901 e un DE12345678901 passerebbero per lo
+  // stesso soggetto. Col prefisso scritto, deve combaciare tutto.
+  const paese=ripulisci(f&&f.clientePaese)||'IT';
+  const combacia=c=>{
+    const v=ripulisci(c.vat_number);
+    if(!v)return false;
+    if(v===piena)return true;
+    return paese==='IT'&&!/^[A-Z]{2}/.test(v)&&v===p;
+  };
   if(p){
     // Niente impedisce a due schede di avere la stessa partita IVA: il
     // database non ha un vincolo e il modulo non lo rifiuta. Sceglierne
     // una vorrebbe dire attribuire gli scostamenti al cliente sbagliato.
-    const perPiva=(data.clients||[]).filter(c=>String(c.vat_number||'').replace(/\s/g,'')===p);
+    const perPiva=(data.clients||[]).filter(combacia);
     if(perPiva.length===1)return {cliente:perPiva[0],come:'piva'};
     if(perPiva.length>1)return {cliente:null,come:'pivaDoppia'};
   }
@@ -748,10 +774,7 @@ function clientePerFattura(f){
     // fattura ne ha un'altra, non e' quel soggetto: sono due enti
     // distinti con la stessa ragione sociale, e abbinarli vorrebbe dire
     // confrontare la fattura con le ore di un altro cliente.
-    const contrari=perNome.filter(c=>{
-      const v=String(c.vat_number||'').replace(/\s/g,'');
-      return !!p&&!!v&&v!==p;
-    });
+    const contrari=perNome.filter(c=>!!p&&!!ripulisci(c.vat_number)&&!combacia(c));
     const buoni=perNome.filter(c=>contrari.indexOf(c)<0);
     if(buoni.length===1)return {cliente:buoni[0],come:'nome'};
     if(buoni.length>1)return {cliente:null,come:'omonimi'};
@@ -780,10 +803,21 @@ function rigaFatturabile(e){
   const w=e&&e.wbs_id?wbsById(e.wbs_id):null;
   return !w||w.billable!==false;
 }
+// Il pianificato entra o no secondo l'impostazione «Fattura anche il
+// pianificato», che e' la stessa che usa groupSummary per comporre la
+// proposta. Escluderlo sempre voleva dire che una fattura emessa DA
+// QUELLA PROPOSTA, con l'impostazione accesa, risultava sempre piu'
+// alta del consuntivo: uno scostamento che veniva dall'app, non da te.
+function rigaDaConfrontare(e){return !isPlanned(e)||fatturaPianificato()}
 function oreDelMese(clientId,mese){
   return (data.entries||[]).filter(e=>
     e.client_id===clientId && String(e.entry_date||'').startsWith(mese) &&
-    !isPlanned(e) && rigaFatturabile(e));
+    rigaDaConfrontare(e) && rigaFatturabile(e));
+}
+function pianificatoNelMese(clientId,mese){
+  return (data.entries||[]).some(e=>
+    e.client_id===clientId && String(e.entry_date||'').startsWith(mese) &&
+    isPlanned(e) && rigaFatturabile(e));
 }
 function giorniConsuntivati(clientId,mese){
   return oreDelMese(clientId,mese).reduce((s,e)=>s+dailyDays(e),0);
@@ -794,7 +828,7 @@ function importoConsuntivato(clientId,mese){
     e.client_id===clientId && (String(e.year)+'-'+String(e.month).padStart(2,'0'))===mese
   ).reduce((s,e)=>s+Number(e.amount||0),0);
   const man=(data.manualEntries||[]).filter(e=>
-    e.client_id===clientId && String(e.entry_date||'').startsWith(mese) && !isPlanned(e)
+    e.client_id===clientId && String(e.entry_date||'').startsWith(mese) && rigaDaConfrontare(e)
   ).reduce((s,e)=>s+Number(e.amount||0),0);
   return g+mens+man;
 }
@@ -858,7 +892,7 @@ function confrontaFattura(f){
   // righe e l'imponibile del riepilogo: ignorarlo faceva risultare «non
   // torna» una fattura corretta, e l’errore fermava tutto il resto.
   const sconto=Number(f.sconto||0);
-  const dopoSconto=sommaRighe+sconto;
+  const dopoSconto=sommaRighe+sconto+Number(f.arrotondamentoRiepiloghi||0);
   const dettSconto=sconto
     ? ` ${sconto<0?'meno':'piu\u2019'} ${fmtEUR(Math.abs(sconto))} di ${sconto<0?'sconto':'maggiorazione'} in piede fanno ${fmtEUR(dopoSconto)},`
     : '';
@@ -916,45 +950,10 @@ function confrontaFattura(f){
     nota('nota','Pi\u00f9 contributi previdenziali in fattura',
       `${casse.length} blocchi cassa: ${casse.map(c=>(c.tipo||'cassa')+' '+fmtNum(c.aliquota,2)+'% '+fmtEUR(c.importo)).join(' \u00b7 ')}. Nella quadratura entra la somma, ${fmtEUR(f.rivalsaImporto)}; il raffronto con la configurazione, che ha una sola aliquota, qui non si fa.`);
 
-  // 3. La rivalsa concorda con la configurazione? Va guardato in
-  //    entrambi i versi: c'e' e non dovrebbe, oppure manca e dovrebbe.
-  const ts=currentTaxSetting(Number(String(f.data||'').slice(0,4))||currentYear());
-  const alConf=Number(ts.inps_recharge_rate||4);
-  const attivaConf=ts.inps_recharge_enabled!==false;
-  if(f.rivalsaImporto>0&&!attivaConf)
-    nota('scostamento','Rivalsa in fattura ma disattivata in configurazione',
-      `La fattura addebita ${fmtEUR(f.rivalsaImporto)} di rivalsa, mentre in Configurazione fiscale la rivalsa e' spenta.`);
-  else if(!(f.rivalsaImporto>0)&&attivaConf)
-    nota('scostamento','Rivalsa attiva in configurazione ma assente in fattura',
-      `In Configurazione fiscale la rivalsa e' al ${fmtNum(alConf,2)}%, ma la fattura non ne addebita.`);
-  else if(f.rivalsaAliquota>0&&Math.abs(f.rivalsaAliquota-alConf)>0.005)
-    nota('scostamento','Aliquota di rivalsa diversa da quella configurata',
-      `In fattura ${fmtNum(f.rivalsaAliquota,2)}%, in Configurazione fiscale ${fmtNum(alConf,2)}%.`);
-
-  // 3-bis. Il bollo, nei due versi come la rivalsa, con una cautela: e'
-  //        dovuto solo sopra i 77,47 € di importi non assoggettati a
-  //        IVA, e senza quella soglia ogni fatturina esente
-  //        risulterebbe «senza il bollo che dovrebbe avere».
-  //        Un'impostazione mai salvata non e' una scelta: in quel caso
-  //        non si dichiara nessuno scostamento.
-  const bolloConf=ts.stamp_duty_enabled;
-  const bolloConfImporto=Number(ts.stamp_duty_amount??2);
-  const esente=Number(f.baseEsente??(f.imposta>0?0:f.imponibile));
-  if(f.bolloImporto>0&&bolloConf===false)
-    nota('scostamento','Bollo in fattura ma disattivato in configurazione',
-      `La fattura espone ${fmtEUR(f.bolloImporto)} di imposta di bollo, mentre in Configurazione fiscale la marca da bollo e' spenta.`);
-  else if(!(f.bolloImporto>0)&&bolloConf===true&&esente>BOLLO_SOGLIA)
-    nota('scostamento','Bollo attivo in configurazione ma assente in fattura',
-      `In Configurazione fiscale la marca da bollo e' attiva a ${fmtEUR(bolloConfImporto)}, e la fattura ha ${fmtEUR(esente)} non assoggettati a IVA: sopra i ${fmtEUR(BOLLO_SOGLIA)} il bollo e' dovuto. In fattura non ce n'e'.`);
-  else if(f.bolloImporto>0&&bolloConf!==false&&!vicini(f.bolloImporto,bolloConfImporto))
-    nota('scostamento','Importo del bollo diverso da quello configurato',
-      `In fattura ${fmtEUR(f.bolloImporto)}, in Configurazione fiscale ${fmtEUR(bolloConfImporto)}.`);
-
-  // 4. Il confronto col consuntivo, PER MESE e non per riga. Una
-  //    fattura puo' avere piu' righe sullo stesso mese — progetti
-  //    diversi, o la consulenza e le spese separate — e confrontare
-  //    ogni riga col totale del mese produceva uno scostamento falso
-  //    per ognuna di esse.
+  // 2-ter. I mesi che la fattura copre. Si calcolano qui, prima della
+  //        configurazione, perche' rivalsa e bollo di UNA fattura
+  //        stanno nel suo billing_header, che e' per cliente e per
+  //        mese: senza sapere il mese non si saprebbe quale leggere.
   const perMese={};
   f.righe.forEach(r=>{
     if(!r.mese){
@@ -968,7 +967,72 @@ function confrontaFattura(f){
     if(r.giorni!==null){m.giorni+=r.giorni;m.haGiorni=true}
   });
   const mesi=Object.keys(perMese).sort();
-  if(cliente)mesi.forEach(mese=>{
+  const senzaMese=f.righe.filter(r=>!r.mese).length;
+
+  // 3. La rivalsa concorda con la configurazione? Va guardato in
+  //    entrambi i versi: c'e' e non dovrebbe, oppure manca e dovrebbe.
+  //    E la configurazione da guardare non e' sempre quella dell'anno:
+  //    billingCalc da' la precedenza al billing_header della singola
+  //    fattura, dove rivalsa e bollo si possono accendere o spegnere
+  //    per quel cliente e quel mese. Confrontando solo le impostazioni
+  //    annuali, una fattura emessa ESATTAMENTE come la proposta
+  //    risultava con la rivalsa di troppo, o mancante.
+  const tsAnno=currentTaxSetting(Number(String(f.data||'').slice(0,4))||currentYear());
+  const testata=(cliente&&mesi.length===1)
+    ? (data.billingHeaders||[]).find(h=>h.client_id===cliente.id&&
+        (String(h.year)+'-'+String(h.month).padStart(2,'0'))===mesi[0])
+    : null;
+  const ts=testata?{...tsAnno,
+    inps_recharge_enabled:testata.inps_recharge_enabled ?? tsAnno.inps_recharge_enabled,
+    inps_recharge_rate:testata.inps_recharge_rate ?? tsAnno.inps_recharge_rate,
+    stamp_duty_enabled:testata.stamp_duty_enabled ?? tsAnno.stamp_duty_enabled,
+    stamp_duty_amount:testata.stamp_duty_amount ?? tsAnno.stamp_duty_amount}:tsAnno;
+  const dove=testata?`nella fattura salvata di ${monthLabel(mesi[0])}`:'in Configurazione fiscale';
+  const alConf=Number(ts.inps_recharge_rate||4);
+  const attivaConf=ts.inps_recharge_enabled!==false;
+  if(f.rivalsaImporto>0&&!attivaConf)
+    nota('scostamento','Rivalsa in fattura ma disattivata in configurazione',
+      `La fattura addebita ${fmtEUR(f.rivalsaImporto)} di rivalsa, mentre ${dove} la rivalsa e' spenta.`);
+  else if(!(f.rivalsaImporto>0)&&attivaConf)
+    nota('scostamento','Rivalsa attiva in configurazione ma assente in fattura',
+      `${testata?'Nella fattura salvata di '+monthLabel(mesi[0]):'In Configurazione fiscale'} la rivalsa e' al ${fmtNum(alConf,2)}%, ma la fattura non ne addebita.`);
+  else if(f.rivalsaAliquota>0&&Math.abs(f.rivalsaAliquota-alConf)>0.005)
+    nota('scostamento','Aliquota di rivalsa diversa da quella configurata',
+      `In fattura ${fmtNum(f.rivalsaAliquota,2)}%, ${dove} ${fmtNum(alConf,2)}%.`);
+
+  // 3-bis. Il bollo, nei due versi come la rivalsa, con una cautela: e'
+  //        dovuto solo sopra i 77,47 € di importi non assoggettati a
+  //        IVA, e senza quella soglia ogni fatturina esente
+  //        risulterebbe «senza il bollo che dovrebbe avere».
+  //        Un'impostazione mai salvata non e' una scelta: in quel caso
+  //        non si dichiara nessuno scostamento.
+  const bolloConf=ts.stamp_duty_enabled;
+  const bolloConfImporto=Number(ts.stamp_duty_amount??2);
+  const esente=Number(f.baseEsente||0);
+  if(f.bolloImporto>0&&bolloConf===false)
+    nota('scostamento','Bollo in fattura ma disattivato in configurazione',
+      `La fattura espone ${fmtEUR(f.bolloImporto)} di imposta di bollo, mentre ${dove} la marca da bollo e' spenta.`);
+  else if(!(f.bolloImporto>0)&&bolloConf===true&&esente>BOLLO_SOGLIA)
+    nota('scostamento','Bollo attivo in configurazione ma assente in fattura',
+      `${testata?'Nella fattura salvata di '+monthLabel(mesi[0]):'In Configurazione fiscale'} la marca da bollo e' attiva a ${fmtEUR(bolloConfImporto)}, e la fattura ha ${fmtEUR(esente)} assoggettati al bollo: sopra i ${fmtEUR(BOLLO_SOGLIA)} e' dovuto. In fattura non ce n'e'.`);
+  else if(f.bolloImporto>0&&bolloConf!==false&&!vicini(f.bolloImporto,bolloConfImporto))
+    nota('scostamento','Importo del bollo diverso da quello configurato',
+      `In fattura ${fmtEUR(f.bolloImporto)}, ${dove} ${fmtEUR(bolloConfImporto)}.`);
+
+  // 4. Il confronto col consuntivo, PER MESE e non per riga. Una
+  //    fattura puo' avere piu' righe sullo stesso mese — progetti
+  //    diversi, o la consulenza e le spese separate — e confrontare
+  //    ogni riga col totale del mese produceva uno scostamento falso
+  //    per ognuna di esse.
+  // Se anche UNA riga non dice il suo mese, i mesi riconosciuti non si
+  // confrontano: la riga orfana potrebbe appartenere a uno qualunque di
+  // essi, e il raffronto darebbe un ammanco che viene dalla descrizione
+  // non riconosciuta, non dai tuoi dati. Una riga «Rimborso taxi» senza
+  // mese bastava a far risultare marzo corto di tutte le spese.
+  if(senzaMese&&mesi.length)
+    nota('nota','Il confronto mese per mese non si fa',
+      `${senzaMese===1?'Una riga non dice':senzaMese+' righe non dicono'} a che mese si riferisc${senzaMese===1?'e':'ono'}: potrebbe stare in uno qualunque dei mesi in fattura, quindi confrontarli darebbe scostamenti inventati. Scrivi il mese nella descrizione e ricarica.`);
+  if(cliente&&!senzaMese)mesi.forEach(mese=>{
     const m=perMese[mese],et=monthLabel(mese);
     const quante=m.righe>1?` (${m.righe} righe sommate)`:'';
     if(m.haGiorni){
@@ -982,6 +1046,10 @@ function confrontaFattura(f){
       nota('scostamento',`Importo diverso dal fatturabile · ${et}`,
         `In fattura ${fmtEUR(m.importo)}${quante}, l'app si aspettava ${fmtEUR(atteso)} (lavoro piu’ rimborsi spese del mese).`);
   });
+
+  if(cliente&&!senzaMese&&fatturaPianificato()&&mesi.some(m=>pianificatoNelMese(cliente.id,m)))
+    nota('nota','Nelle attese entra anche il pianificato',
+      'Hai acceso «Fattura anche il pianificato», quindi i giorni e gli importi qui sopra comprendono le righe pianificate, come fa la proposta di fattura.');
 
   // 4-bis. Le rate: dire «da saldare entro il...» indicando solo la
   //        prima scadenza farebbe credere che valga per l'intero
@@ -3160,6 +3228,12 @@ function netMarginMonthlyList(year){const vals=netMarginByMonth(year);const md=a
 function balanceMarginBars(year){return monthBars(annualMonthData(year).map(m=>m.compensi-m.costi))}
 function homeBalanceCharts(){const year=currentYear();const c=annualTaxCalc(year);const bo=bolloCalc(year);const ex=billingExtras(year);const gsRate=Number(c.settings.inps_gs_rate??26.07)/100;const inpsDovuto=c.forfaitIncome*gsRate;const imposta=c.substituteTax;const margine=(c.compensi+ex.rivalsa)-c.costi-bo.aCarico;const utileNetto=margine-inpsDovuto-imposta;return `<div class="card cardLink" onclick="go('balance')" role="button" title="Apri il Bilancio ${year}"><b>Ripartizione ricavi ${year} <span class="cardLinkArrow">›</span></b><div class="desc" style="margin-top:2px">Dove vanno i ricavi: spese, contributi, imposte, utile netto</div>${balanceCompositionBar(c.costi+bo.aCarico,inpsDovuto,imposta,utileNetto)}</div><div class="card cardLink" onclick="go('balance')" role="button" title="Apri il Bilancio ${year}"><b>Marginalità netta mensile ${year} <span class="cardLinkArrow">›</span></b><div class="desc" style="margin-top:2px">Utile per mese al netto di spese, contributi e imposte</div>${netMarginMonthlyList(year)}</div>`}
 const BOLLO_SOGLIA=77.47;
+// Le nature che l'Agenzia delle Entrate considera assoggettate al
+// bollo: escluse (N1), non soggette per altri motivi (N2.2), non
+// imponibili per dichiarazione d'intento e per operazioni assimilate
+// all'esportazione (N3.5, N3.6), esenti (N4). Restano fuori
+// l'inversione contabile (N6.*) e la carenza di territorialita' (N2.1).
+const NATURE_BOLLO=['N1','N2.2','N3.5','N3.6','N4'];
 function bolloCalc(year=currentYear()){
   const ts=currentTaxSetting(year);const unit=Number(ts.stamp_duty_amount??2)||2;
   const rows=data.billingHeaders.filter(h=>Number(h.year)===Number(year)&&['invoice_issued','collected'].includes(h.status));
