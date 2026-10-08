@@ -467,6 +467,9 @@ console.log('\n=== SE IL DATABASE NON HA ANCORA LA COLONNA, LO DICE ===');
   await pg.evaluate(()=>{window.__colonneMancanti=['vat_number']});
   await pg.evaluate(()=>window.go('clients'));
   await pg.waitForTimeout(500);
+  // la pagina si apre sulla LISTA: il modulo si chiede
+  await pg.evaluate(()=>window.apriNuovoCliente());
+  await pg.waitForTimeout(300);
   await pg.evaluate(()=>{
     const f=document.querySelector('#app form.form');
     f.name.value='Nuovo Cliente';
@@ -488,6 +491,9 @@ console.log('\n=== IL CAMPO C’È ANCHE QUANDO SI CREA IL CLIENTE ===');
   const pg=await apri();
   await pg.evaluate(()=>window.go('clients'));
   await pg.waitForTimeout(500);
+  // la pagina si apre sulla LISTA: il modulo si chiede
+  await pg.evaluate(()=>window.apriNuovoCliente());
+  await pg.waitForTimeout(300);
   ok(await pg.evaluate(()=>!!document.querySelector('#app form.form [name=vat_number]')),
      'il modulo di creazione ha il campo Partita IVA');
   await pg.evaluate(()=>{
