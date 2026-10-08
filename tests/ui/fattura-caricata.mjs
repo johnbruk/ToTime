@@ -959,6 +959,140 @@ console.log('\n=== SENZA LA TUA P.IVA NEL PROFILO, LO DICE E NON BLOCCA ===');
   await pg.close();
 }
 
+console.log('\n=== IL MESE SI LEGGE DAI CAMPI DELLO STANDARD, NON SOLO DAL TESTO ===');
+{
+  // DataInizioPeriodo e DataFinePeriodo sono campi della FatturaPA: il
+  // mese spesso sta lì, scritto come dato. Cercandolo solo nella
+  // descrizione — «Consulenza - Marzo 2026», che è una convenzione di
+  // chi emette — una fattura di un altro emittente finiva «senza mese»
+  // e il confronto mensile si fermava del tutto.
+  const standard=XML
+    .replace('Consulenza - Febbraio 2026 | Giorni: 1,0','Consulenza')
+    .replace('Consulenza - Marzo 2026 | Giorni: 5,5','Consulenza')
+    .replace('<PrezzoTotale>460.00</PrezzoTotale>',
+             '<PrezzoTotale>460.00</PrezzoTotale><DataInizioPeriodo>2026-02-01</DataInizioPeriodo><DataFinePeriodo>2026-02-28</DataFinePeriodo>')
+    .replace('<PrezzoTotale>2530.00</PrezzoTotale>',
+             '<PrezzoTotale>2530.00</PrezzoTotale><DataInizioPeriodo>2026-03-01</DataInizioPeriodo><DataFinePeriodo>2026-03-31</DataFinePeriodo>');
+  const pg=await apri();
+  const r=await confronta(pg,standard);
+  ok(r.f.righe[0].mese==='2026-02'&&r.f.righe[1].mese==='2026-03',
+     'il mese si legge dal periodo, con la descrizione muta',
+     r.f.righe.map(x=>x.mese).join(' · '));
+  ok(!r.esiti.some(e=>/senza mese riconoscibile/.test(e.titolo)),
+     'e nessuna riga resta orfana',
+     r.esiti.map(e=>e.titolo).join(' | '));
+  ok(r.mesi.join(',')==='2026-02,2026-03','i mesi coperti si riconoscono lo stesso',r.mesi.join(','));
+  await pg.close();
+  // Un periodo a cavallo di due mesi non si può attribuire: si torna
+  // alla descrizione invece di scegliere a caso.
+  const cavallo=XML.replace('<PrezzoTotale>2530.00</PrezzoTotale>',
+    '<PrezzoTotale>2530.00</PrezzoTotale><DataInizioPeriodo>2026-03-01</DataInizioPeriodo><DataFinePeriodo>2026-04-30</DataFinePeriodo>');
+  const pg2=await apri();
+  const r2=await confronta(pg2,cavallo);
+  ok(r2.f.righe[1].mese==='2026-03','a cavallo di due mesi vince la descrizione',String(r2.f.righe[1].mese));
+  await pg2.close();
+}
+
+console.log('\n=== I GIORNI SI LEGGONO DA «5,5 GG», NON SOLO DAL TESTO ===');
+{
+  // Quantita e UnitaMisura sono campi dello standard. Senza leggerli, il
+  // confronto coi giorni lavorati si saltava in silenzio su qualunque
+  // fattura che non ripetesse «Giorni: 5,5» nella descrizione.
+  const gg=XML
+    .replace('Consulenza - Marzo 2026 | Giorni: 5,5','Consulenza - Marzo 2026')
+    .replace('<Quantita>5.50</Quantita>','<Quantita>5.50</Quantita><UnitaMisura>GG</UnitaMisura>');
+  const pg=await apri();
+  const r=await confronta(pg,gg);
+  ok(r.f.righe[1].giorni===5.5,'5,50 GG sono 5,5 giorni',String(r.f.righe[1].giorni));
+  ok(!r.esiti.some(e=>/Giorni diversi/.test(e.titolo)),
+     'e il confronto coi giorni lavorati si fa, invece di saltarsi',
+     r.esiti.map(e=>e.titolo).join(' | '));
+  await pg.close();
+  // E se i giorni fatturati non tornano, si vede: il controllo è vivo.
+  const storti=gg.replace('<Quantita>5.50</Quantita>','<Quantita>7.00</Quantita>');
+  const pg2=await apri();
+  const r2=await confronta(pg2,storti);
+  ok(r2.esiti.some(e=>/Giorni diversi/.test(e.titolo)),
+     'con 7,00 GG contro 5,5 consuntivati lo scostamento compare',
+     (r2.esiti.find(e=>/Giorni diversi/.test(e.titolo))||{}).dettaglio||'nessuno');
+  await pg2.close();
+}
+
+console.log('\n=== SENZA DatiRiepilogo IL FILE SI RIFIUTA ===');
+{
+  // È obbligatorio nella FatturaPA, ed è l'unica fonte indipendente con
+  // cui verificare che le righe tornino. Senza, il controllo di
+  // quadratura si saltava in silenzio e un documento troncato poteva
+  // arrivare in fondo e far dire «tutto torna».
+  const monco=XML.replace(/<DatiRiepilogo>[\s\S]*?<\/DatiRiepilogo>/,'');
+  const pg=await apri();
+  const r=await confronta(pg,monco);
+  const b=r.esiti.find(e=>e.liv==='blocco');
+  ok(!!b&&/DatiRiepilogo/.test(b.dettaglio),'si rifiuta, dicendo cosa manca',
+     b?b.dettaglio.slice(0,110):'nessun blocco');
+  ok(r.mesi.length===0&&r.cliente===null,'e non confronta niente',
+     `${r.cliente} · ${r.mesi.length} mesi`);
+  await pg.close();
+}
+
+console.log('\n=== IL TOTALE CHE NON TORNA FERMA IL CONFRONTO ===');
+{
+  // Il ramo del riepilogo si fermava già; questo proseguiva, dando la
+  // colpa ai consuntivi con un documento già dichiarato inattendibile.
+  // Il consuntivo qui è ANCHE guasto, così si vede che lo scostamento
+  // sarebbe arrivato e invece non arriva.
+  const totStorto=XML.replace('<ImportoTotaleDocumento>3109.60','<ImportoTotaleDocumento>9999.00');
+  const pg=await apri(`S.timesheet_entries=S.timesheet_entries.filter(e=>e.id!=='m6');`);
+  const sano=await confronta(pg,XML);
+  ok(sano.esiti.some(e=>/Giorni diversi/.test(e.titolo)),
+     'col totale sano lo scostamento sui giorni c’è');
+  const r=await confronta(pg,totStorto);
+  ok(r.esiti.some(e=>/Il totale non torna/.test(e.titolo)),'il blocco sul totale c’è');
+  ok(r.esiti.some(e=>/si ferma qui/.test(e.titolo)),'e dice che il confronto si ferma');
+  ok(!r.esiti.some(e=>/Giorni diversi|Importo diverso/.test(e.titolo)),
+     'nessuno scostamento sui consuntivi con un totale inattendibile',
+     r.esiti.map(e=>e.titolo).join(' | '));
+  ok(r.mesi.length===0,'e nessun mese dichiarato coperto',String(r.mesi.length));
+  await pg.close();
+}
+
+console.log('\n=== LO SCONTO DI DOCUMENTO ARRIVA AL CONFRONTO MENSILE ===');
+{
+  // perMese sommava i PrezzoTotale LORDI e li confrontava con l'attesa
+  // netta dell'app: su una fattura con sconto in piede, o nascondeva
+  // che si era fatturato meno, o inventava uno scostamento.
+  // Un mese solo: lo sconto è tutto suo.
+  const unMese=SOLO_MARZO
+    .replace('<ImportoTotaleDocumento>','<ScontoMaggiorazione><Tipo>SC</Tipo><Importo>130.00</Importo></ScontoMaggiorazione><ImportoTotaleDocumento>')
+    .replace('<ImponibileImporto>2631.20','<ImponibileImporto>2501.20')
+    .replace('<ImportoTotaleDocumento>2631.20','<ImportoTotaleDocumento>2501.20');
+  const pg=await apri();
+  const r=await confronta(pg,unMese);
+  ok(!r.esiti.some(e=>/non torna con se stessa/.test(e.titolo)),'la fattura quadra',
+     (r.esiti.find(e=>/non torna con se stessa/.test(e.titolo))||{}).dettaglio||'nessuno');
+  const sc=r.esiti.find(e=>/Importo diverso/.test(e.titolo));
+  ok(!!sc,'e marzo risulta fatturato MENO di quanto l’app si aspetta',sc?sc.dettaglio.slice(0,120):'nessuno');
+  // senza il simbolo: fra numero e € ci va uno spazio unificatore, non
+  // uno normale, e cercarlo con lo spazio semplice non trova mai
+  ok(!!sc&&/2\.400,00/.test(sc.dettaglio)&&!/In fattura 2\.530,00/.test(sc.dettaglio),
+     'cioè 2.530 − 130 = 2.400, non 2.530',
+     sc?sc.dettaglio.slice(0,120):'');
+  await pg.close();
+  // Su più mesi lo sconto non si sa come ripartirlo: lo si dice.
+  const piuMesi=XML
+    .replace('<ImportoTotaleDocumento>','<ScontoMaggiorazione><Tipo>SC</Tipo><Importo>130.00</Importo></ScontoMaggiorazione><ImportoTotaleDocumento>')
+    .replace('<ImponibileImporto>3109.60','<ImponibileImporto>2979.60')
+    .replace('<ImportoTotaleDocumento>3109.60','<ImportoTotaleDocumento>2979.60');
+  const pg2=await apri();
+  const r2=await confronta(pg2,piuMesi);
+  ok(r2.esiti.some(e=>/Sconto di documento su più mesi/.test(e.titolo)),
+     'su due mesi lo dice invece di inventare una ripartizione',
+     r2.esiti.map(e=>e.titolo).join(' | '));
+  ok(!r2.esiti.some(e=>/Importo diverso/.test(e.titolo)),
+     'e non confronta gli importi mese per mese');
+  await pg2.close();
+}
+
 await b.close(); srv.close();
 console.log(`\n=== fattura caricata: OK ${pass} · KO ${fail} ===`);
 process.exit(fail?1:0);
