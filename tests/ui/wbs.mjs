@@ -37,6 +37,13 @@ await pg.goto(`http://127.0.0.1:${srv.address().port}/tests/ui/mock.html`,{waitU
 await pg.waitForTimeout(900);
 console.log('\n=== A. Dove la gerarchia esiste ===');
 await pg.evaluate(()=>window.go('dailyForm'));await pg.waitForTimeout(350);
+// Il cliente non si propone piu': con un default preselezionato bastava
+// non guardare quel campo per consuntivare su quello sbagliato. La
+// gerarchia si disegna dopo averlo scelto, come fa una persona.
+await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
+  const primo=[...f.client_id.options].find(o=>o.value);
+  if(primo){f.client_id.value=primo.value;window.refreshProjectsForForm(f)}});
+await pg.waitForTimeout(400);
 const campi=await pg.evaluate(()=>[...document.querySelectorAll('#app form.form [name]')].map(e=>e.name));
 ok(campi.includes('engagement_id')&&campi.includes('wbs_id'),'il modulo mostra commessa e WBS',campi.join(', '));
 // La regola era «in gerarchia non si chiede l'attivita' sciolta», e
@@ -112,7 +119,10 @@ const campi2=await pg.evaluate(()=>[...document.querySelectorAll('#app form.form
 ok(!campi2.includes('wbs_id'),'niente WBS nel modulo',campi2.join(', '));
 ok(campi2.includes('project_id')&&campi2.includes('activity_id'),'restano progetto e attivita\', come prima');
 const prima2=await pg.evaluate(()=>window.__stores.timesheet_entries.length);
-await pg.evaluate(()=>{const f=document.querySelector('form.form');f.hours.value='4';f.requestSubmit()});
+await pg.evaluate(()=>{const f=document.querySelector('form.form');
+  const primo=[...f.client_id.options].find(o=>o.value);
+  if(primo){f.client_id.value=primo.value;window.refreshProjectsForForm(f)}
+  f.hours.value='4';f.requestSubmit()});
 await pg.waitForTimeout(700);
 ok(await pg.evaluate(()=>window.__stores.timesheet_entries.length)===prima2+1,'e si salva senza chiedere niente di nuovo');
 ok(errs2.length===0,'nessun errore JS',errs2.slice(0,2).join(' | ')||'nessuno');

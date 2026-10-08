@@ -91,6 +91,11 @@ ok(pv[0]==='30,0 h','nemmeno l\'analisi consuntivi le conta',pv[0]);
 console.log('\n=== G. Avviso quando si consuntiva in un giorno di assenza ===');
 await pg.evaluate(()=>window.go('dailyForm'));await pg.waitForTimeout(400);
 dialogs=[];
+// Il cliente non si propone piu': si sceglie, come fa una persona.
+await pg.evaluate(()=>{const f=document.querySelector('form.form');
+  const primo=[...f.client_id.options].find(o=>o.value);
+  if(primo){f.client_id.value=primo.value;window.refreshProjectsForForm(f)}});
+await pg.waitForTimeout(400);
 await pg.evaluate(()=>{const f=document.querySelector('form.form');f.entry_date.value='2026-07-08';f.hours.value='4';f.requestSubmit()});
 await pg.waitForTimeout(800);
 ok(dialogs.length===1&&/malattia/i.test(dialogs[0]),'l\'avviso dice di che assenza si tratta',JSON.stringify(dialogs[0]||''));

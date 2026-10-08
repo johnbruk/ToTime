@@ -127,7 +127,7 @@ ok(seconda&&String(seconda.year)==='2027','e nell\'anno scelto',seconda?String(s
 
 console.log('\n--- 5. ci si registra sopra un consuntivo ---');
 await pg.evaluate(()=>window.go('dailyForm'));await pg.waitForTimeout(500);
-// il modulo si apre sul primo cliente dell'elenco: qui serve Solution
+// il modulo si apre SENZA cliente: lo si sceglie, e qui serve Solution
 await pg.selectOption('#app form.form [name="client_id"]','c1');await pg.waitForTimeout(400);
 const vis=await pg.evaluate(()=>{const o={};for(const id of ['prjField','engField','wbsField']){const e=document.getElementById(id);o[id]=e?(e.hidden?'nascosto':'visibile'):'assente'}return o});
 // il progetto e' uno solo e non si chiede; le commesse sono due — la
