@@ -202,6 +202,62 @@ console.log('\n=== SE IL FILE NON SI CONSERVA, LA FATTURA RESTA REGISTRATA E LO 
   await pg.close();
 }
 
+console.log('\n=== QUELLO CHE SI PROMETTE SUL FILE È VERO ===');
+{
+  // Con l'archivio, registrando il file si carica: dire «non viene
+  // caricato da nessuna parte» sarebbe una promessa falsa.
+  const pg=await apri();
+  const t=await testo(pg);
+  ok(!/non viene caricato da nessuna parte/.test(t),'con l’archivio non promette che il file resti nel browser',
+     (t.match(/Il file resta[^.]{0,60}/)||[''])[0]||'non lo promette');
+  ok(/si conserva il file intero nel tuo archivio/.test(t),'e dice che registrando il file si conserva',
+     (t.match(/Registrando se ne[^.]{0,110}/)||[''])[0]||'non lo dice');
+  await pg.close();
+  const senza=await apri(`window.__tabelleMancanti=['invoice_documents'];`);
+  ok(/non viene caricato da nessuna parte/.test(await testo(senza)),'senza archivio, invece, il file resta davvero nel browser');
+  await senza.close();
+}
+
+console.log('\n=== UN XML CORRETTO AGGIORNA ANCHE IL FILE CONSERVATO ===');
+{
+  // Stesso numero e stessa data, importi corretti: le schede si
+  // riscrivono, e il file conservato deve seguirle.
+  const vecchio=XML.replace('<PrezzoTotale>460.00</PrezzoTotale>','<PrezzoTotale>450.00</PrezzoTotale>');
+  const pg=await apri(`S.invoice_documents=[{id:'dv',client_id:'sol',invoice_number:'1/2026',invoice_date:'2026-04-08',
+    months:['2026-02','2026-03'],natures:['N2.2'],total_amount:3099.2,stamp_base:3099.2,stamp_amount:2,
+    file_name:'vecchia.xml',xml:${JSON.stringify(vecchio)}}];`);
+  await carica(pg,XML);
+  ok(await premi(pg,/^Registra su 2 mesi$/),'si registra la versione corretta');
+  const d=await documenti(pg);
+  ok(d.length===1,'il file conservato resta uno',String(d.length));
+  ok(d[0]&&d[0].xml===XML,'ma è quello nuovo',d[0]&&d[0].xml===vecchio?'è ancora il vecchio':'?');
+  ok(d[0]&&d[0].file_name==='fattura.xml'&&Math.abs(Number(d[0].total_amount)-3109.6)<0.005,
+     'col nome e il totale nuovi',d[0]?d[0].file_name+' · '+d[0].total_amount:'');
+  await pg.close();
+}
+
+console.log('\n=== IL FILE CONSERVATO È QUELLO CARICATO, BOM COMPRESO ===');
+{
+  const conBom='\uFEFF'+XML;
+  const pg=await apri();
+  await carica(pg,conBom);
+  await premi(pg,/^Registra su 2 mesi$/);
+  const d=await documenti(pg);
+  ok(d[0]&&d[0].xml===conBom,'il carattere iniziale invisibile resta',d[0]?(d[0].xml.charCodeAt(0)===0xFEFF?'c’è':'tolto'):'nessun file');
+  await pg.close();
+}
+
+console.log('\n=== UN TIPO DI DOCUMENTO INVENTATO NON PASSA ===');
+{
+  // «constructor» non e' un tipo: ma e' una chiave che ogni oggetto
+  // eredita, e cercandolo cosi' risultava ammesso.
+  const pg=await apri();
+  await carica(pg,XML.replace('<TipoDocumento>TD01','<TipoDocumento>constructor'));
+  const t=await testo(pg);
+  ok(/Tipo di documento non trattato/.test(t),'si ferma',(t.match(/Tipo di documento[^.]{0,40}/)||[''])[0]||'passa');
+  await pg.close();
+}
+
 await b.close(); srv.close();
 console.log(`\n=== fattura conservata: OK ${pass} · KO ${fail} ===`);
 process.exit(fail?1:0);

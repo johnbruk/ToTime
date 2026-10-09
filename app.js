@@ -892,7 +892,7 @@ function confrontaFattura(f){
   //    parcella (TD06) — quella che Fiscozen emette per chi lavora in
   //    proprio — e le fatture differite (TD24, TD25). Passava solo TD01,
   //    e ogni parcella si fermava come se fosse una nota di credito.
-  if(f.tipo&&!TIPI_FATTURA[f.tipo]){
+  if(f.tipo&&!Object.prototype.hasOwnProperty.call(TIPI_FATTURA,f.tipo)){
     const nomi={TD02:'acconto o anticipo su fattura',TD03:'acconto o anticipo su parcella',
       TD04:'nota di credito',TD05:'nota di debito'};
     nota('blocco','Tipo di documento non trattato',
@@ -1198,7 +1198,9 @@ function fatturaCarica(){
 <p class="sub">Si legge l’XML della fattura elettronica e lo si confronta coi tuoi consuntivi. <b>Non si salva niente</b> finché non premi «Registra».</p>
 <div class="card"><div class="field"><label>File della fattura (.xml)</label>
 <input type="file" accept=".xml,text/xml,application/xml" onchange="fatturaFileScelto(this)"></div>
-<div class="desc">Il file resta nel browser e non viene caricato da nessuna parte. Registrando si scrivono solo i suoi numeri, sulle schede di fatturazione.</div></div>
+<div class="desc">${archivioPronto()
+  ?'Finché non premi «Registra» il file resta nel browser. Registrando se ne scrivono i numeri sulle schede di fatturazione e si conserva il file intero nel tuo archivio, visibile solo a te: per ritrovarlo e riscaricarlo.'
+  :'Il file resta nel browser e non viene caricato da nessuna parte. Registrando si scrivono solo i suoi numeri, sulle schede di fatturazione.'}</div></div>
 ${r?schedaFatturaLetta(r):''}
 <button type="button" class="secondary" onclick="go('billing')">Torna alla fatturazione</button>`);
 }
@@ -1418,7 +1420,10 @@ async function registraFatturaOra(){
   }
   // Il file si conserva DOPO le schede: se non riesce, la fattura resta
   // registrata, e al prossimo caricamento si offre di conservarlo.
-  const c=p.daConservare?await conservaFattura(r):{saltata:true};
+  // Quando le schede si riscrivono — un XML corretto, con lo stesso
+  // numero e la stessa data — il file conservato si aggiorna con loro:
+  // altrimenti i conti seguirebbero il file nuovo e l'archivio il vecchio.
+  const c=(archivioPronto()&&(!p.gia||p.daConservare))?await conservaFattura(r):{saltata:true};
   await reload();
   const registrata='Fattura '+(f.numero||'')+' registrata su '+p.righe.map(x=>monthLabel(x.mese)).join(' e ')
     +': bilancio e stima delle imposte ora usano questi numeri.';
@@ -1456,17 +1461,21 @@ function fatturaFileScelto(input){
   const reader=new FileReader();
   reader.onload=()=>{
     try{
-      const testo=String(reader.result||'').replace(/^﻿/,'');
-      const f=leggiFatturaXML(testo);
+      // Si conserva il testo com'e' arrivato. readAsText toglierebbe da
+      // se' il BOM iniziale: si leggono i byte e si decodificano
+      // tenendolo, e lo si toglie solo per leggere la fattura. Cosi' il
+      // file riscaricato e' quello caricato.
+      const originale=new TextDecoder('utf-8',{ignoreBOM:true}).decode(reader.result);
+      const f=leggiFatturaXML(originale.replace(/^﻿/,''));
       const r=confrontaFattura(f);
-      state.fatturaLetta={f,...r,nome:file.name,xml:testo};
+      state.fatturaLetta={f,...r,nome:file.name,xml:originale};
       render();
     }catch(e){
       setMsgLeggero('Non si è potuto leggere il file: '+(e&&e.message||e),9000);
     }
   };
   reader.onerror=()=>setMsgLeggero('Non si è potuto aprire il file.',7000);
-  reader.readAsText(file);
+  reader.readAsArrayBuffer(file);
 }
 function renderTemplate(tpl,row){
   const fallback={daily_rate_8h:'Consulenza - [Mese Anno] - Cliente/Progetto: [Progetto] | Giorni: [Giorni]',monthly_flat:'Consulenza - [Mese Anno] - Cliente/Progetto: [Progetto]',manual_entry:'Prestazione professionale - [Mese Anno] - Cliente/Progetto: [Progetto]',travel_expenses:'Spese di trasferta - [Mese Anno] - Cliente/Progetto: [Progetto]'}[row.type]||'[Mese Anno] - [Progetto]';
