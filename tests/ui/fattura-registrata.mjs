@@ -142,12 +142,14 @@ console.log('\n=== REGISTRANDOLA, I CONTI SEGUONO LA FATTURA ===');
 }
 
 console.log('\n=== RIPETERLA NON DUPLICA ===');
-{
-  const pg=await apri(`S.billing_headers=[
+// Le schede come le scrive la registrazione: numero, data e ogni importo.
+const REGISTRATA=`S.billing_headers=[
     {id:'h2',client_id:'sol',year:2026,month:2,status:'invoice_issued',invoice_number:'1/2026',
-     invoice_date:'2026-04-08',total_amount:460,invoice_total_amount:478.4},
+     invoice_date:'2026-04-08',total_amount:460,inps_recharge_amount:18.4,stamp_duty_amount:0,invoice_total_amount:478.4},
     {id:'h3',client_id:'sol',year:2026,month:3,status:'invoice_issued',invoice_number:'1/2026',
-     invoice_date:'2026-04-08',total_amount:2530,invoice_total_amount:2631.2}];`);
+     invoice_date:'2026-04-08',total_amount:2530,inps_recharge_amount:101.2,stamp_duty_amount:0,invoice_total_amount:2631.2}];`;
+{
+  const pg=await apri(REGISTRATA);
   await carica(pg,XML);
   const t=await testo(pg);
   ok(/Già registrata/.test(t),'la riconosce come già registrata',
@@ -318,6 +320,125 @@ console.log('\n=== SENZA TOTALE DICHIARATO SI REGISTRA LO STESSO ===');
   ok(!/il totale dichiarato è 0,00/.test(t),'non lo rifiuta per un totale di 0,00 €',
      (t.match(/Divisa per mese[^.]{0,90}/)||[''])[0]||'non lo rifiuta');
   ok(await bottone(pg)==='Registra su 2 mesi','e offre di registrarla',await bottone(pg)||'nessun pulsante');
+  await pg.close();
+}
+
+console.log('\n=== GIÀ REGISTRATA VUOL DIRE: NON CAMBIEREBBE NIENTE ===');
+{
+  // Stesso numero e stesso totale, ma la data scritta a mano e' un'altra:
+  // col solo totale la si dava per registrata, e la data restava sbagliata.
+  const pg=await apri(REGISTRATA.replace(/2026-04-08/g,'2026-04-01'));
+  await carica(pg,XML);
+  ok(await bottone(pg)==='Registra su 2 mesi','con la data diversa si può ancora allineare',
+     await bottone(pg)||'nessun pulsante');
+  await pg.close();
+}
+
+console.log('\n=== IL NUMERO TIENE LE LETTERE DEL SEZIONALE ===');
+{
+  // «A1/2026» e «1/2026» sono due fatture: togliendo tutte le lettere
+  // diventavano lo stesso numero, e la seconda sovrascriveva la prima.
+  const pg=await apri(`S.billing_headers=[
+    {id:'hx',client_id:'sol',year:2026,month:2,status:'invoice_issued',invoice_number:'A1/2026',
+     invoice_date:'2026-04-08',total_amount:460,invoice_total_amount:478.4}];`);
+  await carica(pg,XML);
+  const t=await testo(pg);
+  ok(/Febbraio 2026 risulta già fatturato con la A1\/2026/.test(t),'la A1/2026 non è la 1/2026: non si sovrascrive',
+     (t.match(/Febbraio 2026 risulta[^.]{0,40}/)||[''])[0]||'si sovrascrive');
+  await pg.close();
+}
+
+console.log('\n=== SENZA NUMERO NON SI REGISTRA ===');
+{
+  const pg=await apri();
+  await carica(pg,XML.replace(/<Numero>[^<]*<\/Numero>/,''));
+  const t=await testo(pg);
+  ok(/mancano il numero o la data/.test(t),'senza numero le schede non si terrebbero insieme: non si registra',
+     (t.match(/Alla fattura mancano[^.]{0,40}/)||[''])[0]||'si registra');
+  ok(await bottone(pg)==='','nessun pulsante');
+  await pg.close();
+}
+
+console.log('\n=== L’ARROTONDAMENTO DEL RIEPILOGO ENTRA NELL’IMPONIBILE ===');
+{
+  // Righe da 2.529,99 e un riepilogo che arrotonda di un centesimo:
+  // la fattura torna, e la registrazione deve tornare con lei.
+  const arrot=XML.replace('<PrezzoTotale>2530.00</PrezzoTotale>','<PrezzoTotale>2529.99</PrezzoTotale>')
+    .replace('<Imposta>0.00</Imposta>','<Imposta>0.00</Imposta><Arrotondamento>0.01</Arrotondamento>');
+  const pg=await apri();
+  await carica(pg,arrot);
+  ok(await bottone(pg)==='Registra su 2 mesi','si registra',
+     (await testo(pg)).match(/Questa fattura non si registra[^.]{0,120}/)?.[0]||await bottone(pg));
+  await pg.evaluate(()=>window.registraFattura());
+  await pg.waitForTimeout(1500);
+  const h=await schede(pg);
+  const somma=h.reduce((a,x)=>a+Number(x.invoice_total_amount),0);
+  ok(Math.abs(somma-3109.6)<0.005,'e la somma dei mesi è il totale, al centesimo',somma.toFixed(2));
+  await pg.close();
+}
+
+console.log('\n=== LA RIVALSA CHE NON VALE SU TUTTO NON SI INDOVINA ===');
+{
+  // 119,60 di rivalsa su 2.000 di base cassa, mentre le righe fanno
+  // 2.990: una parte e' senza rivalsa, e non si sa di quale mese.
+  const pg=await apri();
+  await carica(pg,XML.replace('<ImponibileCassa>2990.00</ImponibileCassa>','<ImponibileCassa>2000.00</ImponibileCassa>'));
+  const t=await testo(pg);
+  ok(/non vale su tutte le righe/.test(t),'su più mesi non si registra, e dice perché',
+     (t.match(/La rivalsa non vale[^.]{0,80}/)||[''])[0]||'si registra');
+  await pg.close();
+}
+
+console.log('\n=== UNA FATTURA SI ELIMINA TUTTA O NIENTE ===');
+{
+  // Se il database rifiuta, non deve restare una fattura dimezzata.
+  const pg=await apri(DUE_MESI+`window.__rifiutaCancellazione='h3';`);
+  await eliminaFebbraio(pg);
+  const h=await schede(pg);
+  ok(h.map(x=>x.id).join(',')==='h2,h3,h4','il database dice di no su marzo: resta anche febbraio',
+     h.map(x=>x.id).join(','));
+  await pg.close();
+}
+
+console.log('\n=== FERMATA A METÀ, RIPETERLA NON DUPLICA ===');
+{
+  // Febbraio si scrive, marzo no. Ripetendo, febbraio va aggiornato,
+  // non inserito una seconda volta.
+  const pg=await apri();
+  await carica(pg,XML);
+  await pg.evaluate(()=>{window.__rifiutaRiga=(t,r)=>t==='billing_headers'&&Number(r.month)===3});
+  await pg.evaluate(()=>window.registraFattura());
+  await pg.waitForTimeout(1500);
+  const prima=await schede(pg);
+  ok(prima.map(x=>x.month).join(',')==='2','la prima volta si ferma dopo febbraio',prima.map(x=>x.month).join(',')||'nessuna');
+  const t=await testo(pg);
+  ok(/Registrazione fermata su Marzo 2026/.test(t),'e dice dove si è fermata',
+     (t.match(/Registrazione fermata[^:]{0,30}/)||[''])[0]||'non lo dice');
+  await pg.evaluate(()=>{window.__rifiutaRiga=null});
+  await pg.evaluate(()=>window.registraFattura());
+  await pg.waitForTimeout(1500);
+  const dopo=await schede(pg);
+  ok(dopo.map(x=>x.month).join(',')==='2,3','ripetendola, febbraio si aggiorna e marzo si aggiunge: due schede, non tre',
+     dopo.map(x=>x.month).join(','));
+  await pg.close();
+}
+
+console.log('\n=== IL BOLLO DI UNA FATTURA A CAVALLO D’ANNO ===');
+{
+  // Dicembre e gennaio, 52 € l'uno, una fattura sola da 104: sopra
+  // soglia. Tagliata al confine dell'anno erano due mezze fatture.
+  const pg=await apri(`S.billing_headers=[
+    {id:'h2',client_id:'sol',year:2025,month:12,status:'invoice_issued',invoice_number:'7/2026',
+     invoice_date:'2026-01-08',total_amount:50,invoice_total_amount:52},
+    {id:'h3',client_id:'sol',year:2026,month:1,status:'invoice_issued',invoice_number:'7/2026',
+     invoice_date:'2026-01-08',total_amount:50,invoice_total_amount:52}];`);
+  const d=await bolloDovuto(pg);
+  ok(d==='2,00','sul 2026 il bollo c’è: la fattura intera supera la soglia',d);
+  await pg.evaluate(()=>window.openInvoiceDetail('sol',2025,12));await pg.waitForTimeout(500);
+  await pg.evaluate(()=>window.go('tasseFuture'));await pg.waitForTimeout(900);
+  const t=await testo(pg);
+  ok(!/Imposta di bollo 2025 Dovuta/.test(t),'e sul 2025 non si conta una seconda volta',
+     (t.match(/Imposta di bollo 2025 Dovuta [^€]*€/)||[''])[0]||'nessun bollo nel 2025');
   await pg.close();
 }
 
