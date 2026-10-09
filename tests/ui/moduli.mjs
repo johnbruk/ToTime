@@ -52,13 +52,10 @@ const wbsSenzaAtt=await pg.evaluate(()=>{
   const w=(window.__stores.wbs_items||[]).find(x=>x.id===v);
   return !w||!w.activity_id;
 });
-const attVisibile=await pg.evaluate(()=>{
-  const s=document.querySelector('#app form.form [name=activity_id]');
-  return !!s&&!(s.closest('.field')&&s.closest('.field').hidden);
-});
-ok(attVisibile===wbsSenzaAtt,
-   'il tipo di attivita\' si chiede solo dove la commessa non lo da\'',
-   'commessa senza attivita\': '+wbsSenzaAtt+' \u00b7 campo visibile: '+attVisibile);
+const attNelModulo=await pg.evaluate(()=>!!document.querySelector('#app form.form [name=activity_id]'));
+ok(wbsSenzaAtt&&attNelModulo===false,
+   'il tipo di attivita\' non si chiede nel consuntivo: lo porta la commessa',
+   'commessa senza attivita\': '+wbsSenzaAtt+' \u00b7 campo nel modulo: '+attNelModulo);
 const scelto=await pg.evaluate(()=>document.querySelector('#app [name="wbs_id"]')?.value||'');
 ok(scelto==='w10','con la voce già scelta: ce n\'è una sola',scelto||'vuota');
 const primaTm=(await store('timesheet_entries')).length;

@@ -53,14 +53,14 @@ await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
   const primo=[...f.client_id.options].find(o=>o.value);
   if(primo){f.client_id.value=primo.value;window.refreshProjectsForForm(f)}});
 await pg.waitForTimeout(400);
-// Il progetto non si sceglie piu' a mano: dei due che il cliente ha,
-// uno solo porta a una commessa aperta, quindi si sceglie da se' e il
-// suo menu non compare. (p2 «Alfa» non ha nessuna commessa: offrirlo
-// voleva dire offrire un vicolo cieco, ed e' il blocco di stasera.)
+// Dei due progetti del cliente uno solo porta a una commessa aperta,
+// quindi si prende da se'. Ma il menu RESTA A SCHERMO: il progetto e'
+// uno dei tre dati da indicare, e vederlo scelto non e' rumore, e'
+// l'informazione. (p2 «Alfa» non ha nessuna commessa e non si offre.)
 ok(await campo('hier_project_id')==='p1',
    'il progetto si prende da se\': e\' l\'unico che porta a una commessa',await campo('hier_project_id'));
-ok(await pg.evaluate(()=>{const e=document.getElementById('prjField');return !e||e.hidden}),
-   'e il suo menu non compare: non c\'e\' niente da scegliere');
+ok(await pg.evaluate(()=>{const e=document.getElementById('prjField');return !!e&&!e.hidden}),
+   'ma si vede lo stesso: e\' uno dei tre dati da indicare');
 await pg.evaluate(()=>{const f=document.querySelector('#app form.form');f.hours.value='6';f.work_city.value='Milano'});
 const prima=await conta();
 await pg.evaluate(()=>[...document.querySelectorAll('#app button')].find(x=>/Salva e vai al giorno dopo/.test(x.textContent)).click());

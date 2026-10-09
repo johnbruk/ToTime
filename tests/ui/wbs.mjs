@@ -60,14 +60,17 @@ const wbsSenzaAttivita=await pg.evaluate(()=>{
   const w=(window.__stores.wbs_items||[]).find(x=>x.id===document.querySelector('[name=wbs_id]')?.value);
   return !w||!w.activity_id;
 });
-const attVisibile=await pg.evaluate(()=>{
-  const s=document.querySelector('#app form.form [name=activity_id]');
-  return !!s&&!(s.closest('.field')&&s.closest('.field').hidden);
-});
 ok(wbsSenzaAttivita,'questa commessa non porta un\'attivita\' con se\'');
-ok(attVisibile===wbsSenzaAttivita,
-   'e allora il tipo di attivita\' si puo\' scegliere, invece di partire vuoto',
-   'commessa senza attivita\': '+wbsSenzaAttivita+' \u00b7 campo visibile: '+attVisibile);
+// Il «tipo di attivita'» non si chiede piu' nel consuntivo: lo porta
+// l'attivita' della commessa, dove si imposta una volta sola. Chiederlo
+// qui voleva dire due campi omonimi nello stesso modulo.
+const attNelModulo=await pg.evaluate(()=>!!document.querySelector('#app form.form [name=activity_id]'));
+ok(attNelModulo===false,'e il tipo di attivita\' non si chiede qui: lo porta la commessa',
+   attNelModulo?'campo ancora presente':'assente, giusto');
+const etichette=await pg.evaluate(()=>[...document.querySelectorAll('#app form.form .field')]
+  .filter(d=>!d.hidden).map(d=>(d.querySelector('label')?.textContent||'').trim()));
+ok(etichette.filter(x=>/attivit/i.test(x)).length===1,
+   'un solo campo si chiama «Attivita\'», non due',etichette.join(' | '));
 const opts=async n=>pg.evaluate(x=>[...document.querySelectorAll(`[name="${x}"] option`)].map(o=>o.value).filter(Boolean),n);
 // Un livello con una scelta sola si sceglie da se' e non compare: qui
 // c'e' un progetto solo e una commessa sola, quindi il modulo non deve
@@ -102,7 +105,7 @@ await pg.evaluate(()=>{const f=document.querySelector('form.form');f.wbs_id.valu
 await pg.waitForTimeout(500);
 ok(await pg.evaluate(()=>window.__stores.timesheet_entries.length)===prima,'senza WBS non salva',prima+' voci, invariate');
 const avviso=await pg.evaluate(()=>document.querySelector('.toast')?.textContent||'');
-ok(/attività della commessa/i.test(avviso),'e dice cosa scegliere',avviso||'nessun messaggio');
+ok(/Scegli l’attività/.test(avviso),'e dice cosa scegliere, col nome del campo che vedi',avviso||'nessun messaggio');
 ok(!/\bWBS\b/.test(avviso),'senza tirare in ballo la sigla WBS',avviso||'—');
 
 console.log('\n=== C. Salvando, la voce porta la WBS ===');

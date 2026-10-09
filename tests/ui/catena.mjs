@@ -130,11 +130,19 @@ await pg.evaluate(()=>window.go('dailyForm'));await pg.waitForTimeout(500);
 // il modulo si apre SENZA cliente: lo si sceglie, e qui serve Solution
 await pg.selectOption('#app form.form [name="client_id"]','c1');await pg.waitForTimeout(400);
 const vis=await pg.evaluate(()=>{const o={};for(const id of ['prjField','engField','wbsField']){const e=document.getElementById(id);o[id]=e?(e.hidden?'nascosto':'visibile'):'assente'}return o});
-// il progetto e' uno solo e non si chiede; le commesse sono due — la
-// 2026 nata da se' e la 2027 aggiunta al punto 4b — quindi quella si'
-ok(vis.prjField==='nascosto','il progetto non viene chiesto: ce n\'è uno solo',JSON.stringify(vis));
-ok(vis.engField==='visibile','la commessa sì, perché adesso sono due',JSON.stringify(vis));
-ok(vis.wbsField==='nascosto','e l\'attività no, ce n\'è una sola per commessa',JSON.stringify(vis));
+// La tripletta si vede sempre: cliente, progetto (o cliente finale),
+// attivita'. Anche con una scelta sola, perche' sono i tre dati da
+// indicare e nasconderli toglieva l'informazione insieme al rumore.
+// La commessa invece e' un dettaglio della struttura: qui sono due —
+// la 2026 nata da se' e la 2027 aggiunta al punto 4b — e allora
+// compare, perche' li' c'e' davvero da scegliere.
+ok(vis.prjField==='visibile','il progetto si vede: è il secondo dei tre dati',JSON.stringify(vis));
+ok(vis.engField==='visibile','la commessa compare, perché adesso sono due',JSON.stringify(vis));
+ok(vis.wbsField==='visibile','e l\'attività si vede: è il terzo',JSON.stringify(vis));
+const etichetteC=await pg.evaluate(()=>[...document.querySelectorAll('#app form.form .field')]
+  .filter(d=>!d.hidden).map(d=>(d.querySelector('label')?.textContent||'').trim()));
+ok(etichetteC.filter(x=>/attività/i.test(x)).length===1,
+   'e di campi che si chiamano «attività» ce n\'è UNO solo',etichetteC.join(' | '));
 await pg.selectOption('#app form.form [name="engagement_id"]',eng[0].id);await pg.waitForTimeout(300);
 await pg.evaluate(()=>{const f=document.querySelector('#app form.form');f.hours.value='8';f.requestSubmit()});
 await pg.waitForTimeout(1000);
