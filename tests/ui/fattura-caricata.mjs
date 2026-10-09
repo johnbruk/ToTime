@@ -253,6 +253,28 @@ console.log('\n=== UNA NOTA DI CREDITO NON SI CONFRONTA COME UNA FATTURA ===');
   await pg.close();
 }
 
+console.log('\n=== UNA PARCELLA SI LEGGE COME UNA FATTURA ===');
+{
+  // TD06 e' la parcella: Fiscozen la emette per chi lavora in proprio.
+  // Ha lo stesso segno di una fattura, e si fermava con «Tipo di
+  // documento non trattato» come se fosse una nota di credito.
+  const parcella=XML.replace('<TipoDocumento>TD01','<TipoDocumento>TD06');
+  const pg=await apri();
+  const r=await confronta(pg,parcella);
+  const b=r.esiti.find(e=>e.liv==='blocco');
+  ok(!b,'una parcella TD06 non si ferma',b?b.titolo+': '+b.dettaglio.slice(0,60):'nessun blocco');
+  ok(r.mesi.length===2,'e si confronta mese per mese, come una fattura',r.mesi.join(', '));
+  for(const tipo of ['TD24','TD25']){
+    const r2=await confronta(pg,XML.replace('<TipoDocumento>TD01','<TipoDocumento>'+tipo));
+    ok(!r2.esiti.some(e=>e.liv==='blocco'),'neanche una fattura differita '+tipo);
+  }
+  const acc=await confronta(pg,XML.replace('<TipoDocumento>TD01','<TipoDocumento>TD02'));
+  const ba=acc.esiti.find(e=>e.liv==='blocco');
+  ok(!!ba&&/acconto/.test(ba.dettaglio)&&!/segno opposto/.test(ba.dettaglio),
+     'mentre un acconto si ferma, senza parlare di segno opposto',ba?ba.dettaglio.slice(0,90):'non si ferma');
+  await pg.close();
+}
+
 console.log('\n=== UNA FATTURA IN ALTRA VALUTA NON SI CONFRONTA IN EURO ===');
 {
   const usd=XML.replace('<Divisa>EUR','<Divisa>USD');

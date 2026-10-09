@@ -19,7 +19,8 @@ export const APP_DATA_KEYS = [
   'engagementReferences',
   'wbsItems',
   'billingLines',
-  'invoiceAllocations'
+  'invoiceAllocations',
+  'invoiceDocuments'
 ];
 
 export function createEmptyAppData() {

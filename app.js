@@ -878,6 +878,7 @@ function rimborsiDelMese(clientId,mese){
   ).reduce((s,e)=>s+Number(e.amount||0),0);
 }
 const vicini=(a,b)=>Math.abs(Number(a||0)-Number(b||0))<0.005;
+const TIPI_FATTURA={TD01:'fattura',TD06:'parcella',TD24:'fattura differita',TD25:'fattura differita'};
 function confrontaFattura(f){
   const esiti=[];
   const nota=(liv,titolo,dettaglio)=>esiti.push({liv,titolo,dettaglio});
@@ -887,9 +888,15 @@ function confrontaFattura(f){
   //    Una nota di credito ha gli importi positivi e il segno glielo da'
   //    il tipo: confrontarla come una fattura direbbe che hai fatturato
   //    quello che invece hai stornato.
-  if(f.tipo&&f.tipo!=='TD01'){
+  //    Fatture a tutti gli effetti, con lo stesso segno, sono anche la
+  //    parcella (TD06) — quella che Fiscozen emette per chi lavora in
+  //    proprio — e le fatture differite (TD24, TD25). Passava solo TD01,
+  //    e ogni parcella si fermava come se fosse una nota di credito.
+  if(f.tipo&&!Object.prototype.hasOwnProperty.call(TIPI_FATTURA,f.tipo)){
+    const nomi={TD02:'acconto o anticipo su fattura',TD03:'acconto o anticipo su parcella',
+      TD04:'nota di credito',TD05:'nota di debito'};
     nota('blocco','Tipo di documento non trattato',
-      `Questo e' un documento ${esc(f.tipo)}${f.tipo==='TD04'?' (nota di credito)':''}. Il confronto sa leggere solo le fatture TD01: su un documento di segno opposto direbbe il contrario del vero.`);
+      `Questo e' un documento ${esc(f.tipo)}${nomi[f.tipo]?' ('+nomi[f.tipo]+')':''}. Il confronto sa leggere fatture e parcelle (TD01, TD06, TD24, TD25)${f.tipo==='TD04'?': su una nota di credito, che ha il segno opposto, direbbe il contrario del vero':''}.`);
     return {esiti,cliente:null,mesi:[]};
   }
   if(f.divisa&&f.divisa!=='EUR'){
@@ -1191,7 +1198,9 @@ function fatturaCarica(){
 <p class="sub">Si legge l’XML della fattura elettronica e lo si confronta coi tuoi consuntivi. <b>Non si salva niente</b> finché non premi «Registra».</p>
 <div class="card"><div class="field"><label>File della fattura (.xml)</label>
 <input type="file" accept=".xml,text/xml,application/xml" onchange="fatturaFileScelto(this)"></div>
-<div class="desc">Il file resta nel browser e non viene caricato da nessuna parte. Registrando si scrivono solo i suoi numeri, sulle schede di fatturazione.</div></div>
+<div class="desc">${archivioPronto()
+  ?'Finché non premi «Registra» il file resta nel browser. Registrando se ne scrivono i numeri sulle schede di fatturazione e si conserva il file intero nel tuo archivio, visibile solo a te: per ritrovarlo e riscaricarlo.'
+  :'Il file resta nel browser e non viene caricato da nessuna parte. Registrando si scrivono solo i suoi numeri, sulle schede di fatturazione.'}</div></div>
 ${r?schedaFatturaLetta(r):''}
 <button type="button" class="secondary" onclick="go('billing')">Torna alla fatturazione</button>`);
 }
@@ -1217,6 +1226,61 @@ function chiaveNumero(n){
     .replace(/^(n|nr|num)(\.|°|º)\s*/i,'')
     .replace(/^#\s*/,'')
     .replace(/\s+/g,'').toUpperCase();
+}
+// ─── Le fatture conservate ─────────────────────────────────
+//
+// Registrando una fattura se ne conserva anche il file: e' la fattura
+// vera, e la sua natura IVA dice se il bollo ci va. Finche' la tabella
+// non c'e' — migrazione non lanciata — la registrazione scrive le
+// schede come prima, e lo dice.
+function archivioPronto(){return !(state.missingTables&&state.missingTables.has('invoice_documents'))}
+function natureFattura(f){
+  return [...new Set((f&&f.riepiloghi||[]).map(x=>String(x.natura||'').trim().toUpperCase()).filter(Boolean))].sort();
+}
+// Una fattura e' riconosciuta da numero e data, come nel database. Il
+// cliente si guarda solo se c'e': quello di una scheda cliente
+// eliminata resta vuoto, e la fattura resta sua.
+function documentoDi(clientId,numero,dataFattura){
+  const n=chiaveNumero(numero),d=String(dataFattura||'').slice(0,10);
+  if(!n||!d)return null;
+  return (data.invoiceDocuments||[]).find(x=>chiaveNumero(x.invoice_number)===n
+    &&String(x.invoice_date||'').slice(0,10)===d&&(!x.client_id||!clientId||x.client_id===clientId))||null;
+}
+async function conservaFattura(r){
+  const f=r.f;
+  if(!r.xml)return {errore:'il testo del file non è più disponibile: caricalo di nuovo.'};
+  const payload={client_id:r.cliente.id,invoice_number:f.numero,invoice_date:f.data,
+    months:r.mesi,total_amount:f.totaleDichiarato?Number(f.totale):null,
+    natures:natureFattura(f),stamp_base:Number(f.baseEsente||0),
+    stamp_amount:Number(f.bolloImporto||0),file_name:r.nome||null,xml:r.xml};
+  const c=documentoDi(r.cliente.id,f.numero,f.data);
+  const res=c?await updateResilient('invoice_documents',{...payload,updated_at:new Date().toISOString()},c.id)
+    :await insertResilient('invoice_documents',payload);
+  return res.error?{errore:motivoLeggibile(res.error)}:{ok:true};
+}
+// Il file si scarica quando serve: l'elenco caricato all'apertura non
+// porta gli XML, che sono documenti interi.
+async function scaricaFatturaConservata(id){
+  const {data:trovate,error}=await sb.from('invoice_documents').select('id,xml,file_name,invoice_number').eq('id',id);
+  if(error)return setMsgLeggero(motivoLeggibile(error),8000);
+  const d=(trovate||[]).find(x=>x.id===id);
+  if(!d||!d.xml)return setMsgLeggero('Il file di questa fattura non si trova più.',7000);
+  const nome=d.file_name||('fattura-'+String(d.invoice_number||'').replace(/[^\w.-]+/g,'_')+'.xml');
+  const url=URL.createObjectURL(new Blob([d.xml],{type:'application/xml'}));
+  const a=document.createElement('a');a.href=url;a.download=nome;
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1500);
+}
+function cardFatturaConservata(clientId,h){
+  if(!h||!h.invoice_number||!h.invoice_date)return '';
+  const d=documentoDi(clientId,h.invoice_number,h.invoice_date);
+  if(!d)return '';
+  const mesi=(d.months||[]).map(monthLabel).join(' e ');
+  const nature=(d.natures||[]).join(', ');
+  return `<div class="card"><b>Fattura conservata</b>
+    <div class="desc" style="margin-top:6px">${esc(d.invoice_number)} del ${fmtDMY(d.invoice_date)}${mesi?' · '+esc(mesi):''}</div>
+    <div class="desc">${nature?'Natura IVA '+esc(nature):'Natura IVA non indicata nel file'}${Number(d.stamp_amount)>0?' · bollo dichiarato '+fmtEUR(d.stamp_amount):''}</div>
+    <button type="button" class="secondary" style="margin-top:10px" onclick="scaricaFatturaConservata('${esc(d.id)}')">Scarica l’XML</button></div>`;
 }
 function pianoRegistrazione(r){
   const f=r&&r.f;
@@ -1285,7 +1349,11 @@ function pianoRegistrazione(r){
     &&vicino(h.invoice_total_amount,x.totale)&&vicino(h.total_amount,x.base)
     &&vicino(h.inps_recharge_amount,x.rivalsa)&&vicino(h.stamp_duty_amount,x.bollo)});
   const scostamenti=(r.esiti||[]).filter(e=>e.liv==='scostamento').length;
-  return {ok:true,righe,gia,scostamenti};
+  // Una fattura registrata prima che l'archivio esistesse ha le schede
+  // giuste ma non il file: si offre di conservarlo, senza riscrivere
+  // le schede.
+  const daConservare=archivioPronto()&&!documentoDi(r.cliente.id,f.numero,f.data);
+  return {ok:true,righe,gia,scostamenti,daConservare};
 }
 function cardRegistrazione(r){
   const p=pianoRegistrazione(r);
@@ -1297,7 +1365,11 @@ function cardRegistrazione(r){
     <div class="value">${fmtEUR(x.totale)}</div></div>`).join('');
   return `<h2>Registra la fattura</h2><p class="sub">Si scrivono sulle schede di fatturazione i numeri di questa fattura, un mese per scheda e tutte con lo stesso numero. Sono quelli che usano il bilancio e la stima delle imposte.</p>
 <div class="list">${righe}</div>
-${p.gia?`<div class="card"><b>Già registrata</b><div class="desc" style="margin-top:6px">Le schede di questi mesi hanno già questo numero e questi importi.</div></div>`
+${archivioPronto()
+  ?`<p class="sub">Si conserva anche il file XML, con la natura IVA${natureFattura(r.f).length?' ('+esc(natureFattura(r.f).join(', '))+')':''}: lo ritrovi nel dettaglio della fattura.</p>`
+  :`<p class="sub">Il file XML per ora non si conserva: manca la tabella delle fatture conservate. Lanciata la migrazione <b>2026-10-09_fatture-conservate.sql</b>, ricaricando la fattura potrai conservarlo.</p>`}
+${p.gia
+  ?`<div class="card"><b>Già registrata</b><div class="desc" style="margin-top:6px">Le schede di questi mesi hanno già questo numero e questi importi${p.daConservare?', ma il file non è ancora conservato.':'.'}</div></div>${p.daConservare?`<button type="button" class="primary" onclick="registraFattura()">Conserva il file XML</button>`:''}`
   :`<button type="button" class="primary" onclick="registraFattura()">Registra su ${p.righe.length===1?'1 mese':p.righe.length+' mesi'}</button>`}`;
 }
 // Se una scheda va in errore a meta', ripetere e' sicuro: lo stesso
@@ -1313,40 +1385,53 @@ async function registraFatturaOra(){
   const r=state.fatturaLetta;
   const p=pianoRegistrazione(r);
   if(!p.ok)return setMsgLeggero(p.perche,9000);
-  if(p.gia)return setMsgLeggero('È già registrata così.',5000);
+  if(p.gia&&!p.daConservare)return setMsgLeggero('È già registrata così.',5000);
   const f=r.f;
-  const elenco=p.righe.map(x=>'· '+monthLabel(x.mese)+': '+fmtEUR(x.totale)).join('\n');
-  if(!confirm('Registrare la fattura '+(f.numero||'senza numero')+'?\n\n'+elenco
-    +(p.scostamenti?'\n\nIl controllo ha trovato '+p.scostamenti+(p.scostamenti===1?' scostamento':' scostamenti')
-      +' dal consuntivato: registrandola, bilancio e imposte seguiranno la fattura, non il consuntivo.':'')
-    +'\n\nBilancio e stima delle imposte useranno questi numeri.'))return;
-  for(const x of p.righe){
-    // Un mese gia' incassato resta incassato: registrare la fattura non
-    // deve far tornare indietro un incasso.
-    const incassata=x.esistente&&x.esistente.status==='collected';
-    const payload={client_id:r.cliente.id,year:x.year,month:x.month,
-      invoice_number:f.numero||null,invoice_date:f.data||null,
-      status:incassata?'collected':'invoice_issued',
-      total_amount:x.base,taxable_base_amount:x.base,
-      inps_recharge_enabled:x.rivalsa>0,inps_recharge_rate:Number(f.rivalsaAliquota||0)||null,
-      inps_recharge_amount:x.rivalsa,
-      stamp_duty_enabled:x.bollo>0,stamp_duty_amount:x.bollo,
-      invoice_total_amount:x.totale};
-    const res=x.esistente
-      ? await updateResilient('billing_headers',payload,x.esistente.id)
-      : await insertResilient('billing_headers',payload);
-    if(res.error){
-      // I mesi gia' scritti si ricaricano PRIMA di proporre di
-      // ripetere: altrimenti il piano li vedrebbe ancora assenti e li
-      // inserirebbe una seconda volta.
-      const perche='Registrazione fermata su '+monthLabel(x.mese)+': '+motivoLeggibile(res.error)+' Ripetila: i mesi già scritti si aggiornano, non si duplicano.';
-      await reload();
-      return setMsgLeggero(perche,10000);
+  if(!p.gia){
+    const elenco=p.righe.map(x=>'· '+monthLabel(x.mese)+': '+fmtEUR(x.totale)).join('\n');
+    if(!confirm('Registrare la fattura '+(f.numero||'senza numero')+'?\n\n'+elenco
+      +(p.scostamenti?'\n\nIl controllo ha trovato '+p.scostamenti+(p.scostamenti===1?' scostamento':' scostamenti')
+        +' dal consuntivato: registrandola, bilancio e imposte seguiranno la fattura, non il consuntivo.':'')
+      +'\n\nBilancio e stima delle imposte useranno questi numeri.'))return;
+    for(const x of p.righe){
+      // Un mese gia' incassato resta incassato: registrare la fattura non
+      // deve far tornare indietro un incasso.
+      const incassata=x.esistente&&x.esistente.status==='collected';
+      const payload={client_id:r.cliente.id,year:x.year,month:x.month,
+        invoice_number:f.numero||null,invoice_date:f.data||null,
+        status:incassata?'collected':'invoice_issued',
+        total_amount:x.base,taxable_base_amount:x.base,
+        inps_recharge_enabled:x.rivalsa>0,inps_recharge_rate:Number(f.rivalsaAliquota||0)||null,
+        inps_recharge_amount:x.rivalsa,
+        stamp_duty_enabled:x.bollo>0,stamp_duty_amount:x.bollo,
+        invoice_total_amount:x.totale};
+      const res=x.esistente
+        ? await updateResilient('billing_headers',payload,x.esistente.id)
+        : await insertResilient('billing_headers',payload);
+      if(res.error){
+        // I mesi gia' scritti si ricaricano PRIMA di proporre di
+        // ripetere: altrimenti il piano li vedrebbe ancora assenti e li
+        // inserirebbe una seconda volta.
+        const perche='Registrazione fermata su '+monthLabel(x.mese)+': '+motivoLeggibile(res.error)+' Ripetila: i mesi già scritti si aggiornano, non si duplicano.';
+        await reload();
+        return setMsgLeggero(perche,10000);
+      }
     }
   }
+  // Il file si conserva DOPO le schede: se non riesce, la fattura resta
+  // registrata, e al prossimo caricamento si offre di conservarlo.
+  // Quando le schede si riscrivono — un XML corretto, con lo stesso
+  // numero e la stessa data — il file conservato si aggiorna con loro:
+  // altrimenti i conti seguirebbero il file nuovo e l'archivio il vecchio.
+  const c=(archivioPronto()&&(!p.gia||p.daConservare))?await conservaFattura(r):{saltata:true};
   await reload();
-  setMsg('Fattura '+(f.numero||'')+' registrata su '+p.righe.map(x=>monthLabel(x.mese)).join(' e ')
-    +': bilancio e stima delle imposte ora usano questi numeri.',8000);
+  const registrata='Fattura '+(f.numero||'')+' registrata su '+p.righe.map(x=>monthLabel(x.mese)).join(' e ')
+    +': bilancio e stima delle imposte ora usano questi numeri.';
+  if(c.errore)
+    return setMsg((p.gia?'Il file':registrata+' Il file')+' però non si è conservato: '+c.errore
+      +' Ricarica la fattura e premi «Conserva il file XML».',12000);
+  setMsg(p.gia?'Il file della fattura '+(f.numero||'')+' è conservato.'
+    :registrata+(c.ok?' Il file XML è conservato.':''),8000);
 }
 function schedaFatturaLetta(r){
   const f=r.f;
@@ -1376,16 +1461,21 @@ function fatturaFileScelto(input){
   const reader=new FileReader();
   reader.onload=()=>{
     try{
-      const f=leggiFatturaXML(String(reader.result||'').replace(/^﻿/,''));
+      // Si conserva il testo com'e' arrivato. readAsText toglierebbe da
+      // se' il BOM iniziale: si leggono i byte e si decodificano
+      // tenendolo, e lo si toglie solo per leggere la fattura. Cosi' il
+      // file riscaricato e' quello caricato.
+      const originale=new TextDecoder('utf-8',{ignoreBOM:true}).decode(reader.result);
+      const f=leggiFatturaXML(originale.replace(/^﻿/,''));
       const r=confrontaFattura(f);
-      state.fatturaLetta={f,...r,nome:file.name};
+      state.fatturaLetta={f,...r,nome:file.name,xml:originale};
       render();
     }catch(e){
       setMsgLeggero('Non si è potuto leggere il file: '+(e&&e.message||e),9000);
     }
   };
   reader.onerror=()=>setMsgLeggero('Non si è potuto aprire il file.',7000);
-  reader.readAsText(file);
+  reader.readAsArrayBuffer(file);
 }
 function renderTemplate(tpl,row){
   const fallback={daily_rate_8h:'Consulenza - [Mese Anno] - Cliente/Progetto: [Progetto] | Giorni: [Giorni]',monthly_flat:'Consulenza - [Mese Anno] - Cliente/Progetto: [Progetto]',manual_entry:'Prestazione professionale - [Mese Anno] - Cliente/Progetto: [Progetto]',travel_expenses:'Spese di trasferta - [Mese Anno] - Cliente/Progetto: [Progetto]'}[row.type]||'[Mese Anno] - [Progetto]';
@@ -3623,7 +3713,7 @@ function billingDetailView(){const clientId=state.edit;const group=billingGroups
     }
     if(l.type==='travel_expenses'){(l.items||[]).forEach(e=>items.push({title:expenseCategoryName(e.expense_category_id),desc:'Rimborso in fattura'+(e.work_city?' · '+e.work_city:''),fisco:expenseFiscoText(e),importo:Number(e.amount||0),quantita:1}))}
     else{items.push({title:projectName(l.project_id)||'Senza progetto',desc:l.label,fisco:fiscoText(l),...campiFiscozen(l)})}});
-  const piedeTot=piede.reduce((s,x)=>s+x.amount,0);return appShell(`<h1>${esc(clientName(clientId))}</h1><p class="sub">Fattura ${monthLabel(state.month)}</p><div class="card"><b>Totale cliente</b><div class="amount" style="margin-top:8px">${fmtEUR(calc.total)}</div><div class="metricLine">Base ${fmtEUR(calc.subtotal)} <span class="dot">·</span> Rivalsa ${fmtEUR(calc.inpsAmount)}${calc.stampAmount>0?' <span class="dot">·</span> Bollo '+fmtEUR(calc.stampAmount):''}</div>${calc.stampDue>0&&calc.stampAmount===0?`<div class="metricLine"><span class="tag gray">A tuo carico</span> ${fmtEUR(calc.stampDue)} di bollo, fuori dal totale</div>`:''}${group.pAmount>0?`<div class="metricLine" style="margin-top:6px"><span class="tag blue">Pianificato</span> ${fmtEUR(group.pAmount)} dei ${fmtEUR(calc.subtotal)} di base${group.pHours>0?` <span class="dot">·</span> ${fmtNum(group.pHours/8,2)} gg/u`:''}</div>`:''}<span class="tag ${statusClass(st)}">${statusLabel(st)}</span></div><h2>Da incollare su Fiscozen</h2><p class="sub">Una riga per prestazione, coi campi nell'ordine in cui li chiede «Aggiungi prestazione».</p><div class="list">${items.map((it,i)=>`<div class="row"><div>${i+1}</div><div><div class="title">${esc(it.title)}</div><div class="desc">${esc(it.desc)}</div><div class="fzCampi"><div><span>Descrizione</span><div class="copybox" id="copy-${i}">${esc(it.fisco)}</div><button class="secondary" onclick="copyText('${esc(it.fisco).replace(/'/g,'&#39;')}')">Copia descrizione</button></div><div><span>Importo</span><b>${fmtEUR(it.importo)}</b></div><div><span>Quantità</span><b>${fmtNum(it.quantita,2)}</b></div></div>${it.nota?`<div class="small">${esc(it.nota)}</div>`:''}</div><div></div></div>`).join('')}</div>${(calc.inpsEnabled&&calc.inpsAmount>0)||bolloDovuto(calc.stampMode)?`<h2>Questo non si incolla</h2><p class="sub">Fiscozen ci pensa da sé, o in fattura non ci va affatto. Sta qui per saperlo, non per copiarlo.</p><div class="list">${calc.inpsEnabled&&calc.inpsAmount>0?`<div class="row"><div>☑</div><div><div class="title">Rivalsa INPS ${fmtNum(calc.inpsRate,2)}%</div><div class="metricLine">${fmtEUR(calc.inpsAmount)}</div><div class="desc">${Math.abs(Number(calc.inpsRate)-4)<0.005?'La calcola Fiscozen: spunta «Applica contributo GS INPS 4,00%» dentro ogni prestazione. Incollandola anche come voce verrebbe contata due volte.':'Attenzione: la spunta di Fiscozen, «Applica contributo GS INPS 4,00%», applica il 4%, mentre qui l’aliquota è del '+fmtNum(calc.inpsRate,2)+'%. Con la spunta il totale su Fiscozen non tornerebbe con questo: la rivalsa per la gestione separata è del 4%, controlla l’aliquota in Configurazione fiscale.'}</div></div><div></div></div>`:''}${bolloDovuto(calc.stampMode)?`<div class="row"><div>·</div><div><div class="title">Marca da bollo</div><div class="metricLine">${calc.stampDue>0?fmtEUR(calc.stampDue)+(calc.stampAmount>0?'':' <span class="tag gray">a tuo carico</span>'):'Qui non è dovuta'}</div><div class="desc">${calc.stampDue>0?'Non è una prestazione e non si aggiunge fra le voci. '+esc(bolloFrase(calc.stampMode)):'Gli importi esenti non superano '+fmtEUR(BOLLO_SOGLIA)+', quindi qui il bollo non è dovuto.'}</div></div><div></div></div>`:''}</div>`:''}${piede.length?`<h2>Spese a piè di lista</h2><p class="sub">Anticipate da te e <b>da chiedere a parte</b>: non entrano nel totale della fattura, che e' e resta ${fmtEUR(calc.total)}. Sono una partita di giro, quindi la descrizione analitica serve comunque.</p><div class="card"><b>Da farsi rimborsare</b><div class="amount" style="margin-top:8px">${fmtEUR(piedeTot)}</div><small class="desc">${piede.length} ${piede.length===1?'spesa':'spese'}</small></div><div class="list">${piede.map((it,i)=>`<div class="row"><div>·</div><div><div class="title">${esc(it.title)}</div><div class="desc">${it.desc}</div><div class="metricLine">${it.metric}</div><div class="copybox" id="pie-${i}">${esc(it.fisco)}</div><button class="secondary" onclick="copyText('${esc(it.fisco).replace(/'/g,'&#39;')}')">Copia descrizione</button></div><div></div></div>`).join('')}</div>`:''}<h2>Dati fattura / incasso</h2><form class="form" onsubmit="saveBillingHeader(event)"><div class="field"><label>Stato</label><select name="status"><option value="to_invoice" ${st==='to_invoice'?'selected':''}>Da fatturare</option><option value="invoice_issued" ${st==='invoice_issued'?'selected':''}>Fattura emessa</option><option value="collected" ${st==='collected'?'selected':''}>Incassato</option><option value="excluded" ${st==='excluded'?'selected':''}>Escluso</option></select></div><div class="field"><label>Rivalsa INPS</label><select name="inps_recharge_enabled"><option value="true" ${calc.inpsEnabled?'selected':''}>Sì</option><option value="false" ${!calc.inpsEnabled?'selected':''}>No</option></select></div><div class="field"><label>Percentuale rivalsa INPS</label><input name="inps_recharge_rate" type="number" step="0.01" value="${Number(calc.inpsRate||4)}"></div><div class="field"><label>Numero fattura</label><input name="invoice_number" value="${esc(header.invoice_number||'')}"></div><div class="field"><label>Data fattura</label><input name="invoice_date" type="date" value="${esc(header.invoice_date||'')}"></div><div class="field"><label>Data incasso</label><input name="collection_date" type="date" value="${esc(header.collection_date||'')}"></div><div class="field"><label>Importo incassato</label><input name="collected_amount" type="number" step="0.01" value="${Number(header.collected_amount||0)}"></div><div class="field"><label>Note</label><textarea name="notes">${esc(header.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva stato fattura</button>${header.id?`<button type="button" class="secondary danger" onclick="eliminaFattura('${header.id}')">Elimina fattura</button>`:''}<button type="button" class="secondary" onclick="go('billing')">Indietro</button></div></form>`)}
+  const piedeTot=piede.reduce((s,x)=>s+x.amount,0);return appShell(`<h1>${esc(clientName(clientId))}</h1><p class="sub">Fattura ${monthLabel(state.month)}</p><div class="card"><b>Totale cliente</b><div class="amount" style="margin-top:8px">${fmtEUR(calc.total)}</div><div class="metricLine">Base ${fmtEUR(calc.subtotal)} <span class="dot">·</span> Rivalsa ${fmtEUR(calc.inpsAmount)}${calc.stampAmount>0?' <span class="dot">·</span> Bollo '+fmtEUR(calc.stampAmount):''}</div>${calc.stampDue>0&&calc.stampAmount===0?`<div class="metricLine"><span class="tag gray">A tuo carico</span> ${fmtEUR(calc.stampDue)} di bollo, fuori dal totale</div>`:''}${group.pAmount>0?`<div class="metricLine" style="margin-top:6px"><span class="tag blue">Pianificato</span> ${fmtEUR(group.pAmount)} dei ${fmtEUR(calc.subtotal)} di base${group.pHours>0?` <span class="dot">·</span> ${fmtNum(group.pHours/8,2)} gg/u`:''}</div>`:''}<span class="tag ${statusClass(st)}">${statusLabel(st)}</span></div>${cardFatturaConservata(clientId,header)}<h2>Da incollare su Fiscozen</h2><p class="sub">Una riga per prestazione, coi campi nell'ordine in cui li chiede «Aggiungi prestazione».</p><div class="list">${items.map((it,i)=>`<div class="row"><div>${i+1}</div><div><div class="title">${esc(it.title)}</div><div class="desc">${esc(it.desc)}</div><div class="fzCampi"><div><span>Descrizione</span><div class="copybox" id="copy-${i}">${esc(it.fisco)}</div><button class="secondary" onclick="copyText('${esc(it.fisco).replace(/'/g,'&#39;')}')">Copia descrizione</button></div><div><span>Importo</span><b>${fmtEUR(it.importo)}</b></div><div><span>Quantità</span><b>${fmtNum(it.quantita,2)}</b></div></div>${it.nota?`<div class="small">${esc(it.nota)}</div>`:''}</div><div></div></div>`).join('')}</div>${(calc.inpsEnabled&&calc.inpsAmount>0)||bolloDovuto(calc.stampMode)?`<h2>Questo non si incolla</h2><p class="sub">Fiscozen ci pensa da sé, o in fattura non ci va affatto. Sta qui per saperlo, non per copiarlo.</p><div class="list">${calc.inpsEnabled&&calc.inpsAmount>0?`<div class="row"><div>☑</div><div><div class="title">Rivalsa INPS ${fmtNum(calc.inpsRate,2)}%</div><div class="metricLine">${fmtEUR(calc.inpsAmount)}</div><div class="desc">${Math.abs(Number(calc.inpsRate)-4)<0.005?'La calcola Fiscozen: spunta «Applica contributo GS INPS 4,00%» dentro ogni prestazione. Incollandola anche come voce verrebbe contata due volte.':'Attenzione: la spunta di Fiscozen, «Applica contributo GS INPS 4,00%», applica il 4%, mentre qui l’aliquota è del '+fmtNum(calc.inpsRate,2)+'%. Con la spunta il totale su Fiscozen non tornerebbe con questo: la rivalsa per la gestione separata è del 4%, controlla l’aliquota in Configurazione fiscale.'}</div></div><div></div></div>`:''}${bolloDovuto(calc.stampMode)?`<div class="row"><div>·</div><div><div class="title">Marca da bollo</div><div class="metricLine">${calc.stampDue>0?fmtEUR(calc.stampDue)+(calc.stampAmount>0?'':' <span class="tag gray">a tuo carico</span>'):'Qui non è dovuta'}</div><div class="desc">${calc.stampDue>0?'Non è una prestazione e non si aggiunge fra le voci. '+esc(bolloFrase(calc.stampMode)):'Gli importi esenti non superano '+fmtEUR(BOLLO_SOGLIA)+', quindi qui il bollo non è dovuto.'}</div></div><div></div></div>`:''}</div>`:''}${piede.length?`<h2>Spese a piè di lista</h2><p class="sub">Anticipate da te e <b>da chiedere a parte</b>: non entrano nel totale della fattura, che e' e resta ${fmtEUR(calc.total)}. Sono una partita di giro, quindi la descrizione analitica serve comunque.</p><div class="card"><b>Da farsi rimborsare</b><div class="amount" style="margin-top:8px">${fmtEUR(piedeTot)}</div><small class="desc">${piede.length} ${piede.length===1?'spesa':'spese'}</small></div><div class="list">${piede.map((it,i)=>`<div class="row"><div>·</div><div><div class="title">${esc(it.title)}</div><div class="desc">${it.desc}</div><div class="metricLine">${it.metric}</div><div class="copybox" id="pie-${i}">${esc(it.fisco)}</div><button class="secondary" onclick="copyText('${esc(it.fisco).replace(/'/g,'&#39;')}')">Copia descrizione</button></div><div></div></div>`).join('')}</div>`:''}<h2>Dati fattura / incasso</h2><form class="form" onsubmit="saveBillingHeader(event)"><div class="field"><label>Stato</label><select name="status"><option value="to_invoice" ${st==='to_invoice'?'selected':''}>Da fatturare</option><option value="invoice_issued" ${st==='invoice_issued'?'selected':''}>Fattura emessa</option><option value="collected" ${st==='collected'?'selected':''}>Incassato</option><option value="excluded" ${st==='excluded'?'selected':''}>Escluso</option></select></div><div class="field"><label>Rivalsa INPS</label><select name="inps_recharge_enabled"><option value="true" ${calc.inpsEnabled?'selected':''}>Sì</option><option value="false" ${!calc.inpsEnabled?'selected':''}>No</option></select></div><div class="field"><label>Percentuale rivalsa INPS</label><input name="inps_recharge_rate" type="number" step="0.01" value="${Number(calc.inpsRate||4)}"></div><div class="field"><label>Numero fattura</label><input name="invoice_number" value="${esc(header.invoice_number||'')}"></div><div class="field"><label>Data fattura</label><input name="invoice_date" type="date" value="${esc(header.invoice_date||'')}"></div><div class="field"><label>Data incasso</label><input name="collection_date" type="date" value="${esc(header.collection_date||'')}"></div><div class="field"><label>Importo incassato</label><input name="collected_amount" type="number" step="0.01" value="${Number(header.collected_amount||0)}"></div><div class="field"><label>Note</label><textarea name="notes">${esc(header.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva stato fattura</button>${header.id?`<button type="button" class="secondary danger" onclick="eliminaFattura('${header.id}')">Elimina fattura</button>`:''}<button type="button" class="secondary" onclick="go('billing')">Indietro</button></div></form>`)}
 async function saveBillingHeader(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const clientId=state.edit;const group=billingGroupsByClient().find(g=>g.client_id===clientId);const {year,month}=periodParts();const tempCalc=billingCalc(group,{inps_recharge_enabled:f.inps_recharge_enabled==='true',inps_recharge_rate:Number(f.inps_recharge_rate||4)});const payload={year,month,client_id:clientId,total_amount:Number(tempCalc.subtotal||0),services_amount:tempCalc.services,expenses_amount:tempCalc.expenses,manual_amount:tempCalc.manual,taxable_base_amount:tempCalc.taxableBase,inps_recharge_enabled:tempCalc.inpsEnabled,inps_recharge_rate:tempCalc.inpsRate,inps_recharge_amount:tempCalc.inpsAmount,stamp_duty_enabled:tempCalc.stampEnabled,stamp_duty_amount:tempCalc.stampAmount,invoice_total_amount:tempCalc.total,status:f.status,invoice_number:norm(f.invoice_number)||null,invoice_date:f.invoice_date||null,collection_date:f.collection_date||null,collected_amount:Number(f.collected_amount||0)||null,notes:f.notes||null};const existing=headerForClient(clientId);let error;if(existing){({error}=await updateResilient('billing_headers',payload,existing.id));}else{({error}=await insertResilient('billing_headers',payload));}if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='billingDetail';state.edit=clientId;render()}
 function copyText(txt){const cleaned=document.createElement('textarea');cleaned.innerHTML=txt;const val=cleaned.value;navigator.clipboard?.writeText(val).then(()=>setMsg('Descrizione copiata.')).catch(()=>prompt('Copia descrizione:',val))}
 
@@ -6721,7 +6811,7 @@ Object.assign(window,{
   scomposizioneRimborsi,
   forecastCalc,
   leggiFatturaXML,confrontaFattura,clientePerPiva,giorniConsuntivati,
-  fatturaCarica,fatturaFileScelto,registraFattura,
+  fatturaCarica,fatturaFileScelto,registraFattura,scaricaFatturaConservata,
   annualTaxCalc,
   cambiaClientePolicy,
   savePolicy,

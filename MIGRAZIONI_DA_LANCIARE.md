@@ -1,4 +1,4 @@
-# Le quattro migrazioni da lanciare
+# Le migrazioni da lanciare
 
 Nel **SQL Editor di Supabase**, in quest'ordine. Sono tutte sicure da
 rilanciare e **nessuna tocca un importo esistente**: ognuna finisce con
@@ -90,6 +90,26 @@ La verifica deve dire: `colonna receipt_path esiste` ·
 Se dicesse «ESISTE MA E' PUBBLICO», fermati e dimmelo: un bucket
 pubblico renderebbe le ricevute leggibili a chiunque ne indovini il
 percorso.
+
+---
+
+## 5. `migrations/2026-10-09_fatture-conservate.sql`
+
+Crea la tabella `invoice_documents`, dove si conservano le fatture
+caricate: il file XML, la natura IVA, i mesi che coprono, il bollo
+dichiarato.
+
+Serve per: conservare il file quando registri una fattura caricata, e
+ritrovarlo nel dettaglio della fattura con «Scarica l'XML».
+
+Senza di lei: la registrazione scrive le schede dei mesi come prima, e
+il file non si conserva. L'app lo dice nella schermata della fattura
+caricata. Una fattura registrata prima della migrazione si conserva
+dopo: ricaricandola, l'app offre «Conserva il file XML» senza
+riscrivere le schede.
+
+La verifica deve dire: `tabella invoice_documents esiste` ·
+`RLS attiva` · `policy 4` · `fatture conservate 0` (all'inizio).
 
 ---
 

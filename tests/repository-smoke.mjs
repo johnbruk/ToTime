@@ -85,6 +85,19 @@ assert.ok(wbsError, 'l\'errore viene comunque registrato');
 assert.equal(wbsError.optional, true, 'ma marcato come facoltativo');
 assert.deepEqual(optionalResult.data.wbsItems, []);
 
+// Le fatture conservate: facoltative come le altre tabelle nuove, e
+// l'elenco non si porta dietro gli XML, che si scaricano uno per volta.
+const docMissing = Object.assign(new Error("Could not find the table 'public.invoice_documents' in the schema cache"), { code: 'PGRST205' });
+const docResult = await createRepository(makeSupabaseMock(new Set(['invoice_documents']), docMissing).sb).loadAll();
+assert.equal(docResult.errors.find(e => e.table === 'invoice_documents').optional, true,
+  'senza la migrazione delle fatture conservate non e\' un errore da mostrare');
+assert.deepEqual(docResult.data.invoiceDocuments, []);
+const colMock = makeSupabaseMock();
+await createRepository(colMock.sb).loadAll();
+const docSelect = colMock.calls.find(c => c[0] === 'invoice_documents' && c[1] === 'select');
+assert.ok(docSelect && docSelect[2] !== '*' && !/(^|,)xml(,|$)/.test(docSelect[2]),
+  'l\'elenco delle fatture conservate non carica gli XML');
+
 // mentre una tabella storica che sparisce resta un errore vero
 const realFail = makeSupabaseMock(new Set(['clients']), Object.assign(new Error('boom'), { code: 'XX000' }));
 const realResult = await createRepository(realFail.sb).loadAll();
