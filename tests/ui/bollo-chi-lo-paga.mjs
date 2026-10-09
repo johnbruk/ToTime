@@ -89,8 +89,11 @@ console.log('\n=== PAGANDOLO TU, IN FATTURA C’È MA NON NEL TOTALE ===');
      (t.match(/Marca da bollo[^·]{0,60}/)||[''])[0]);
   ok(/a tuo carico/.test(t),'ed è marcata «a tuo carico»',
      (t.match(/Marca da bollo[\s\S]{0,80}/)||[''])[0]);
-  ok(/la paghi tu/.test(t),'e il modulo lo dice per esteso',
-     (t.match(/In fattura, ma la paghi tu[^.]{0,80}/)||[''])[0]);
+  ok(/La paghi tu: il totale della fattura non la comprende/.test(t),
+     'e la pagina lo dice per esteso',(t.match(/La paghi tu[^.]{0,90}/)||[''])[0]);
+  ok(/non si aggiunge fra le voci/.test(t),
+     'dicendo anche che non è una prestazione da incollare',
+     (t.match(/Non è una prestazione[^.]{0,60}/)||[''])[0]);
   ok(!/name="stamp_duty_enabled"/.test(await pg.content()),
      'e sulla singola fattura non si ridiscute: niente interruttore qui');
   // il totale: 500 € di lavoro, nessuna rivalsa, nessun bollo addebitato
@@ -113,8 +116,8 @@ console.log('\n=== ADDEBITANDOLO, ENTRA NEL TOTALE ===');
   await pg.evaluate(()=>window.openBillingClient('ac'));
   await pg.waitForTimeout(800);
   const t=await testo(pg);
-  ok(/addebitata al cliente/.test(t),'il modulo dice che è addebitata',
-     (t.match(/In fattura e addebitata[^.]{0,60}/)||[''])[0]);
+  ok(/Addebitata al cliente: entra nel totale/.test(t),'la pagina dice che è addebitata',
+     (t.match(/Addebitata al cliente[^.]{0,60}/)||[''])[0]);
   ok(!/a tuo carico/.test(t),'e non «a tuo carico»');
   await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
     f.status.value='invoice_issued'; f.requestSubmit();});
@@ -152,7 +155,10 @@ console.log('\n=== «NON SI APPLICA» RESTA UNA SCELTA POSSIBILE ===');
   await pg.evaluate(()=>window.openBillingClient('ac'));
   await pg.waitForTimeout(800);
   const t=await testo(pg);
-  ok(/Non si applica/.test(t),'il modulo lo dice',(t.match(/Non si applica[^.]{0,40}/)||[''])[0]);
+  // Dove il bollo non si applica non c'e' niente da dire: la riga non
+  // compare proprio, invece di comparire a zero.
+  ok(!/Marca da bollo/.test(t),'la riga del bollo non compare affatto',
+     (t.match(/Marca da bollo[^.]{0,50}/)||[''])[0]||'assente, giusto');
   await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
     f.status.value='invoice_issued'; f.requestSubmit();});
   await pg.waitForTimeout(1300);
