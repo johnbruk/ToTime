@@ -132,19 +132,24 @@ assert.match(appNode.innerHTML, /Indietro/);
 
 listeners.input[0]({ target: { closest: selector => selector === '.form' } });
 window.go('billing');
-assert.match(appNode.innerHTML, /Fatturazione e incassi/);
+assert.match(appNode.innerHTML, /Fatturazione del mese/);
 // La scheda si chiamava «Totale fatturazione mese» e non diceva di che
 // mese ne' di cosa fosse fatta. Adesso il titolo porta il mese e il
 // numero si scompone sotto, e questi tre controlli tengono in piedi i
 // tre blocchi della pagina: cosa devo fare, cosa aspetto, come va
 // l'anno. Erano quattro schede impilate con «da fatturare» ripetuto due
 // volte su basi diverse.
-// La pagina ha due viste, «Il mese» e «L'anno»: prima mescolava il
-// mese scelto in alto con numeri dell'anno intero che non cambiavano
-// mai. All'apertura si entra dal mese, e le due schede ci sono
-// entrambe per passare da una all'altra.
-assert.match(appNode.innerHTML, /Il mese/);
-assert.match(appNode.innerHTML, /L’anno/);
+// Il mese e l'anno sono due pagine: prima erano due linguette della
+// stessa, e prima ancora la pagina mescolava il mese scelto in alto con
+// numeri dell'anno intero che non cambiavano mai. Il mese ha il suo
+// selettore e nient'altro dell'anno; l'anno ha il suo.
 assert.match(appNode.innerHTML, /Da fatturare/);
+assert.doesNotMatch(appNode.innerHTML, /<h2>La cassa<\/h2>/);
+assert.doesNotMatch(appNode.innerHTML, /class="tabs"/);
+window.go('billingAnno');
+assert.match(appNode.innerHTML, /Fatturazione dell’anno/);
+assert.match(appNode.innerHTML, /<h2>La cassa<\/h2>/);
+assert.match(appNode.innerHTML, /Anno \d{4}/);
+assert.doesNotMatch(appNode.innerHTML, /Da fatturare ·/);
 
 console.log('navigation regression test passed');

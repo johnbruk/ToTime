@@ -338,7 +338,7 @@ function fmtDays(hours){return fmtNum(Number(hours||0)/8,2)}
 function metricLine(hours,amount){return `${fmtNum(hours,1)} h <span class="dot">·</span> ${fmtDays(hours)} gg/u <span class="dot">·</span> ${fmtEUR(amount)}`}
 function amountLine(label,amount){return `${esc(label)} <span class="dot">·</span> ${fmtEUR(amount)}`}
 function dateIT(v){if(!v)return'';const s=String(v);return `${s.slice(8,10)}/${s.slice(5,7)}`}
-function viewLabel(v){return ({tripNew:'Nuova trasferta',tripEdit:'Modifica trasferta',home:'Dashboard',timesheet:'Timesheet',billing:'Fatturazione',billingDetail:'Dettaglio fattura',fatturaCarica:'Carica fattura emessa',tax:'Profilo fiscale',taxPayments:'Pagamenti fiscali',taxPaymentEdit:'Pagamento fiscale',annualMonths:'Consuntivato annuale',annualInvoices:'Elenco fatture',settings:'Configurazione',clients:'Clienti',clientEdit:'Cliente',projects:'Progetti',projectEdit:'Progetto',activities:'Attività',activityEdit:'Attività',expenseCategories:'Voci spesa',vehicles:'Veicoli',vehicleEdit:'Veicolo',policyRimborsi:'Policy rimborsi',expenseCategoryEdit:'Voce spesa',invoiceTemplates:'Template fattura',invoiceTemplateEdit:'Template fattura',appearance:'Aspetto',exportTimesheet:'Export timesheet',dailyForm:'Consuntivo giornaliero',dailyEdit:'Consuntivo giornaliero',monthlyForm:'Compenso mensile',monthlyEdit:'Compenso mensile',manualForm:'Consuntivo manuale',manualEdit:'Consuntivo manuale',expenseForm:'Spesa trasferta',expenseEdit:'Spesa trasferta'})[v]||'schermata precedente'}
+function viewLabel(v){return ({tripNew:'Nuova trasferta',tripEdit:'Modifica trasferta',home:'Dashboard',timesheet:'Timesheet',billing:'Fatturazione del mese',billingAnno:'Fatturazione dell’anno',billingDetail:'Dettaglio fattura',fatturaCarica:'Carica fattura emessa',tax:'Profilo fiscale',taxPayments:'Pagamenti fiscali',taxPaymentEdit:'Pagamento fiscale',annualMonths:'Consuntivato annuale',annualInvoices:'Elenco fatture',settings:'Configurazione',clients:'Clienti',clientEdit:'Cliente',projects:'Progetti',projectEdit:'Progetto',activities:'Attività',activityEdit:'Attività',expenseCategories:'Voci spesa',vehicles:'Veicoli',vehicleEdit:'Veicolo',policyRimborsi:'Policy rimborsi',expenseCategoryEdit:'Voce spesa',invoiceTemplates:'Template fattura',invoiceTemplateEdit:'Template fattura',appearance:'Aspetto',exportTimesheet:'Export timesheet',dailyForm:'Consuntivo giornaliero',dailyEdit:'Consuntivo giornaliero',monthlyForm:'Compenso mensile',monthlyEdit:'Compenso mensile',manualForm:'Consuntivo manuale',manualEdit:'Consuntivo manuale',expenseForm:'Spesa trasferta',expenseEdit:'Spesa trasferta'})[v]||'schermata precedente'}
 // Fuori dal browser — i test di modulo girano in Node con un document
 // finto e ridotto — alcune funzioni del DOM non ci sono. Chiederle di
 // sicuro faceva esplodere l'avvio dell'app invece di proteggerlo.
@@ -483,11 +483,13 @@ const MENU=[
   // «Per commessa» e «Report analitico WBS» non stanno piu' qui: si
   // aprono dalla commessa a cui si riferiscono, che e' il posto dove
   // uno le cerca. Il menu non e' un elenco di tutto quello che esiste.
-  // Il report economico non sta piu' a menu: si apre dalla fatturazione,
-  // in fondo, dove i suoi numeri hanno il contesto da cui vengono. Restava
-  // una sola sottovoce, e un gruppo con un figlio solo e' un gruppo per
-  // finta: Fatturazione torna a essere una voce diretta.
-  {v:'billing',ic:'€',l:'Fatturazione'},
+  // Il report economico non sta a menu: si apre dalla fatturazione, in
+  // fondo, dove i suoi numeri hanno il contesto da cui vengono.
+  // Il mese e l'anno sono due pagine, non due linguette della stessa:
+  // ognuna col suo selettore, e dal menu si va diritti a quella che serve.
+  {main:'billing',ic:'€',l:'Fatturazione',sub:[
+    {v:'billing',l:'Il mese'},
+    {v:'billingAnno',l:'L’anno'}]},
   {v:'balance',ic:'∑',l:'Bilancio'},
   {main:'tax',ic:'%',l:'Tassazione',sub:[
     {v:'tasseFuture',l:'Tasse future'},
@@ -511,7 +513,7 @@ const MENU=[
 const NAV_CHILDREN={
   timesheet:['timesheet','calendario','giorno','griglia','pivot','reportWbs','tmManage','tmForm','importaConsuntivi','dailyForm','dailyEdit','monthlyForm','monthlyEdit','manualForm','manualEdit','annualMonths'],
   expenses:['expenses','expenseForm','expenseEdit','tripNew','tripEdit'],
-  billing:['billing','billingDetail','annualInvoices','fatturatoDetail','fatturazioneCommessa','reportEconomico'],
+  billing:['billing','billingAnno','billingDetail','annualInvoices','fatturatoDetail','fatturazioneCommessa','reportEconomico'],
   tax:['tax','tasseFuture','taxPayments','taxPaymentEdit','taxSettings'],
   settings:['settings','clients','clientEdit','clientDetail','engagements','engagementDetail','engagementNew','engagementEdit','projects','projectEdit','projectDetail','projectNew','wbsEdit','activities','activityEdit','expenseCategories','expenseCategoryEdit','invoiceTemplates','invoiceTemplateEdit','appearance','account','exportTimesheet']
 };
@@ -3223,6 +3225,7 @@ function pivotWithExpenses(){return settingValue('pivot_exp')!=='0'}
 async function setPivotSetting(key,val){const r=await saveSetting('pivot_'+key,val);if(r.error)return setMsg(r.error.message,7000);state.pivotClosed=[];await reload();render()}
 async function setPivotPreset(d1,d2){const a=await saveSetting('pivot_dim1',d1);if(a.error)return setMsg(a.error.message,7000);const b=await saveSetting('pivot_dim2',d2);if(b.error)return setMsg(b.error.message,7000);state.pivotClosed=[];await reload();render()}
 async function togglePivotExpenses(){await setPivotSetting('exp',pivotWithExpenses()?'0':'1')}
+function yearSelector(){return `<div class="month"><button onclick="changeYear(-1)" title="Anno precedente" aria-label="Anno precedente">‹</button><strong>Anno ${currentYear()}</strong><button onclick="changeYear(1)" title="Anno successivo" aria-label="Anno successivo">›</button></div>`}
 function changeYear(n){const [y,m]=String(state.month).split('-').map(Number);state.month=(y+n)+'-'+String(m).padStart(2,'0');render()}
 function recSite(e){return [e.work_site,e.work_city].filter(Boolean).join(' - ')||e.work_location||''}
 function pivotRecords(){
@@ -3281,9 +3284,7 @@ function pivot(){
   const scope=pivotScope(),d1=pivotDim1(),d2=pivotDim2(),sort=pivotSort();
   const t=pivotTree();
   const period=scope==='year'?String(currentYear()):monthLabel(state.month);
-  const selector=scope==='year'
-    ?`<div class="month"><button onclick="changeYear(-1)" title="Anno precedente" aria-label="Anno precedente">‹</button><strong>Anno ${currentYear()}</strong><button onclick="changeYear(1)" title="Anno successivo" aria-label="Anno successivo">›</button></div>`
-    :monthSelector();
+  const selector=scope==='year'?yearSelector():monthSelector();
   const scopeTabs=`<div class="tabs"><button type="button" class="${scope==='month'?'active':''}" onclick="setPivotSetting('scope','month')">Mese</button><button type="button" class="${scope==='year'?'active':''}" onclick="setPivotSetting('scope','year')">Anno</button></div>`;
   const presets=`<div class="pvPresets">${PIVOT_PRESETS.map(p=>`<button type="button" class="miniBtn${d1===p[0]&&d2===p[1]?' active':''}" onclick="setPivotPreset('${p[0]}','${p[1]}')">${p[2]}</button>`).join('')}</div>`;
   const sortBtn=(v,l)=>`<button type="button" class="miniBtn${sort===v?' active':''}" onclick="setPivotSetting('sort','${v}')">${l}</button>`;
@@ -3615,12 +3616,9 @@ function billingGroupsByClient(){const lines=groupSummary();const by={};lines.fo
 // cassa» e la soglia parlavano dell'anno intero, senza cambiare.
 // Due periodi nella stessa schermata, e niente che lo dicesse: i
 // numeri sembravano non rispondere al selettore.
-function billingVista(){return settingValue('billing_vista')==='anno'?'anno':'mese'}
-async function setBillingVista(v){
-  const r=await saveSetting('billing_vista',v);
-  if(r.error)return setMsg(motivoLeggibile(r.error),7000);
-  await reload();render();
-}
+// Prima erano due linguette della stessa pagina; adesso sono due
+// pagine, ognuna col suo selettore: il mese sceglie il mese, l'anno
+// l'anno.
 function billingMeseCard(groups,total){
   const base=groups.reduce((s,g)=>s+Number(g.calc.subtotal||0),0);
   const riv=groups.reduce((s,g)=>s+Number(g.calc.inpsAmount||0),0);
@@ -3667,22 +3665,21 @@ ${f.pianificato>0?riga('+ Pianificato','giorni già a calendario, non ancora lav
 ${f.pianificato>0?riga('= Previsione ricavi '+year,'se tutto il pianificato si realizza',f.ricavi,true):''}
 </div></div>`;
 }
-function billing(){const groups=billingGroupsByClient();const total=groups.reduce((s,g)=>s+g.total,0);
-  const vista=billingVista();
-  const tabs=`<div class="tabs"><button type="button" class="${vista==='mese'?'active':''}" onclick="setBillingVista('mese')">Il mese</button><button type="button" class="${vista==='anno'?'active':''}" onclick="setBillingVista('anno')">L’anno</button></div>`;
-  if(vista==='anno')return appShell(`<h1>Fatturazione e incassi</h1>${tabs}
+const linkReportEconomico=()=>`<div class="list"><div class="row" onclick="go('reportEconomico')"><div></div>
+      <div><div class="title">Report economico</div>
+      <div class="desc">Ricavi, costi e margine, mese per mese.</div></div><div class="chev">›</div></div></div>`;
+function billingAnno(){
+  return appShell(`<h1>Fatturazione dell’anno</h1>${yearSelector()}
 <h2>La cassa</h2>${billingCassaCard()}${forfettarioBarCard()}
 <h2>Maturato e previsione</h2>${billingAnnoCard()}
-    <div class="list"><div class="row" onclick="go('reportEconomico')"><div></div>
-      <div><div class="title">Report economico</div>
-      <div class="desc">Ricavi, costi e margine, mese per mese.</div></div><div class="chev">›</div></div></div>`);
-  return appShell(`<h1>Fatturazione e incassi</h1>${tabs}${monthSelector()}
+    ${linkReportEconomico()}`);
+}
+function billing(){const groups=billingGroupsByClient();const total=groups.reduce((s,g)=>s+g.total,0);
+  return appShell(`<h1>Fatturazione del mese</h1>${monthSelector()}
 ${billingMeseCard(groups,total)}
 <div class="list">${groups.map(g=>{const st=headerStatus(g.client_id);return `<div class="row" onclick="openBillingClient('${g.client_id}')"><div></div><div><div class="title">${esc(clientName(g.client_id))}</div><div class="metricLine">${metricLine(g.hours,g.total)}</div><div class="desc">Base ${fmtEUR(g.calc.subtotal)} · Rivalsa ${fmtEUR(g.calc.inpsAmount)} · Bollo ${fmtEUR(g.calc.stampAmount)}</div><span class="tag ${statusClass(st)}">${statusLabel(st)}</span></div><div class="value">›</div></div>`}).join('')||emptyState('Nessuna riga fatturabile in questo mese.','+ Registra un consuntivo','newEntryChoice()')}</div>
 <div class="miniActions"><button type="button" class="miniBtn" onclick="go('fatturaCarica')" title="Carica l’XML di una fattura già emessa e confrontalo coi consuntivi">⤒ Carica fattura emessa</button></div>
-    <div class="list"><div class="row" onclick="go('reportEconomico')"><div></div>
-      <div><div class="title">Report economico</div>
-      <div class="desc">Ricavi, costi e margine, mese per mese.</div></div><div class="chev">›</div></div></div>`)}
+    ${linkReportEconomico()}`)}
 function openBillingClient(clientId){navigateTo('billingDetail',{edit:clientId})}
 // La descrizione da copiare su Fiscozen diceva «Rimborso spese di
 // trasferta - Ottobre 2026 - Omnichannel - Volo»: mancava la DATA e
@@ -6593,7 +6590,7 @@ function render(){
       <button type="button" class="primary" onclick="go('home')">Torna alla dashboard</button>`;
   }
 }
-function renderInterno(){document.documentElement.setAttribute('data-view',state.view||'home');if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,reportWbs,reportEconomico,fatturazioneCommessa,engagements,engagementNew,engagementEdit,engagementDetail,projectNew,projectDetail,clientDetail,wbsEdit,importaConsuntivi,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,tripNew,tripEdit,timesheet,griglia,pivot,billing,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,vehicles,vehicleEdit,policyRimborsi,fatturaCarica,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,balance,taxSettings,tasseFuture,fatturatoDetail,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
+function renderInterno(){document.documentElement.setAttribute('data-view',state.view||'home');if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,reportWbs,reportEconomico,fatturazioneCommessa,engagements,engagementNew,engagementEdit,engagementDetail,projectNew,projectDetail,clientDetail,wbsEdit,importaConsuntivi,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,tripNew,tripEdit,timesheet,griglia,pivot,billing,billingAnno,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,vehicles,vehicleEdit,policyRimborsi,fatturaCarica,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,balance,taxSettings,tasseFuture,fatturatoDetail,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
 
 Object.assign(window,{
   setRep,
@@ -6760,7 +6757,7 @@ Object.assign(window,{
   taxSettings,
   fatturatoDetail,
   billingMeseCard,
-  billingVista,setBillingVista,
+  billingAnno,yearSelector,
   apriNuovoCliente,chiudiNuovoCliente,
   billingCassaCard,
   billingAnnoCard,

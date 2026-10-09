@@ -34,21 +34,23 @@ const ATTESI={
   clients:'Impostazioni', engagements:'Impostazioni', projects:'Impostazioni',
   activities:'Impostazioni', expenseCategories:'Impostazioni', appearance:'Impostazioni',
   reportWbs:'Consuntivi',
-  expenses:'Spese', tasseFuture:'Tassazione'};
+  expenses:'Spese', tasseFuture:'Tassazione',
+  // la fatturazione ha due pagine, e le schede che stanno sotto di lei
+  // — il dettaglio, le fatture emesse, il report economico — tengono
+  // aperto il suo gruppo
+  billing:'Fatturazione', billingAnno:'Fatturazione', billingDetail:'Fatturazione',
+  annualInvoices:'Fatturazione', reportEconomico:'Fatturazione', fatturazioneCommessa:'Fatturazione'};
 const persi=[];
 for(const [vista,atteso] of Object.entries(ATTESI)){
   await pg.evaluate(v=>window.go(v),vista);await pg.waitForTimeout(160);
   const g=await gruppo();
   if(g.aperto!==atteso)persi.push(vista+' → '+(g.aperto||'nessun gruppo aperto')+' (atteso '+atteso+')');
 }
-// Fatturazione e Bilancio non sono gruppi: sono voci dirette, quindi
-// non c'e' un gruppo da tenere aperto. Quello che deve succedere e' che
-// restino evidenziate come voce corrente anche dalle schede che stanno
-// sotto di loro — il report economico, per esempio, che dal menu e'
-// uscito e si apre dalla fatturazione.
+// Bilancio non e' un gruppo: e' una voce diretta, quindi non c'e' un
+// gruppo da tenere aperto. Quello che deve succedere e' che resti
+// evidenziata come voce corrente.
 const spente=[];
-for(const [vista,atteso] of [['billing','Fatturazione'],['reportEconomico','Fatturazione'],
-                             ['fatturazioneCommessa','Fatturazione'],['balance','Bilancio']]){
+for(const [vista,atteso] of [['balance','Bilancio']]){
   await pg.evaluate(v=>window.go(v),vista);await pg.waitForTimeout(160);
   const acc=await pg.evaluate(()=>[...document.querySelectorAll('.sidebarNav button')]
     .filter(b=>b.classList.contains('active'))
@@ -56,7 +58,15 @@ for(const [vista,atteso] of [['billing','Fatturazione'],['reportEconomico','Fatt
   if(!acc.includes(atteso))spente.push(`${vista} → ${acc.join(',')||'nessuna'} (atteso ${atteso})`);
 }
 ok(spente.length===0,'le voci dirette restano evidenziate da dentro le loro schede',
-   spente.join(' | ')||'Fatturazione e Bilancio');
+   spente.join(' | ')||'Bilancio');
+
+// La fatturazione: due pagine sotto la stessa voce, e quella su cui si
+// e' resta accesa.
+await pg.evaluate(()=>window.go('billingAnno'));await pg.waitForTimeout(160);
+const fat=await gruppo();
+ok(fat.sottovoci.join(',')==='Il mese,L’anno','Fatturazione ha due pagine: «Il mese» e «L’anno»',fat.sottovoci.join(', '));
+const accesa=await pg.evaluate(()=>[...document.querySelectorAll('.sidebarNav .navSubItem.active')].map(b=>b.textContent.trim()));
+ok(accesa.join(',')==='L’anno','e dalla pagina dell’anno è accesa «L’anno»',accesa.join(', ')||'nessuna');
 
 ok(persi.length===0,'nessuna vista fa richiudere il menu',persi.slice(0,4).join(' | ')||Object.keys(ATTESI).length+' viste controllate');
 
