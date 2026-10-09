@@ -294,6 +294,7 @@ const MIGRAZIONE_DI={
   trip_id:'2026-10-06_trasferte.sql',
   vehicle_id:'2026-10-06_veicoli-e-chilometrica.sql',
   vat_number:'2026-10-08_partita-iva-cliente.sql',
+  stamp_duty_mode:'2026-10-09_bollo-chi-lo-paga.sql',
   from_place:'2026-10-06_veicoli-e-chilometrica.sql',
   to_place:'2026-10-06_veicoli-e-chilometrica.sql',
   round_trip:'2026-10-06_veicoli-e-chilometrica.sql',
@@ -307,6 +308,7 @@ const NOME_COLONNA={
   to_place:'l\u2019arrivo',round_trip:'l\u2019andata e ritorno',
   payment_method:'come l\u2019hai pagata',receipt_kept:'la ricevuta',
   vat_number:'la partita IVA del cliente',
+  stamp_duty_mode:'chi paga la marca da bollo',
   receipt_path:'la ricevuta allegata',wbs_id:'la commessa',
   is_mileage:'il rimborso chilometrico',
   activity_id:'il tipo di attività',project_id:'il progetto',client_id:'il cliente'
@@ -1088,18 +1090,31 @@ function confrontaFattura(f){
   //        risulterebbe «senza il bollo che dovrebbe avere».
   //        Un'impostazione mai salvata non e' una scelta: in quel caso
   //        non si dichiara nessuno scostamento.
-  const bolloConf=ts.stamp_duty_enabled;
+  // Il bollo si controlla su DUE domande, non su una: e' dovuto? e chi
+  // lo paga? Prima erano lo stesso interruttore, e chi lo mette in
+  // fattura pagandolo di tasca propria si prendeva uno scostamento
+  // falso a ogni fattura — e perdeva proprio il controllo utile, che
+  // sopra la soglia il bollo ci vuole, chiunque lo paghi.
+  const bolloMod=bolloModo(ts);
   const bolloConfImporto=Number(ts.stamp_duty_amount??2);
   const esente=Number(f.baseEsente||0);
-  if(f.bolloImporto>0&&bolloConf===false)
-    nota('scostamento','Bollo in fattura ma disattivato in configurazione',
-      `La fattura espone ${fmtEUR(f.bolloImporto)} di imposta di bollo, mentre ${dove} la marca da bollo e' spenta.`);
-  else if(!(f.bolloImporto>0)&&bolloConf===true&&esente>BOLLO_SOGLIA)
-    nota('scostamento','Bollo attivo in configurazione ma assente in fattura',
-      `${testata?'Nella fattura salvata di '+monthLabel(mesi[0]):'In Configurazione fiscale'} la marca da bollo e' attiva a ${fmtEUR(bolloConfImporto)}, e la fattura ha ${fmtEUR(esente)} assoggettati al bollo: sopra i ${fmtEUR(BOLLO_SOGLIA)} e' dovuto. In fattura non ce n'e'.`);
-  else if(f.bolloImporto>0&&bolloConf!==false&&!vicini(f.bolloImporto,bolloConfImporto))
+  const bolloVaQui=bolloDovuto(bolloMod)&&esente>BOLLO_SOGLIA;
+  if(f.bolloImporto>0&&bolloMod==='none')
+    nota('scostamento','Bollo in fattura, ma in configurazione non si applica',
+      `La fattura espone ${fmtEUR(f.bolloImporto)} di imposta di bollo, mentre ${dove} la marca da bollo risulta non applicabile.`);
+  else if(!(f.bolloImporto>0)&&bolloVaQui)
+    nota('scostamento','Manca il bollo, che qui e\' dovuto',
+      `La fattura ha ${fmtEUR(esente)} di importi esenti: sopra i ${fmtEUR(BOLLO_SOGLIA)} il bollo e' dovuto e la fattura lo deve dichiarare${bolloMod==='mine'?', anche quando lo paghi tu':''}. In fattura non ce n'e'.`);
+  else if(f.bolloImporto>0&&bolloMod!=='none'&&!vicini(f.bolloImporto,bolloConfImporto))
     nota('scostamento','Importo del bollo diverso da quello configurato',
       `In fattura ${fmtEUR(f.bolloImporto)}, ${dove} ${fmtEUR(bolloConfImporto)}.`);
+  // Il verso che prima non si poteva nemmeno dire: il bollo c'e' ed e'
+  // finito nel totale, ma in configurazione lo paghi tu. Qui il cliente
+  // lo ha pagato lui, e i conti dell'anno contano 2 € di costo che non
+  // hai sostenuto.
+  if(f.bolloImporto>0&&bolloMod==='mine'&&bolloAddebitato)
+    nota('scostamento','Bollo addebitato al cliente, ma qui lo paghi tu',
+      `La fattura somma ${fmtEUR(f.bolloImporto)} di bollo al totale, mentre ${dove} risulta a tuo carico. O la fattura va rifatta, o va cambiata l'impostazione: altrimenti i costi dell'anno contano un bollo che hai incassato.`);
 
   // 4. Il confronto col consuntivo, PER MESE e non per riga. Una
   //    fattura puo' avere piu' righe sullo stesso mese — progetti
@@ -1355,6 +1370,34 @@ function annualTaxCalc(year=currentYear()){
   const forfaitIncome=revenue*coeff;const taxable=Math.max(0,forfaitIncome-paidContrib);const substituteTax=taxable*taxRate;const net=revenue-paidContrib-substituteTax;
   return {settings:ts,revenue,forfaitIncome,paidContrib,taxable,substituteTax,net,rimborsiFuori:fuori,...totalsY};
 }
+// La marca da bollo: una cosa e' che sia DOVUTA — sopra i 77,47 € di
+// importi esenti la fattura la deve dichiarare — un'altra e' CHI LA
+// PAGA. Un interruttore solo diceva tutte e due le cose insieme, e chi
+// il bollo lo mette in fattura ma lo versa di tasca sua all'Agenzia
+// delle Entrate non aveva modo di dirlo: spegnendolo il totale tornava
+// giusto, ma il lettore segnalava uno scostamento falso a ogni fattura
+// e smetteva di controllare il caso che conta — sopra la soglia il
+// bollo ci vuole, chiunque lo paghi.
+const BOLLO_MODI={
+  charged:'In fattura, addebitata al cliente',
+  mine:'In fattura, ma la pago io',
+  none:'Non si applica'};
+function bolloModo(ts){
+  const m=ts&&ts.stamp_duty_mode;
+  if(m==='charged'||m==='mine'||m==='none')return m;
+  // Prima della migrazione comanda il vecchio interruttore. Un'impostazione
+  // mai salvata non e' una scelta, e resta tale.
+  if(ts&&ts.stamp_duty_enabled===true)return 'charged';
+  if(ts&&ts.stamp_duty_enabled===false)return 'none';
+  return null;
+}
+function bolloDovuto(modo){return modo==='charged'||modo==='mine'}
+function bolloFrase(modo){
+  if(modo==='charged')return 'In fattura e addebitata al cliente: entra nel totale.';
+  if(modo==='mine')return 'In fattura, ma la paghi tu: il totale non la comprende e resta un tuo costo.';
+  if(modo==='none')return 'Non si applica.';
+  return 'Non ancora scelta: la imposti in Configurazione fiscale.';
+}
 function billingCalc(group,header={}){
   const settings=currentTaxSetting();
   const services=group.lines.filter(l=>['daily_rate_8h','monthly_flat'].includes(l.type)).reduce((s,l)=>s+Number(l.amount||0),0);
@@ -1364,11 +1407,25 @@ function billingCalc(group,header={}){
   const inpsEnabled=header.inps_recharge_enabled ?? settings.inps_recharge_enabled ?? true;
   const inpsRate=Number(header.inps_recharge_rate ?? settings.inps_recharge_rate ?? 4);
   const inpsAmount=inpsEnabled?taxableBase*inpsRate/100:0;
-  const stampEnabled=header.stamp_duty_enabled ?? settings.stamp_duty_enabled ?? false;
-  const stampAmount=stampEnabled?Number(header.stamp_duty_amount ?? settings.stamp_duty_amount ?? 2):0;
+  // Il bollo si sceglie una volta per tutto l'anno, in Configurazione
+  // fiscale: sulla singola fattura non si ridiscute.
+  const stampMode=bolloModo(settings);
+  const stampUnit=Number(settings.stamp_duty_amount ?? 2)||2;
   const subtotal=services+manual+expenses;
+  // Dovuto sopra la soglia, e la soglia si misura sugli importi esenti:
+  // per un forfettario sono il compenso piu' la rivalsa. Sotto, il
+  // bollo non ci va — e prima ci finiva lo stesso, gonfiando di 2 € le
+  // fatture piccole.
+  const baseEsente=subtotal+inpsAmount;
+  const stampDue=(bolloDovuto(stampMode)&&baseEsente>BOLLO_SOGLIA)?stampUnit:0;
+  // Addebitato: solo se si e' scelto di addebitarlo. E' questo, e non
+  // il dovuto, che entra nel totale e che resta scritto sulla fattura
+  // salvata come «quanto ho addebitato».
+  const stampAmount=stampMode==='charged'?stampDue:0;
+  const stampEnabled=stampMode==='charged';
   const total=subtotal+inpsAmount+stampAmount;
-  return {services,manual,expenses,taxableBase,inpsEnabled,inpsRate,inpsAmount,stampEnabled,stampAmount,subtotal,total};
+  return {services,manual,expenses,taxableBase,inpsEnabled,inpsRate,inpsAmount,
+    stampMode,stampUnit,stampDue,stampEnabled,stampAmount,baseEsente,subtotal,total};
 }
 function invoiceTemplateByCode(code){return data.invoiceTemplates.find(t=>t.active&&t.template_code===code)}
 
@@ -3361,8 +3418,10 @@ function billingDetailView(){const clientId=state.edit;const group=billingGroups
     }
     if(l.type==='travel_expenses'){(l.items||[]).forEach(e=>items.push({title:expenseCategoryName(e.expense_category_id),desc:'Rimborso in fattura'+(e.work_city?' · '+e.work_city:''),metric:amountLine(expenseCategoryName(e.expense_category_id),Number(e.amount||0)),fisco:expenseFiscoText(e)}))}
     else{items.push({title:projectName(l.project_id)||'Senza progetto',desc:l.label,metric:l.type==='daily_rate_8h'?metricLine(l.hours,l.amount):amountLine(l.label,l.amount),fisco:fiscoText(l)})}});
-  const piedeTot=piede.reduce((s,x)=>s+x.amount,0);const inpsText=renderTemplate(invoiceTemplateByCode('RIVALSA_INPS_4'),{type:'manual_entry',client_id:clientId,project_id:null,amount:calc.inpsAmount,hours:0});const bolloText=renderTemplate(invoiceTemplateByCode('MARCA_BOLLO'),{type:'manual_entry',client_id:clientId,project_id:null,amount:calc.stampAmount,hours:0});return appShell(`<h1>${esc(clientName(clientId))}</h1><p class="sub">Fattura ${monthLabel(state.month)}</p><div class="card"><b>Totale cliente</b><div class="amount" style="margin-top:8px">${fmtEUR(calc.total)}</div><div class="metricLine">Base ${fmtEUR(calc.subtotal)} <span class="dot">·</span> Rivalsa ${fmtEUR(calc.inpsAmount)} <span class="dot">·</span> Bollo ${fmtEUR(calc.stampAmount)}</div>${group.pAmount>0?`<div class="metricLine" style="margin-top:6px"><span class="tag blue">Pianificato</span> ${fmtEUR(group.pAmount)} dei ${fmtEUR(calc.subtotal)} di base${group.pHours>0?` <span class="dot">·</span> ${fmtNum(group.pHours/8,2)} gg/u`:''}</div>`:''}<span class="tag ${statusClass(st)}">${statusLabel(st)}</span></div><h2>Righe Fiscozen</h2><div class="list">${items.map((it,i)=>`<div class="row"><div>${i+1}</div><div><div class="title">${esc(it.title)}</div><div class="desc">${esc(it.desc)}</div><div class="metricLine">${it.metric}</div><div class="copybox" id="copy-${i}">${esc(it.fisco)}</div><button class="secondary" onclick="copyText('${esc(it.fisco).replace(/'/g,'&#39;')}')">Copia descrizione</button></div><div></div></div>`).join('')}${calc.inpsEnabled&&calc.inpsAmount>0?`<div class="row"><div>+</div><div><div class="title">Rivalsa INPS ${fmtNum(calc.inpsRate,2)}%</div><div class="metricLine">${fmtEUR(calc.inpsAmount)}</div><div class="copybox">${esc(inpsText)}</div><button class="secondary" onclick="copyText('${esc(inpsText).replace(/'/g,'&#39;')}')">Copia descrizione</button></div><div></div></div>`:''}${calc.stampEnabled&&calc.stampAmount>0?`<div class="row"><div>+</div><div><div class="title">Marca da bollo</div><div class="metricLine">${fmtEUR(calc.stampAmount)}</div><div class="copybox">${esc(bolloText)}</div><button class="secondary" onclick="copyText('${esc(bolloText).replace(/'/g,'&#39;')}')">Copia descrizione</button></div><div></div></div>`:''}</div>${piede.length?`<h2>Spese a piè di lista</h2><p class="sub">Anticipate da te e <b>da chiedere a parte</b>: non entrano nel totale della fattura, che e' e resta ${fmtEUR(calc.total)}. Sono una partita di giro, quindi la descrizione analitica serve comunque.</p><div class="card"><b>Da farsi rimborsare</b><div class="amount" style="margin-top:8px">${fmtEUR(piedeTot)}</div><small class="desc">${piede.length} ${piede.length===1?'spesa':'spese'}</small></div><div class="list">${piede.map((it,i)=>`<div class="row"><div>·</div><div><div class="title">${esc(it.title)}</div><div class="desc">${it.desc}</div><div class="metricLine">${it.metric}</div><div class="copybox" id="pie-${i}">${esc(it.fisco)}</div><button class="secondary" onclick="copyText('${esc(it.fisco).replace(/'/g,'&#39;')}')">Copia descrizione</button></div><div></div></div>`).join('')}</div>`:''}<h2>Dati fattura / incasso</h2><form class="form" onsubmit="saveBillingHeader(event)"><div class="field"><label>Stato</label><select name="status"><option value="to_invoice" ${st==='to_invoice'?'selected':''}>Da fatturare</option><option value="invoice_issued" ${st==='invoice_issued'?'selected':''}>Fattura emessa</option><option value="collected" ${st==='collected'?'selected':''}>Incassato</option><option value="excluded" ${st==='excluded'?'selected':''}>Escluso</option></select></div><div class="field"><label>Rivalsa INPS</label><select name="inps_recharge_enabled"><option value="true" ${calc.inpsEnabled?'selected':''}>Sì</option><option value="false" ${!calc.inpsEnabled?'selected':''}>No</option></select></div><div class="field"><label>Percentuale rivalsa INPS</label><input name="inps_recharge_rate" type="number" step="0.01" value="${Number(calc.inpsRate||4)}"></div><div class="field"><label>Marca da bollo</label><select name="stamp_duty_enabled"><option value="true" ${calc.stampEnabled?'selected':''}>Sì</option><option value="false" ${!calc.stampEnabled?'selected':''}>No</option></select></div><div class="field"><label>Importo bollo</label><input name="stamp_duty_amount" type="number" step="0.01" value="${Number(calc.stampAmount||0)||Number(currentTaxSetting().stamp_duty_amount||2)}"></div><div class="field"><label>Numero fattura</label><input name="invoice_number" value="${esc(header.invoice_number||'')}"></div><div class="field"><label>Data fattura</label><input name="invoice_date" type="date" value="${esc(header.invoice_date||'')}"></div><div class="field"><label>Data incasso</label><input name="collection_date" type="date" value="${esc(header.collection_date||'')}"></div><div class="field"><label>Importo incassato</label><input name="collected_amount" type="number" step="0.01" value="${Number(header.collected_amount||0)}"></div><div class="field"><label>Note</label><textarea name="notes">${esc(header.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva stato fattura</button>${header.id?`<button type="button" class="secondary danger" onclick="eliminaFattura('${header.id}')">Elimina fattura</button>`:''}<button type="button" class="secondary" onclick="go('billing')">Indietro</button></div></form>`)}
-async function saveBillingHeader(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const clientId=state.edit;const group=billingGroupsByClient().find(g=>g.client_id===clientId);const {year,month}=periodParts();const tempCalc=billingCalc(group,{inps_recharge_enabled:f.inps_recharge_enabled==='true',inps_recharge_rate:Number(f.inps_recharge_rate||4),stamp_duty_enabled:f.stamp_duty_enabled==='true',stamp_duty_amount:Number(f.stamp_duty_amount||0)});const payload={year,month,client_id:clientId,total_amount:Number(tempCalc.subtotal||0),services_amount:tempCalc.services,expenses_amount:tempCalc.expenses,manual_amount:tempCalc.manual,taxable_base_amount:tempCalc.taxableBase,inps_recharge_enabled:tempCalc.inpsEnabled,inps_recharge_rate:tempCalc.inpsRate,inps_recharge_amount:tempCalc.inpsAmount,stamp_duty_enabled:tempCalc.stampEnabled,stamp_duty_amount:tempCalc.stampAmount,invoice_total_amount:tempCalc.total,status:f.status,invoice_number:norm(f.invoice_number)||null,invoice_date:f.invoice_date||null,collection_date:f.collection_date||null,collected_amount:Number(f.collected_amount||0)||null,notes:f.notes||null};const existing=headerForClient(clientId);let error;if(existing){({error}=await updateResilient('billing_headers',payload,existing.id));}else{({error}=await insertResilient('billing_headers',payload));}if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='billingDetail';state.edit=clientId;render()}
+  const piedeTot=piede.reduce((s,x)=>s+x.amount,0);const inpsText=renderTemplate(invoiceTemplateByCode('RIVALSA_INPS_4'),{type:'manual_entry',client_id:clientId,project_id:null,amount:calc.inpsAmount,hours:0});const bolloText=renderTemplate(invoiceTemplateByCode('MARCA_BOLLO'),{type:'manual_entry',client_id:clientId,project_id:null,amount:calc.stampAmount,hours:0});return appShell(`<h1>${esc(clientName(clientId))}</h1><p class="sub">Fattura ${monthLabel(state.month)}</p><div class="card"><b>Totale cliente</b><div class="amount" style="margin-top:8px">${fmtEUR(calc.total)}</div><div class="metricLine">Base ${fmtEUR(calc.subtotal)} <span class="dot">·</span> Rivalsa ${fmtEUR(calc.inpsAmount)} <span class="dot">·</span> Bollo ${fmtEUR(calc.stampAmount)}</div>${group.pAmount>0?`<div class="metricLine" style="margin-top:6px"><span class="tag blue">Pianificato</span> ${fmtEUR(group.pAmount)} dei ${fmtEUR(calc.subtotal)} di base${group.pHours>0?` <span class="dot">·</span> ${fmtNum(group.pHours/8,2)} gg/u`:''}</div>`:''}<span class="tag ${statusClass(st)}">${statusLabel(st)}</span></div><h2>Righe Fiscozen</h2><div class="list">${items.map((it,i)=>`<div class="row"><div>${i+1}</div><div><div class="title">${esc(it.title)}</div><div class="desc">${esc(it.desc)}</div><div class="metricLine">${it.metric}</div><div class="copybox" id="copy-${i}">${esc(it.fisco)}</div><button class="secondary" onclick="copyText('${esc(it.fisco).replace(/'/g,'&#39;')}')">Copia descrizione</button></div><div></div></div>`).join('')}${calc.inpsEnabled&&calc.inpsAmount>0?`<div class="row"><div>+</div><div><div class="title">Rivalsa INPS ${fmtNum(calc.inpsRate,2)}%</div><div class="metricLine">${fmtEUR(calc.inpsAmount)}</div><div class="copybox">${esc(inpsText)}</div><button class="secondary" onclick="copyText('${esc(inpsText).replace(/'/g,'&#39;')}')">Copia descrizione</button></div><div></div></div>`:''}${calc.stampDue>0?`<div class="row"><div>${calc.stampAmount>0?'+':'='}</div><div><div class="title">Marca da bollo</div><div class="metricLine">${fmtEUR(calc.stampDue)}${calc.stampAmount>0?'':' <span class="tag gray">a tuo carico</span>'}</div><div class="copybox">${esc(bolloText)}</div><button class="secondary" onclick="copyText('${esc(bolloText).replace(/'/g,'&#39;')}')">Copia descrizione</button></div><div></div></div>`:''}</div>${piede.length?`<h2>Spese a piè di lista</h2><p class="sub">Anticipate da te e <b>da chiedere a parte</b>: non entrano nel totale della fattura, che e' e resta ${fmtEUR(calc.total)}. Sono una partita di giro, quindi la descrizione analitica serve comunque.</p><div class="card"><b>Da farsi rimborsare</b><div class="amount" style="margin-top:8px">${fmtEUR(piedeTot)}</div><small class="desc">${piede.length} ${piede.length===1?'spesa':'spese'}</small></div><div class="list">${piede.map((it,i)=>`<div class="row"><div>·</div><div><div class="title">${esc(it.title)}</div><div class="desc">${it.desc}</div><div class="metricLine">${it.metric}</div><div class="copybox" id="pie-${i}">${esc(it.fisco)}</div><button class="secondary" onclick="copyText('${esc(it.fisco).replace(/'/g,'&#39;')}')">Copia descrizione</button></div><div></div></div>`).join('')}</div>`:''}<h2>Dati fattura / incasso</h2><form class="form" onsubmit="saveBillingHeader(event)"><div class="field"><label>Stato</label><select name="status"><option value="to_invoice" ${st==='to_invoice'?'selected':''}>Da fatturare</option><option value="invoice_issued" ${st==='invoice_issued'?'selected':''}>Fattura emessa</option><option value="collected" ${st==='collected'?'selected':''}>Incassato</option><option value="excluded" ${st==='excluded'?'selected':''}>Escluso</option></select></div><div class="field"><label>Rivalsa INPS</label><select name="inps_recharge_enabled"><option value="true" ${calc.inpsEnabled?'selected':''}>Sì</option><option value="false" ${!calc.inpsEnabled?'selected':''}>No</option></select></div><div class="field"><label>Percentuale rivalsa INPS</label><input name="inps_recharge_rate" type="number" step="0.01" value="${Number(calc.inpsRate||4)}"></div><div class="field"><label>Marca da bollo</label>
+      <div class="copybox bolloNota">${calc.stampDue>0?fmtEUR(calc.stampDue)+' · ':''}${esc(bolloFrase(calc.stampMode))}${calc.stampDue>0?'':' Qui non è dovuta: gli importi esenti non superano '+fmtEUR(BOLLO_SOGLIA)+'.'}</div>
+      <div class="small">Si sceglie una volta per tutto l'anno, in Configurazione fiscale.</div></div><div class="field"><label>Numero fattura</label><input name="invoice_number" value="${esc(header.invoice_number||'')}"></div><div class="field"><label>Data fattura</label><input name="invoice_date" type="date" value="${esc(header.invoice_date||'')}"></div><div class="field"><label>Data incasso</label><input name="collection_date" type="date" value="${esc(header.collection_date||'')}"></div><div class="field"><label>Importo incassato</label><input name="collected_amount" type="number" step="0.01" value="${Number(header.collected_amount||0)}"></div><div class="field"><label>Note</label><textarea name="notes">${esc(header.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva stato fattura</button>${header.id?`<button type="button" class="secondary danger" onclick="eliminaFattura('${header.id}')">Elimina fattura</button>`:''}<button type="button" class="secondary" onclick="go('billing')">Indietro</button></div></form>`)}
+async function saveBillingHeader(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const clientId=state.edit;const group=billingGroupsByClient().find(g=>g.client_id===clientId);const {year,month}=periodParts();const tempCalc=billingCalc(group,{inps_recharge_enabled:f.inps_recharge_enabled==='true',inps_recharge_rate:Number(f.inps_recharge_rate||4)});const payload={year,month,client_id:clientId,total_amount:Number(tempCalc.subtotal||0),services_amount:tempCalc.services,expenses_amount:tempCalc.expenses,manual_amount:tempCalc.manual,taxable_base_amount:tempCalc.taxableBase,inps_recharge_enabled:tempCalc.inpsEnabled,inps_recharge_rate:tempCalc.inpsRate,inps_recharge_amount:tempCalc.inpsAmount,stamp_duty_enabled:tempCalc.stampEnabled,stamp_duty_amount:tempCalc.stampAmount,invoice_total_amount:tempCalc.total,status:f.status,invoice_number:norm(f.invoice_number)||null,invoice_date:f.invoice_date||null,collection_date:f.collection_date||null,collected_amount:Number(f.collected_amount||0)||null,notes:f.notes||null};const existing=headerForClient(clientId);let error;if(existing){({error}=await updateResilient('billing_headers',payload,existing.id));}else{({error}=await insertResilient('billing_headers',payload));}if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='billingDetail';state.edit=clientId;render()}
 function copyText(txt){const cleaned=document.createElement('textarea');cleaned.innerHTML=txt;const val=cleaned.value;navigator.clipboard?.writeText(val).then(()=>setMsg('Descrizione copiata.')).catch(()=>prompt('Copia descrizione:',val))}
 
 
@@ -3421,8 +3480,9 @@ function projectionCalc(year=currentYear()){
 function projectionCard(){const p=projectionCalc(currentYear());return `<div class="card projectionCard"><b>Proiezione anno ${p.year}</b><div class="desc">Basata sull’imponibile mensile reale — lavoro più i rimborsi che restano tassabili: media ponderata 50% ultimi 3 mesi chiusi · 30% media anno · 20% mese corrente (dato reale, senza estrapolazioni). Imponibile reale ad oggi: ${fmtEUR(p.actualToDate)}. Data avvio attività: ${dateIT(p.startDate)}.${p.excludedMonths.length?' Mesi esclusi: '+p.excludedMonths.join(', ')+'.':''}</div><div class="kpiGrid three" style="margin-top:14px"><div><span>Prudente</span><strong>${fmtEUR(p.prudent)}</strong><small>fattore ${fmtNum(p.prudentFactor*100,0)}%</small></div><div><span>Base</span><strong>${fmtEUR(p.base)}</strong><small>media ponderata</small></div><div><span>Ottimistico</span><strong>${fmtEUR(p.optimistic)}</strong><small>fattore ${fmtNum(p.optimisticFactor*100,0)}%</small></div></div><div class="riskBox"><div><span>Rischio limite forfettario</span><strong class="risk risk-${p.risk.toLowerCase()}">${p.risk}</strong></div><div class="desc">Utilizzo previsto ${fmtNum(p.ratio*100,1)}% su limite ${fmtEUR(p.limit)}, calcolato sui consuntivi reali inseriti.</div></div></div>`}
 
 function tax(){const year=currentYear();const c=annualTaxCalc(year);const ts=c.settings;return appShell(`<div class="screenTitle">Fiscalità</div><p class="sub">Stima regime forfettario per l'anno ${year}. Valori configurabili, da verificare con il consulente fiscale.</p>${projectionCard()}${previsioneTasseCard()}<div class="card"><b>Stima tasse forfettario</b><div class="list" style="box-shadow:none;margin-bottom:0"><div class="row"><div></div><div><div class="title">ATECO ${esc(ts.ateco_code||'')}</div><div class="desc">${esc(ts.ateco_description||'')}</div></div><div></div></div><div class="row"><div></div><div><div class="title">Incassato anno</div><div class="desc">base di calcolo provvisoria</div></div><div class="value">${fmtEUR(c.revenue)}</div></div><div class="row"><div></div><div><div class="title">Reddito forfettario lordo</div><div class="desc">coefficiente ${fmtNum(ts.profitability_coefficient,2)}%</div></div><div class="value">${fmtEUR(c.forfaitIncome)}</div></div><div class="row" onclick="go('taxPayments')"><div></div><div><div class="title">Contributi INPS pagati</div><div class="desc">tocca per gestire i pagamenti fiscali registrati</div></div><div class="value">${fmtEUR(c.paidContrib)}</div></div><div class="row"><div></div><div><div class="title">Imponibile fiscale stimato</div><div class="desc">reddito forfettario - contributi</div></div><div class="value">${fmtEUR(c.taxable)}</div></div><div class="row"><div></div><div><div class="title">Imposta sostitutiva stimata</div><div class="desc">aliquota ${fmtNum(ts.substitute_tax_rate,2)}%</div></div><div class="value">${fmtEUR(c.substituteTax)}</div></div><div class="row"><div></div><div><div class="title">Netto stimato dopo imposta</div><div class="desc">incassato - contributi - imposta</div></div><div class="value">${fmtEUR(c.net)}</div></div></div></div><button class="secondary" style="margin-bottom:12px" onclick="go('tasseFuture')">◷ Tasse future · scadenze previste ›</button><div class="grid"><button class="secondary" onclick="go('taxPayments')">Pagamenti fiscali (INPS) ›</button><button class="secondary" onclick="go('taxSettings')">Configurazione fiscale ›</button></div>`)}
-function taxSettings(){const year=currentYear();const c=annualTaxCalc(year);const ts=c.settings;return appShell(`<div class="screenTitle">Configurazione fiscale</div><p class="sub">ATECO, regime, aliquote e parametri della stima. Il cruscotto imposte è nella voce Tassazione.</p><form class="form" onsubmit="saveTaxSettings(event)"><h2>ATECO, regime e tasse</h2><p class="sub">Determinano il calcolo delle tasse sul tuo codice ATECO.</p><div class="field"><label>Anno fiscale</label><input name="fiscal_year" type="number" value="${year}"></div><div class="field"><label>Regime fiscale</label><select name="regime"><option value="forfettario" ${ts.regime==='forfettario'?'selected':''}>Forfettario</option><option value="ordinario" ${ts.regime==='ordinario'?'selected':''}>Ordinario</option><option value="semplificato" ${ts.regime==='semplificato'?'selected':''}>Semplificato</option></select></div><div class="field"><label>Codice ATECO</label><input name="ateco_code" value="${esc(ts.ateco_code||'')}"></div><div class="field"><label>Descrizione ATECO</label><input name="ateco_description" value="${esc(ts.ateco_description||'')}"></div><div class="field"><label>Coefficiente redditività %</label><input name="profitability_coefficient" type="number" step="0.01" value="${Number(ts.profitability_coefficient||67)}"></div><div class="field"><label>Aliquota imposta sostitutiva %</label><input name="substitute_tax_rate" type="number" step="0.01" value="${Number(ts.substitute_tax_rate||5)}"></div><div class="field"><label>Limite ricavi annuo forfettario</label><input name="annual_revenue_limit" type="number" step="0.01" value="${Number(ts.annual_revenue_limit||85000)}"></div><div class="field"><label>Data avvio attività</label><input name="activity_start_date" type="date" value="${esc(ts.activity_start_date||DEFAULT_DEFAULT_ACTIVITY_START_DATE)}"></div><h2>Rimborsi spese e reddito</h2><p class="sub">Dal 1° gennaio 2025 i rimborsi <b>analitici</b> di vitto, alloggio, viaggio e trasporto, pagati con strumenti <b>tracciabili</b> e addebitati voce per voce in fattura, non concorrono al reddito né alla soglia degli 85.000 € (D.Lgs. 192/2024 sull'art. 54 TUIR, tracciabilità dalla L. 207/2024). <b>Sull'applicazione al regime forfettario la dottrina è però divisa</b>: la norma non richiama espressamente la legge 190/2014 e manca un chiarimento. Perciò la scelta è tua, da fare con il commercialista: l'app non la prende per te.</p><div class="card"><div class="themeChoice"><button type="button" class="${rimborsiFuoriReddito()?'':'active'}" onclick="cambiaRimborsiFuoriReddito('no')"><b>Li conto come compensi</b><span>Prudente, ed è quello che l'app ha sempre fatto: i rimborsi entrano nei ricavi e nella stima delle imposte. Nessun numero si muove.</span></button><button type="button" class="${rimborsiFuoriReddito()?'active':''}" onclick="cambiaRimborsiFuoriReddito('si')"><b>Fuori dal reddito, regola 2025</b><span>I rimborsi analitici tracciabili, con ricevuta e già incassati, escono dalla base imponibile della stima. Il rimborso chilometrico resta compenso in ogni caso, perché è forfettario.</span></button></div>${(()=>{const sc=scomposizioneRimborsi(year);if(!sc.totale)return '';return `<div class="metricLine" style="margin-top:14px">Rimborsi in fattura ${year}: <b>${fmtEUR(sc.totale)}</b></div><div class="desc" style="margin-top:6px">di cui <b>${fmtEUR(sc.analitici)}</b> analitici che reggono il requisito${sc.chilometrici?` · <b>${fmtEUR(sc.chilometrici)}</b> chilometrici, compenso comunque`:''}${sc.senzaRequisiti?` · <b>${fmtEUR(sc.senzaRequisiti)}</b> senza i requisiti (contanti, ricevuta mancante o mese non ancora incassato)`:''}.</div>`})()}</div><h2>Rivalsa INPS e marca da bollo</h2><p class="sub">Voci aggiuntive da esporre in fattura oltre al compenso.</p><div class="field"><label>Gestione previdenziale</label><input name="inps_management" value="${esc(ts.inps_management||'gestione_separata')}"></div><div class="field"><label>Aliquota INPS Gestione Separata %</label><input name="inps_gs_rate" type="number" step="0.01" value="${Number(ts.inps_gs_rate??26.07)}"></div><div class="field"><label>Rivalsa INPS</label><select name="inps_recharge_enabled"><option value="true" ${ts.inps_recharge_enabled?'selected':''}>Sì</option><option value="false" ${!ts.inps_recharge_enabled?'selected':''}>No</option></select></div><div class="field"><label>Percentuale rivalsa INPS</label><input name="inps_recharge_rate" type="number" step="0.01" value="${Number(ts.inps_recharge_rate||4)}"></div><div class="field"><label>Marca da bollo</label><select name="stamp_duty_enabled"><option value="true" ${ts.stamp_duty_enabled?'selected':''}>Sì</option><option value="false" ${!ts.stamp_duty_enabled?'selected':''}>No</option></select></div><div class="field"><label>Importo marca da bollo</label><input name="stamp_duty_amount" type="number" step="0.01" value="${Number(ts.stamp_duty_amount||2)}"></div><details class="moreFields"><summary>Proiezione annua (avanzato)</summary><p class="sub">Parametri opzionali per affinare la stima "Prudente / Base / Ottimistico".</p><div class="field"><label>Includi mese corrente nella proiezione</label><select name="projection_include_current_month"><option value="true" ${ts.projection_include_current_month!==false?'selected':''}>Sì</option><option value="false" ${ts.projection_include_current_month===false?'selected':''}>No</option></select></div><div class="field"><label>Mesi esclusi dalla proiezione</label><input name="projection_excluded_months" placeholder="es. 1,8" value="${esc(parseExcludedMonths(ts.projection_excluded_months).join(','))}"></div><div class="field"><label>Fattore scenario prudente</label><input name="projection_prudent_factor" type="number" step="0.01" value="${Number(ts.projection_prudent_factor??0.85)}"></div><div class="field"><label>Fattore scenario ottimistico</label><input name="projection_optimistic_factor" type="number" step="0.01" value="${Number(ts.projection_optimistic_factor??1.10)}"></div><div class="field"><label>Soglia rischio basso %</label><input name="risk_low_threshold" type="number" step="0.01" value="${Number(ts.risk_low_threshold??70)}"></div><div class="field"><label>Soglia rischio medio %</label><input name="risk_medium_threshold" type="number" step="0.01" value="${Number(ts.risk_medium_threshold??90)}"></div><div class="field"><label>Soglia rischio alto %</label><input name="risk_high_threshold" type="number" step="0.01" value="${Number(ts.risk_high_threshold??100)}"></div></details><div class="field"><label>Note</label><textarea name="notes">${esc(ts.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva configurazione fiscale</button><button type="button" class="secondary" onclick="go('settings')">Indietro</button></div></form>`)}
-async function saveTaxSettings(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const year=Number(f.fiscal_year||currentYear());const payload={fiscal_year:year,regime:f.regime,ateco_code:norm(f.ateco_code)||null,ateco_description:norm(f.ateco_description)||null,profitability_coefficient:Number(f.profitability_coefficient||0),substitute_tax_rate:Number(f.substitute_tax_rate||0),inps_management:norm(f.inps_management)||null,inps_gs_rate:Number(f.inps_gs_rate||26.07),inps_recharge_enabled:f.inps_recharge_enabled==='true',inps_recharge_rate:Number(f.inps_recharge_rate||0),stamp_duty_enabled:f.stamp_duty_enabled==='true',stamp_duty_amount:Number(f.stamp_duty_amount||0),annual_revenue_limit:Number(f.annual_revenue_limit||0),activity_start_date:f.activity_start_date||null,projection_method:'weighted_average',projection_include_current_month:f.projection_include_current_month==='true',projection_excluded_months:parseExcludedMonths(f.projection_excluded_months),projection_prudent_factor:Number(f.projection_prudent_factor||0.85),projection_optimistic_factor:Number(f.projection_optimistic_factor||1.10),risk_low_threshold:Number(f.risk_low_threshold||70),risk_medium_threshold:Number(f.risk_medium_threshold||90),risk_high_threshold:Number(f.risk_high_threshold||100),notes:f.notes||null};const existing=data.taxSettings.find(t=>Number(t.fiscal_year)===year);let res;if(existing)res=await updateResilient('tax_settings',payload,existing.id);else res=await insertResilient('tax_settings',payload);if(res.error)return setMsg(motivoLeggibile(res.error),7000);await reload();state.view='tax';setMsg('Configurazione fiscale aggiornata.',4000)}
+function taxSettings(){const year=currentYear();const c=annualTaxCalc(year);const ts=c.settings;return appShell(`<div class="screenTitle">Configurazione fiscale</div><p class="sub">ATECO, regime, aliquote e parametri della stima. Il cruscotto imposte è nella voce Tassazione.</p><form class="form" onsubmit="saveTaxSettings(event)"><h2>ATECO, regime e tasse</h2><p class="sub">Determinano il calcolo delle tasse sul tuo codice ATECO.</p><div class="field"><label>Anno fiscale</label><input name="fiscal_year" type="number" value="${year}"></div><div class="field"><label>Regime fiscale</label><select name="regime"><option value="forfettario" ${ts.regime==='forfettario'?'selected':''}>Forfettario</option><option value="ordinario" ${ts.regime==='ordinario'?'selected':''}>Ordinario</option><option value="semplificato" ${ts.regime==='semplificato'?'selected':''}>Semplificato</option></select></div><div class="field"><label>Codice ATECO</label><input name="ateco_code" value="${esc(ts.ateco_code||'')}"></div><div class="field"><label>Descrizione ATECO</label><input name="ateco_description" value="${esc(ts.ateco_description||'')}"></div><div class="field"><label>Coefficiente redditività %</label><input name="profitability_coefficient" type="number" step="0.01" value="${Number(ts.profitability_coefficient||67)}"></div><div class="field"><label>Aliquota imposta sostitutiva %</label><input name="substitute_tax_rate" type="number" step="0.01" value="${Number(ts.substitute_tax_rate||5)}"></div><div class="field"><label>Limite ricavi annuo forfettario</label><input name="annual_revenue_limit" type="number" step="0.01" value="${Number(ts.annual_revenue_limit||85000)}"></div><div class="field"><label>Data avvio attività</label><input name="activity_start_date" type="date" value="${esc(ts.activity_start_date||DEFAULT_DEFAULT_ACTIVITY_START_DATE)}"></div><h2>Rimborsi spese e reddito</h2><p class="sub">Dal 1° gennaio 2025 i rimborsi <b>analitici</b> di vitto, alloggio, viaggio e trasporto, pagati con strumenti <b>tracciabili</b> e addebitati voce per voce in fattura, non concorrono al reddito né alla soglia degli 85.000 € (D.Lgs. 192/2024 sull'art. 54 TUIR, tracciabilità dalla L. 207/2024). <b>Sull'applicazione al regime forfettario la dottrina è però divisa</b>: la norma non richiama espressamente la legge 190/2014 e manca un chiarimento. Perciò la scelta è tua, da fare con il commercialista: l'app non la prende per te.</p><div class="card"><div class="themeChoice"><button type="button" class="${rimborsiFuoriReddito()?'':'active'}" onclick="cambiaRimborsiFuoriReddito('no')"><b>Li conto come compensi</b><span>Prudente, ed è quello che l'app ha sempre fatto: i rimborsi entrano nei ricavi e nella stima delle imposte. Nessun numero si muove.</span></button><button type="button" class="${rimborsiFuoriReddito()?'active':''}" onclick="cambiaRimborsiFuoriReddito('si')"><b>Fuori dal reddito, regola 2025</b><span>I rimborsi analitici tracciabili, con ricevuta e già incassati, escono dalla base imponibile della stima. Il rimborso chilometrico resta compenso in ogni caso, perché è forfettario.</span></button></div>${(()=>{const sc=scomposizioneRimborsi(year);if(!sc.totale)return '';return `<div class="metricLine" style="margin-top:14px">Rimborsi in fattura ${year}: <b>${fmtEUR(sc.totale)}</b></div><div class="desc" style="margin-top:6px">di cui <b>${fmtEUR(sc.analitici)}</b> analitici che reggono il requisito${sc.chilometrici?` · <b>${fmtEUR(sc.chilometrici)}</b> chilometrici, compenso comunque`:''}${sc.senzaRequisiti?` · <b>${fmtEUR(sc.senzaRequisiti)}</b> senza i requisiti (contanti, ricevuta mancante o mese non ancora incassato)`:''}.</div>`})()}</div><h2>Rivalsa INPS e marca da bollo</h2><p class="sub">Voci aggiuntive da esporre in fattura oltre al compenso.</p><div class="field"><label>Gestione previdenziale</label><input name="inps_management" value="${esc(ts.inps_management||'gestione_separata')}"></div><div class="field"><label>Aliquota INPS Gestione Separata %</label><input name="inps_gs_rate" type="number" step="0.01" value="${Number(ts.inps_gs_rate??26.07)}"></div><div class="field"><label>Rivalsa INPS</label><select name="inps_recharge_enabled"><option value="true" ${ts.inps_recharge_enabled?'selected':''}>Sì</option><option value="false" ${!ts.inps_recharge_enabled?'selected':''}>No</option></select></div><div class="field"><label>Percentuale rivalsa INPS</label><input name="inps_recharge_rate" type="number" step="0.01" value="${Number(ts.inps_recharge_rate||4)}"></div><div class="field"><label>Marca da bollo</label><select name="stamp_duty_mode">${['','charged','mine','none'].map(k=>`<option value="${k}" ${bolloModo(ts)===(k||null)?'selected':''}>${k?BOLLO_MODI[k]:'— da scegliere —'}</option>`).join('')}</select>
+      <div class="small">Sopra ${fmtEUR(BOLLO_SOGLIA)} di importi esenti il bollo è <b>dovuto</b>, e la fattura lo deve dichiarare in ogni caso: quello che cambia qui è <b>chi lo paga</b>. Addebitandolo al cliente entra nel totale della fattura. Pagandolo tu la fattura lo dichiara lo stesso, il totale non lo comprende, e i ${fmtEUR(Number(ts.stamp_duty_amount??2)||2)} restano un tuo costo da versare all'Agenzia delle Entrate alle scadenze trimestrali — le trovi in Tasse future.</div></div><div class="field"><label>Importo marca da bollo</label><input name="stamp_duty_amount" type="number" step="0.01" value="${Number(ts.stamp_duty_amount||2)}"></div><details class="moreFields"><summary>Proiezione annua (avanzato)</summary><p class="sub">Parametri opzionali per affinare la stima "Prudente / Base / Ottimistico".</p><div class="field"><label>Includi mese corrente nella proiezione</label><select name="projection_include_current_month"><option value="true" ${ts.projection_include_current_month!==false?'selected':''}>Sì</option><option value="false" ${ts.projection_include_current_month===false?'selected':''}>No</option></select></div><div class="field"><label>Mesi esclusi dalla proiezione</label><input name="projection_excluded_months" placeholder="es. 1,8" value="${esc(parseExcludedMonths(ts.projection_excluded_months).join(','))}"></div><div class="field"><label>Fattore scenario prudente</label><input name="projection_prudent_factor" type="number" step="0.01" value="${Number(ts.projection_prudent_factor??0.85)}"></div><div class="field"><label>Fattore scenario ottimistico</label><input name="projection_optimistic_factor" type="number" step="0.01" value="${Number(ts.projection_optimistic_factor??1.10)}"></div><div class="field"><label>Soglia rischio basso %</label><input name="risk_low_threshold" type="number" step="0.01" value="${Number(ts.risk_low_threshold??70)}"></div><div class="field"><label>Soglia rischio medio %</label><input name="risk_medium_threshold" type="number" step="0.01" value="${Number(ts.risk_medium_threshold??90)}"></div><div class="field"><label>Soglia rischio alto %</label><input name="risk_high_threshold" type="number" step="0.01" value="${Number(ts.risk_high_threshold??100)}"></div></details><div class="field"><label>Note</label><textarea name="notes">${esc(ts.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva configurazione fiscale</button><button type="button" class="secondary" onclick="go('settings')">Indietro</button></div></form>`)}
+async function saveTaxSettings(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const year=Number(f.fiscal_year||currentYear());const payload={fiscal_year:year,regime:f.regime,ateco_code:norm(f.ateco_code)||null,ateco_description:norm(f.ateco_description)||null,profitability_coefficient:Number(f.profitability_coefficient||0),substitute_tax_rate:Number(f.substitute_tax_rate||0),inps_management:norm(f.inps_management)||null,inps_gs_rate:Number(f.inps_gs_rate||26.07),inps_recharge_enabled:f.inps_recharge_enabled==='true',inps_recharge_rate:Number(f.inps_recharge_rate||0),stamp_duty_mode:norm(f.stamp_duty_mode)||null,stamp_duty_enabled:f.stamp_duty_mode==='charged',stamp_duty_amount:Number(f.stamp_duty_amount||0),annual_revenue_limit:Number(f.annual_revenue_limit||0),activity_start_date:f.activity_start_date||null,projection_method:'weighted_average',projection_include_current_month:f.projection_include_current_month==='true',projection_excluded_months:parseExcludedMonths(f.projection_excluded_months),projection_prudent_factor:Number(f.projection_prudent_factor||0.85),projection_optimistic_factor:Number(f.projection_optimistic_factor||1.10),risk_low_threshold:Number(f.risk_low_threshold||70),risk_medium_threshold:Number(f.risk_medium_threshold||90),risk_high_threshold:Number(f.risk_high_threshold||100),notes:f.notes||null};const existing=data.taxSettings.find(t=>Number(t.fiscal_year)===year);let res;if(existing)res=await updateResilient('tax_settings',payload,existing.id);else res=await insertResilient('tax_settings',payload);if(res.error)return setMsg(motivoLeggibile(res.error),7000);await reload();state.view='tax';setMsg('Configurazione fiscale aggiornata.',4000)}
 
 function inpsGsCalc(year=currentYear()){
   const ts=currentTaxSetting(year);
@@ -3469,12 +3529,25 @@ const BOLLO_SOGLIA=77.47;
 const NATURE_BOLLO=['N1','N2.2','N3.5','N3.6','N4'];
 function bolloCalc(year=currentYear()){
   const ts=currentTaxSetting(year);const unit=Number(ts.stamp_duty_amount??2)||2;
+  // Dove il bollo non si applica non c'e' niente da versare: prima si
+  // contavano 2 € per ogni fattura sopra soglia comunque, e chi aveva
+  // scelto «non si applica» si vedeva dei costi che non aveva.
+  const modo=bolloModo(ts);
   const rows=data.billingHeaders.filter(h=>Number(h.year)===Number(year)&&['invoice_issued','collected'].includes(h.status));
   let nFatture=0,dovuto=0,addebitato=0;const perTrim=[0,0,0,0];
-  rows.forEach(h=>{const base=Number(h.total_amount||0);const add=Number(h.stamp_duty_amount||0);addebitato+=add;
-    if(base>BOLLO_SOGLIA){nFatture++;dovuto+=unit;const m=Number(h.month||1);perTrim[Math.min(3,Math.floor((m-1)/3))]+=unit;}});
+  rows.forEach(h=>{
+    const add=Number(h.stamp_duty_amount||0);addebitato+=add;
+    // La soglia si misura sugli importi ESENTI, che comprendono la
+    // rivalsa: e' il totale della fattura meno il bollo addebitato.
+    // Prima si guardava il solo compenso, e una fattura da 76 € con
+    // 3,04 € di rivalsa — 79,04, sopra soglia — non veniva contata.
+    const base=Number(h.invoice_total_amount||h.total_amount||0)-add
+      ||Number(h.total_amount||0);
+    if(bolloDovuto(modo)&&base>BOLLO_SOGLIA){
+      nFatture++;dovuto+=unit;
+      const m=Number(h.month||1);perTrim[Math.min(3,Math.floor((m-1)/3))]+=unit;}});
   const aCarico=Math.max(0,dovuto-addebitato);
-  return {unit,soglia:BOLLO_SOGLIA,nFatture,dovuto,addebitato,aCarico,perTrim,rows:rows.length};
+  return {unit,soglia:BOLLO_SOGLIA,modo,nFatture,dovuto,addebitato,aCarico,perTrim,rows:rows.length};
 }
 function billingExtras(year=currentYear()){let rivalsa=0,bollo=0;data.billingHeaders.filter(h=>Number(h.year)===Number(year)&&['invoice_issued','collected'].includes(h.status)).forEach(h=>{rivalsa+=Number(h.inps_recharge_amount||0);bollo+=Number(h.stamp_duty_amount||0)});return {rivalsa,bollo}}
 function balanceCompositionBar(costi,inps,imposta,utile){const parts=[['Spese a mio carico',Math.max(0,costi),'var(--red)'],['Contributi INPS',Math.max(0,inps),'var(--primary2)'],['Imposta sostitutiva',Math.max(0,imposta),'var(--orange)'],['Utile netto',Math.max(0,utile),'var(--green)']];const tot=parts.reduce((s,p)=>s+p[1],0)||1;return `<div class="segBar">${parts.map(p=>`<span style="width:${p[1]/tot*100}%;background:${p[2]}" title="${p[0]}: ${fmtEUR(p[1])}"></span>`).join('')}</div><div class="segLegend">${parts.map(p=>`<span class="li"><span class="sdot" style="background:${p[2]}"></span>${p[0]} · ${fmtEUR(p[1])}</span>`).join('')}</div>`}
@@ -4279,7 +4352,7 @@ function projectEdit(){
       <div class="field"><label>Stato</label><select name="status">${Object.entries(STATI).map(([k,v])=>`<option value="${k}" ${(p.status||'active')===k?'selected':''}>${v}</option>`).join('')}</select></div>
       <div class="field"><label>Note</label><textarea name="notes">${esc(p.notes||'')}</textarea></div>
       <div class="actions"><button class="primary">Salva modifiche</button>
-        ${engagementsOfProject(p.id).length?'':`<button type="button" class="secondary danger" onclick="deleteProject('${p.id}')">Elimina progetto</button>`}
+        ${projectUsage(p.id)?'':`<button type="button" class="secondary danger" onclick="eliminaProgetto('${p.id}')">Elimina progetto</button>`}
         <button type="button" class="secondary" onclick="openProject('${p.id}')">Annulla</button></div>
     </form>`);
 }
@@ -4487,6 +4560,74 @@ function wbsUsage(id){
   const x=(data.travelExpenses||[]).filter(e=>e.wbs_id===id).length;
   return {t,m,x,tot:t+m+x};
 }
+// Quante registrazioni pendono sotto una commessa e sotto un progetto.
+// Il database le difende da se' — timesheet, compensi e spese puntano
+// alla WBS con ON DELETE RESTRICT — ma farsi rifiutare da Postgres non
+// e' una risposta: qui si guarda prima, per dire quante sono e per
+// proporre la via vera, che e' chiudere.
+function engagementUsage(engId){
+  return wbsOfEngagement(engId).reduce((n,w)=>n+wbsUsage(w.id).tot,0);
+}
+function projectUsage(projId){
+  return engagementsOfProject(projId).reduce((n,e)=>n+engagementUsage(e.id),0);
+}
+// Una commessa si elimina solo se non e' mai stata usata. Se ha
+// registrazioni si CHIUDE: lo storico e i report restano, e dai menu
+// di consuntivo sparisce lo stesso.
+// Le sue attivita' se ne vanno con lei: wbs_items punta a engagements
+// con ON DELETE CASCADE.
+async function eliminaCommessa(id){
+  const e=engagementById(id);
+  if(!e)return setMsg('Quella commessa non c’è più: ricarica la pagina.',6000);
+  const nome=(e.code||e.name||'questa commessa');
+  const usate=engagementUsage(id);
+  if(usate)
+    return setMsg('La commessa '+nome+' ha '+usate+(usate===1?' registrazione':' registrazioni')+
+      ': si può chiudere, non eliminare. Mettila su «Chiusa» e sparisce dai moduli, ma resta nello storico e nei report.',9000);
+  const att=wbsOfEngagement(id).length;
+  if(!confirm('Eliminare la commessa '+nome+'?\n\n'
+    +(att?'Se ne '+(att===1?'va anche la sua attività.':'vanno anche le sue '+att+' attività.')+'\n':'')
+    +'Non è mai stata usata, quindi non si perde nessuna registrazione.\n\n'
+    +'L’operazione non è reversibile.'))return;
+  const prj=e.project_id;
+  const {error}=await sb.from('engagements').delete().eq('id',id);
+  if(error)return setMsg(messaggioCommessa(error),8000);
+  await reload();
+  if(prj&&projectById(prj))navigateTo('projectDetail',{edit:prj});
+  else navigateTo('engagements',{});
+  setMsg('Commessa '+nome+' eliminata.',5000);
+}
+// Il progetto: il database non lo lascia andare finche' ha commesse
+// (ON DELETE RESTRICT), quindi se sono tutte vuote se ne vanno prima
+// loro, in un gesto solo. Con una registrazione sotto, invece, non si
+// elimina niente: si chiude.
+async function eliminaProgetto(id){
+  const p=projectById(id);
+  if(!p)return setMsg('Quel progetto non c’è più: ricarica la pagina.',6000);
+  const nome=(p.code||p.name||'questo progetto');
+  const usate=projectUsage(id);
+  if(usate)
+    return setMsg('Il progetto '+nome+' ha '+usate+(usate===1?' registrazione':' registrazioni')+
+      ' sotto le sue commesse: si può chiudere, non eliminare. Mettilo su «Chiuso» e sparisce dai moduli, ma resta nello storico e nei report.',9000);
+  const comm=engagementsOfProject(id);
+  const att=comm.reduce((n,e)=>n+wbsOfEngagement(e.id).length,0);
+  if(!confirm('Eliminare il progetto '+nome+'?\n\n'
+    +(comm.length?'Se ne '+(comm.length===1?'va anche la sua commessa':'vanno anche le sue '+comm.length+' commesse')
+      +(att?' e '+(att===1?'la sua attività':'le '+att+' attività')+' che ci stanno sotto':'')+'.\n':'')
+    +'Non c’è nessuna registrazione, quindi non si perde niente.\n\n'
+    +'L’operazione non è reversibile.'))return;
+  const cli=p.client_id;
+  for(const e of comm){
+    const {error}=await sb.from('engagements').delete().eq('id',e.id);
+    if(error)return setMsg('La commessa '+(e.code||e.name)+' non si è eliminata: '+messaggioCommessa(error),9000);
+  }
+  const {error}=await sb.from('projects').delete().eq('id',id);
+  if(error)return setMsg(motivoLeggibile(error),8000);
+  await reload();
+  if(cli&&clientById(cli))navigateTo('clientDetail',{edit:cli});
+  else navigateTo('projects',{});
+  setMsg('Progetto '+nome+' eliminato.',5000);
+}
 function statoTag(st){const cls=st==='active'?'green':st==='closed'||st==='cancelled'?'gray':'orange';
   return `<span class="tag ${cls}">${STATI[st]||st}</span>`}
 
@@ -4668,6 +4809,7 @@ function engagementForm(e){
       <div class="field"><label>Stato</label><select name="status">${Object.entries(STATI).map(([k,v])=>`<option value="${k}" ${(e?e.status:'active')===k?'selected':''}>${v}</option>`).join('')}</select></div>
       <div class="field"><label>Note</label><textarea name="notes">${e?esc(e.notes||''):''}</textarea></div>
       <div class="actions"><button class="primary">${nuovo?'Crea commessa':'Salva modifiche'}</button>
+        ${!nuovo&&!engagementUsage(e.id)?`<button type="button" class="secondary danger" onclick="eliminaCommessa('${e.id}')">Elimina commessa</button>`:''}
         <button type="button" class="secondary" onclick="${nuovo?(state.parent?`openProject('${state.parent}')`:`go('engagements')`):`navigateTo('engagementDetail',{edit:'${e.id}'})`}">Annulla</button></div>
     </form>`);
 }
@@ -6145,7 +6287,8 @@ Object.assign(window,{
   gridClienteCambiato,gridCommessaCambiata,gridProgettoCambiato,
   hierChanged,refreshHierForForm,wbsLineage,hierAvailable,
   normCode,wbsReady,engagementsOf,openEngagement,openProjectWbs,editWbs,setEngFilter,
-  openClient,openProject,nuovoProgettoDi,nuovaCommessaDi,creaCommessaDi,eliminaFattura,nuovoProgettoScegliCliente,
+  openClient,openProject,nuovoProgettoDi,nuovaCommessaDi,creaCommessaDi,eliminaFattura,
+  eliminaCommessa,eliminaProgetto,nuovoProgettoScegliCliente,
   importaFile,eseguiImport,annullaImport,
   previewEngCode,previewPrjCode,previewWbsCode,addEngagement,saveEngagement,addEngagementRef,
   addProjectOfClient,saveProjectFull,addWbs,saveWbs,deleteWbs,

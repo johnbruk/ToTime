@@ -673,29 +673,62 @@ console.log('\n=== DUE CASSE PREVIDENZIALI: SI SOMMANO, NON SI SCARTA LA SECONDA
   await pg2.close();
 }
 
-console.log('\n=== IL BOLLO SI CONFRONTA CON LA CONFIGURAZIONE, COME LA RIVALSA ===');
+console.log('\n=== IL BOLLO: E\' DOVUTO, E CHI LO PAGA ===');
 {
-  // Sulla rivalsa i due versi c'erano; sul bollo nessuno dei due.
-  const pg=await apri(`S.tax_settings[0].stamp_duty_enabled=false;`);
+  // Un interruttore solo diceva due cose insieme — che il bollo e'
+  // dovuto e che lo si addebita — e chi lo mette in fattura pagandolo
+  // di tasca sua non aveva modo di dirlo. Adesso sono tre scelte, e i
+  // controlli seguono quella giusta.
+  const pg=await apri(`S.tax_settings[0].stamp_duty_mode='none';`);
   const r=await confronta(pg,XML);
-  ok(r.esiti.some(e=>/Bollo in fattura ma disattivato/.test(e.titolo)),
-     'bollo in fattura con la configurazione spenta: lo dice',
+  ok(r.esiti.some(e=>/Bollo in fattura, ma in configurazione non si applica/.test(e.titolo)),
+     'bollo in fattura con «non si applica»: lo dice',
      r.esiti.map(e=>e.titolo).join(' | '));
   await pg.close();
   const senzaBollo=XML.replace(/<DatiBollo>[\s\S]*?<\/DatiBollo>/,'');
-  const pg2=await apri();
+  const pg2=await apri(`S.tax_settings[0].stamp_duty_mode='charged';`);
   const r2=await confronta(pg2,senzaBollo);
-  const b=r2.esiti.find(e=>/Bollo attivo in configurazione ma assente/.test(e.titolo));
-  ok(!!b,'e viceversa: configurazione accesa e fattura senza bollo',
+  const b=r2.esiti.find(e=>/Manca il bollo, che qui e' dovuto/.test(e.titolo));
+  ok(!!b,'e viceversa: bollo dovuto e fattura che non lo dichiara',
      b?b.titolo:r2.esiti.map(e=>e.titolo).join(' | '));
   ok(!!b&&/77,47/.test(b.dettaglio),'citando la soglia oltre cui è dovuto',b?b.dettaglio.slice(0,140):'');
   await pg2.close();
+  // Pagandolo tu il bollo e' dovuto LO STESSO: la fattura lo deve
+  // dichiarare, e se non c'e' il controllo deve scattare. Prima,
+  // spegnendo l'interruttore per non addebitarlo, questo controllo si
+  // spegneva con lui — proprio quando serviva.
+  const pgMio=await apri(`S.tax_settings[0].stamp_duty_mode='mine';`);
+  const rMio=await confronta(pgMio,senzaBollo);
+  const bMio=rMio.esiti.find(e=>/Manca il bollo, che qui e' dovuto/.test(e.titolo));
+  ok(!!bMio,'e vale anche quando il bollo lo paghi tu',
+     bMio?bMio.titolo:rMio.esiti.map(e=>e.titolo).join(' | '));
+  ok(!!bMio&&/anche quando lo paghi tu/.test(bMio.dettaglio),
+     'dicendolo per esteso',bMio?bMio.dettaglio.slice(0,150):'');
+  await pgMio.close();
+  // E il verso che prima non si poteva nemmeno dire: la fattura somma
+  // il bollo al totale, ma in configurazione risulta a tuo carico.
+  const pgAdd=await apri(`S.tax_settings[0].stamp_duty_mode='mine';`);
+  const rAdd=await confronta(pgAdd,XML);
+  const bAdd=rAdd.esiti.find(e=>/Bollo addebitato al cliente, ma qui lo paghi tu/.test(e.titolo));
+  ok(!!bAdd||!rAdd.f.bolloAddebitato,
+     'e se la fattura lo addebita mentre lo paghi tu, lo dice',
+     bAdd?bAdd.titolo:'la fattura non lo addebita, quindi non c’è niente da dire');
+  await pgAdd.close();
   const pg3=await apri(`S.tax_settings[0].stamp_duty_amount=3;`);
   const r3=await confronta(pg3,XML);
   ok(r3.esiti.some(e=>/Importo del bollo diverso/.test(e.titolo)),
      'e se l’importo non è quello configurato, pure',
      r3.esiti.map(e=>e.titolo).join(' | '));
   await pg3.close();
+  // Prima della migrazione comanda il vecchio interruttore: chi
+  // aggiorna l'app prima del database non deve vedere i controlli
+  // sparire.
+  const pgVecchio=await apri(`delete S.tax_settings[0].stamp_duty_mode;S.tax_settings[0].stamp_duty_enabled=false;`);
+  const rVecchio=await confronta(pgVecchio,XML);
+  ok(rVecchio.esiti.some(e=>/Bollo in fattura, ma in configurazione non si applica/.test(e.titolo)),
+     'e senza la colonna nuova comanda il vecchio interruttore',
+     rVecchio.esiti.map(e=>e.titolo).join(' | '));
+  await pgVecchio.close();
   // Sotto i 77,47 € di importi esenti il bollo NON è dovuto: senza la
   // soglia, ogni fatturina piccola risulterebbe «senza il bollo».
   const piccola=senzaBollo
@@ -828,7 +861,7 @@ console.log('\n=== IL BOLLO NON LO SCONTA OGNI OPERAZIONE A IVA ZERO ===');
   const pg=await apri();
   const r=await confronta(pg,inversione);
   ok(r.f.baseEsente===0,'in inversione contabile la base del bollo è zero',String(r.f.baseEsente));
-  ok(!r.esiti.some(e=>/Bollo attivo in configurazione ma assente/.test(e.titolo)),
+  ok(!r.esiti.some(e=>/Manca il bollo, che qui e' dovuto/.test(e.titolo)),
      'e il bollo non si pretende',
      (r.esiti.find(e=>/Bollo/.test(e.titolo))||{}).titolo||'nessuno');
   await pg.close();
@@ -837,7 +870,7 @@ console.log('\n=== IL BOLLO NON LO SCONTA OGNI OPERAZIONE A IVA ZERO ===');
     .replace(/(<DatiRiepilogo>[\s\S]*?)<Natura>N2\.2<\/Natura>/,'$1<Natura>N4</Natura>');
   const pg2=await apri();
   const r2=await confronta(pg2,esente);
-  ok(r2.esiti.some(e=>/Bollo attivo in configurazione ma assente/.test(e.titolo)),
+  ok(r2.esiti.some(e=>/Manca il bollo, che qui e' dovuto/.test(e.titolo)),
      'su un’operazione esente invece sì: la distinzione è vera, non un modo per tacere',
      r2.esiti.map(e=>e.titolo).join(' | '));
   await pg2.close();

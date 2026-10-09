@@ -24,7 +24,7 @@ const tableRows = {
   manual_entries: [{ id: 'manual-1', entry_date: `${month}-04`, client_id: 'client-1', project_id: 'project-1', activity_id: 'activity-1', amount: 200 }],
   invoice_templates: [],
   app_settings: [],
-  tax_settings: [{ fiscal_year: year, profitability_coefficient: 67, substitute_tax_rate: 5, annual_revenue_limit: 85000, projection_include_current_month: true, projection_excluded_months: [], projection_prudent_factor: 0.85, projection_optimistic_factor: 1.10, risk_low_threshold: 70, risk_medium_threshold: 90, risk_high_threshold: 100, activity_start_date: `${year}-01-01` }],
+  tax_settings: [{ fiscal_year: year, profitability_coefficient: 67, substitute_tax_rate: 5, stamp_duty_mode: 'charged', stamp_duty_amount: 2, inps_recharge_enabled: true, inps_recharge_rate: 4, annual_revenue_limit: 85000, projection_include_current_month: true, projection_excluded_months: [], projection_prudent_factor: 0.85, projection_optimistic_factor: 1.10, risk_low_threshold: 70, risk_medium_threshold: 90, risk_high_threshold: 100, activity_start_date: `${year}-01-01` }],
   tax_payments: [{ fiscal_year: year, payment_type: 'inps_acconto', status: 'paid', amount: 100 }]
 };
 
@@ -67,14 +67,44 @@ assert.equal(summary.find(row => row.type === 'monthly_flat').amount, 1000);
 assert.equal(summary.find(row => row.type === 'manual_entry').amount, 200);
 assert.equal(summary.find(row => row.type === 'travel_expenses').amount, 50);
 
-const billing = window.billingCalc({ lines: summary }, { inps_recharge_enabled: true, inps_recharge_rate: 4, stamp_duty_enabled: true, stamp_duty_amount: 2 });
+// Il bollo si sceglie una volta per l'anno, in configurazione: la
+// singola fattura non lo ridiscute piu'. Prima lo si passava qui come
+// se fosse una scelta della fattura, e un interruttore solo diceva
+// insieme che il bollo e' dovuto e che lo si addebita.
+const billing = window.billingCalc({ lines: summary }, { inps_recharge_enabled: true, inps_recharge_rate: 4 });
 assert.equal(billing.services, 1400);
 assert.equal(billing.manual, 200);
 assert.equal(billing.expenses, 50);
 assert.equal(billing.taxableBase, 1650);
 assert.equal(billing.inpsAmount, 66);
+// 'charged': dovuto e addebitato, quindi dentro al totale
+assert.equal(billing.stampMode, 'charged');
+assert.equal(billing.stampDue, 2);
 assert.equal(billing.stampAmount, 2);
 assert.equal(billing.total, 1718);
+
+// 'mine': la fattura lo dichiara lo stesso, ma il totale non lo
+// comprende — e' il caso di chi lo versa all'Agenzia delle Entrate.
+tableRows.tax_settings[0].stamp_duty_mode = 'mine';
+const billingMio = window.billingCalc({ lines: summary }, { inps_recharge_enabled: true, inps_recharge_rate: 4 });
+assert.equal(billingMio.stampDue, 2);
+assert.equal(billingMio.stampAmount, 0);
+assert.equal(billingMio.total, 1716);
+
+// 'none': niente bollo in nessuna forma
+tableRows.tax_settings[0].stamp_duty_mode = 'none';
+const billingNo = window.billingCalc({ lines: summary }, { inps_recharge_enabled: true, inps_recharge_rate: 4 });
+assert.equal(billingNo.stampDue, 0);
+assert.equal(billingNo.stampAmount, 0);
+assert.equal(billingNo.total, 1716);
+
+// Sotto i 77,47 € di importi esenti il bollo non e' dovuto, e prima ci
+// finiva lo stesso gonfiando di 2 € le fatture piccole.
+tableRows.tax_settings[0].stamp_duty_mode = 'charged';
+const billingPiccola = window.billingCalc({ lines: [{ type: 'manual_entry', amount: 50 }] }, {});
+assert.equal(billingPiccola.stampDue, 0);
+assert.equal(billingPiccola.stampAmount, 0);
+assert.equal(Math.round(billingPiccola.total * 100) / 100, 52);
 
 const annual = window.annualTaxCalc(year);
 assert.equal(annual.revenue, 2300);

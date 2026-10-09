@@ -108,6 +108,25 @@ function makeChain(table){
       // proverebbe piu' che e' l'app a sganciare le spese.
       if(table==='trips'&&(STORES.travel_expenses||[]).some(e=>String(e.trip_id)===String(eqVal)))
         return {data:null,error:{message:'update or delete on table "trips" violates foreign key constraint "travel_expenses_trip_id_fkey" on table "travel_expenses"'}};
+      // La gerarchia, con i vincoli che il database dichiara davvero.
+      // RESTRICT: timesheet, compensi e spese puntano alla WBS con ON
+      // DELETE RESTRICT, e le commesse al progetto idem. Senza questi,
+      // il mock accettava cancellazioni che in produzione Postgres
+      // rifiuta, e i test non provavano piu' che e' l'app a fermarsi
+      // prima con un messaggio invece di farsi dire di no dal database.
+      // CASCADE: le attivita' di una commessa se ne vanno con lei.
+      const usaWbs=id=>['timesheet_entries','manual_entries','travel_expenses']
+        .some(t=>(STORES[t]||[]).some(r=>String(r.wbs_id)===String(id)));
+      if(table==='wbs_items'&&eqCol==='id'&&usaWbs(eqVal))
+        return {data:null,error:{message:'update or delete on table "wbs_items" violates foreign key constraint "timesheet_entries_wbs_id_fkey" on table "timesheet_entries"'}};
+      if(table==='engagements'&&eqCol==='id'){
+        const sue=(STORES.wbs_items||[]).filter(w=>String(w.engagement_id)===String(eqVal));
+        if(sue.some(w=>usaWbs(w.id)))
+          return {data:null,error:{message:'update or delete on table "wbs_items" violates foreign key constraint "timesheet_entries_wbs_id_fkey" on table "timesheet_entries"'}};
+        STORES.wbs_items=(STORES.wbs_items||[]).filter(w=>String(w.engagement_id)!==String(eqVal));
+      }
+      if(table==='projects'&&eqCol==='id'&&(STORES.engagements||[]).some(e=>String(e.project_id)===String(eqVal)))
+        return {data:null,error:{message:'update or delete on table "projects" violates foreign key constraint "engagements_project_id_fkey" on table "engagements"'}};
       // Il CASCADE dichiarato nello schema: cancellata una testata di
       // fattura se ne vanno le sue righe, e con quelle le ripartizioni
       // per commessa. Senza, il mock lasciava righe orfane che in
