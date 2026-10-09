@@ -3618,7 +3618,8 @@ function billingGroupsByClient(){const lines=groupSummary();const by={};lines.fo
 // numeri sembravano non rispondere al selettore.
 // Prima erano due linguette della stessa pagina; adesso sono due
 // pagine, ognuna col suo selettore: il mese sceglie il mese, l'anno
-// l'anno.
+// l'anno. Per questo la cassa non dice piu' «In Ottobre: ...»: era il
+// mese scelto nell'altra pagina, che da qui non si vede ne' si cambia.
 function billingMeseCard(groups,total){
   const base=groups.reduce((s,g)=>s+Number(g.calc.subtotal||0),0);
   const riv=groups.reduce((s,g)=>s+Number(g.calc.inpsAmount||0),0);
@@ -3637,13 +3638,11 @@ ${pian>0?`<div class="metricLine" style="margin-top:6px"><span class="tag blue">
 }
 function billingCassaCard(){
   const year=currentYear();const at=annualTotals(year);
-  const {month}=periodParts();const md=annualMonthData(year)[month-1]||{};
   const aperte=(data.billingHeaders||[]).filter(h=>Number(h.year)===year&&h.status==='invoice_issued').length;
   return `<div class="card"><b>Da incassare</b>
 <div class="amount" style="margin-top:8px">${fmtEUR(at.daIncassare)}</div>
 <div class="metricLine" style="margin-top:6px">${fmtEUR(at.fatturato)} fatturato nel ${year} <span class="dot">·</span> ${fmtEUR(at.incassato)} già incassato${aperte?' <span class="dot">·</span> '+aperte+' fattur'+(aperte===1?'a aperta':'e aperte'):''}</div>
 <div class="desc" style="margin-top:8px">Questi importi <b>comprendono</b> la rivalsa INPS e la marca da bollo, perché sono denaro che entra sul conto.</div>
-<div class="metricLine" style="margin-top:10px">In ${monthLabel(state.month)}: ${fmtEUR(md.fatturato||0)} fatturato <span class="dot">·</span> ${fmtEUR(md.incassato||0)} incassato</div>
 <div class="grid" style="margin-top:12px"><button class="secondary" onclick="openAnnualInvoices('issued')">Fatture emesse ›</button><button class="secondary" onclick="openAnnualInvoices('collected')">Incassi ›</button></div></div>`;
 }
 function billingAnnoCard(){

@@ -230,6 +230,12 @@ console.log('\n=== IL MESE E L’ANNO SONO DUE PAGINE, OGNUNA COL SUO SELETTORE 
     sel:document.querySelector('#app .month strong')?.textContent.trim()}));
   ok(anno.sel==='Anno 2026','la pagina dell’anno ha il selettore dell’anno',anno.sel);
   ok(anno.h2.includes('La cassa')&&anno.h2.includes('Maturato e previsione'),'con la cassa e il prospetto',anno.h2.join(' | '));
+  // Il mese scelto nell'altra pagina non deve affiorare qui: da qui non
+  // si vede ne' si cambia, e una riga «In Ottobre 2026: ...» sarebbe un
+  // numero che dipende da una scelta invisibile.
+  const tAnno=await testo(pg);
+  ok(!/\bIn [A-Z][a-z]+ \d{4}:/.test(tAnno),'e nessuna riga che dipende dal mese scelto altrove',
+     (tAnno.match(/\bIn [A-Z][a-z]+ \d{4}:[^·]{0,30}/)||[''])[0]||'nessuna');
   // l'anno si cambia da qui, senza passare dal mese
   await pg.evaluate(()=>[...document.querySelectorAll('#app .month button')].find(b=>/successivo/.test(b.title)).click());
   await pg.waitForTimeout(400);
