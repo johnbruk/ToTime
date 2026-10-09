@@ -178,6 +178,63 @@ console.log('\n=== IL BOLLO CHE PAGHI TU È UN TUO COSTO ===');
   await pg.close();
 }
 
+console.log('\n=== «NON SI APPLICA»: NESSUNA SCADENZA DI BOLLO DA VERSARE ===');
+{
+  // Il conteggio di quello che si deve all'Agenzia delle Entrate
+  // ignorava del tutto la scelta: contava 2 € per ogni fattura sopra
+  // soglia comunque, e chi aveva scelto «non si applica» si vedeva
+  // delle scadenze che non aveva.
+  const con=await apri('mine');
+  await con.evaluate(({a})=>{window.__stores.billing_headers=[
+    {id:'h1',client_id:'ac',year:a,month:2,status:'invoice_issued',
+     total_amount:4600,invoice_total_amount:4784,stamp_duty_amount:0}];},{a:ANNO});
+  await con.evaluate(()=>window.reload());await con.waitForTimeout(600);
+  await con.evaluate(()=>window.go('tasseFuture'));await con.waitForTimeout(800);
+  const tCon=await testo(con);
+  ok(/Imposta di bollo/.test(tCon),'pagandolo tu, la scadenza del bollo c’è',
+     (tCon.match(/Imposta di bollo[^·]{0,50}/)||[''])[0]);
+  await con.close();
+
+  const senza=await apri('none');
+  await senza.evaluate(({a})=>{window.__stores.billing_headers=[
+    {id:'h1',client_id:'ac',year:a,month:2,status:'invoice_issued',
+     total_amount:4600,invoice_total_amount:4784,stamp_duty_amount:0}];},{a:ANNO});
+  await senza.evaluate(()=>window.reload());await senza.waitForTimeout(600);
+  await senza.evaluate(()=>window.go('tasseFuture'));await senza.waitForTimeout(800);
+  const tSenza=await testo(senza);
+  ok(!/Imposta di bollo/.test(tSenza),'con «non si applica» non c’è: non devi versare niente',
+     (tSenza.match(/Imposta di bollo[^·]{0,50}/)||[''])[0]||'nessuna scadenza');
+  await senza.close();
+}
+
+console.log('\n=== LA SOGLIA SI MISURA SUGLI IMPORTI ESENTI, RIVALSA COMPRESA ===');
+{
+  // 76 € di compenso stanno sotto i 77,47. Ma con il 4% di rivalsa la
+  // fattura espone 79,04 € esenti, e il bollo e' dovuto. Prima si
+  // guardava il solo compenso, e questa fattura non veniva contata.
+  const pg=await apri('mine');
+  await pg.evaluate(({a})=>{window.__stores.billing_headers=[
+    {id:'h1',client_id:'ac',year:a,month:2,status:'invoice_issued',
+     total_amount:76,invoice_total_amount:79.04,stamp_duty_amount:0}];},{a:ANNO});
+  await pg.evaluate(()=>window.reload());await pg.waitForTimeout(600);
+  await pg.evaluate(()=>window.go('tasseFuture'));await pg.waitForTimeout(800);
+  const t=await testo(pg);
+  ok(/Imposta di bollo/.test(t),'76 € di compenso + 4% fanno 79,04: il bollo è dovuto',
+     (t.match(/Imposta di bollo[^·]{0,50}/)||[''])[0]||'non contata');
+  await pg.close();
+
+  const sotto=await apri('mine');
+  await sotto.evaluate(({a})=>{window.__stores.billing_headers=[
+    {id:'h1',client_id:'ac',year:a,month:2,status:'invoice_issued',
+     total_amount:70,invoice_total_amount:72.80,stamp_duty_amount:0}];},{a:ANNO});
+  await sotto.evaluate(()=>window.reload());await sotto.waitForTimeout(600);
+  await sotto.evaluate(()=>window.go('tasseFuture'));await sotto.waitForTimeout(800);
+  const t2=await testo(sotto);
+  ok(!/Imposta di bollo/.test(t2),'mentre 72,80 € restano sotto soglia, e non è dovuto',
+     (t2.match(/Imposta di bollo[^·]{0,50}/)||[''])[0]||'nessuna scadenza');
+  await sotto.close();
+}
+
 await b.close(); srv.close();
 console.log(`\n=== bollo chi lo paga: OK ${pass} · KO ${fail} ===`);
 process.exit(fail?1:0);

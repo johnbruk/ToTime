@@ -3529,12 +3529,25 @@ const BOLLO_SOGLIA=77.47;
 const NATURE_BOLLO=['N1','N2.2','N3.5','N3.6','N4'];
 function bolloCalc(year=currentYear()){
   const ts=currentTaxSetting(year);const unit=Number(ts.stamp_duty_amount??2)||2;
+  // Dove il bollo non si applica non c'e' niente da versare: prima si
+  // contavano 2 € per ogni fattura sopra soglia comunque, e chi aveva
+  // scelto «non si applica» si vedeva dei costi che non aveva.
+  const modo=bolloModo(ts);
   const rows=data.billingHeaders.filter(h=>Number(h.year)===Number(year)&&['invoice_issued','collected'].includes(h.status));
   let nFatture=0,dovuto=0,addebitato=0;const perTrim=[0,0,0,0];
-  rows.forEach(h=>{const base=Number(h.total_amount||0);const add=Number(h.stamp_duty_amount||0);addebitato+=add;
-    if(base>BOLLO_SOGLIA){nFatture++;dovuto+=unit;const m=Number(h.month||1);perTrim[Math.min(3,Math.floor((m-1)/3))]+=unit;}});
+  rows.forEach(h=>{
+    const add=Number(h.stamp_duty_amount||0);addebitato+=add;
+    // La soglia si misura sugli importi ESENTI, che comprendono la
+    // rivalsa: e' il totale della fattura meno il bollo addebitato.
+    // Prima si guardava il solo compenso, e una fattura da 76 € con
+    // 3,04 € di rivalsa — 79,04, sopra soglia — non veniva contata.
+    const base=Number(h.invoice_total_amount||h.total_amount||0)-add
+      ||Number(h.total_amount||0);
+    if(bolloDovuto(modo)&&base>BOLLO_SOGLIA){
+      nFatture++;dovuto+=unit;
+      const m=Number(h.month||1);perTrim[Math.min(3,Math.floor((m-1)/3))]+=unit;}});
   const aCarico=Math.max(0,dovuto-addebitato);
-  return {unit,soglia:BOLLO_SOGLIA,nFatture,dovuto,addebitato,aCarico,perTrim,rows:rows.length};
+  return {unit,soglia:BOLLO_SOGLIA,modo,nFatture,dovuto,addebitato,aCarico,perTrim,rows:rows.length};
 }
 function billingExtras(year=currentYear()){let rivalsa=0,bollo=0;data.billingHeaders.filter(h=>Number(h.year)===Number(year)&&['invoice_issued','collected'].includes(h.status)).forEach(h=>{rivalsa+=Number(h.inps_recharge_amount||0);bollo+=Number(h.stamp_duty_amount||0)});return {rivalsa,bollo}}
 function balanceCompositionBar(costi,inps,imposta,utile){const parts=[['Spese a mio carico',Math.max(0,costi),'var(--red)'],['Contributi INPS',Math.max(0,inps),'var(--primary2)'],['Imposta sostitutiva',Math.max(0,imposta),'var(--orange)'],['Utile netto',Math.max(0,utile),'var(--green)']];const tot=parts.reduce((s,p)=>s+p[1],0)||1;return `<div class="segBar">${parts.map(p=>`<span style="width:${p[1]/tot*100}%;background:${p[2]}" title="${p[0]}: ${fmtEUR(p[1])}"></span>`).join('')}</div><div class="segLegend">${parts.map(p=>`<span class="li"><span class="sdot" style="background:${p[2]}"></span>${p[0]} · ${fmtEUR(p[1])}</span>`).join('')}</div>`}
