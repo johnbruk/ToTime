@@ -19,7 +19,8 @@ const DEFAULT_TABLES = [
   ['engagement_references', 'engagementReferences'],
   ['wbs_items', 'wbsItems'],
   ['billing_lines', 'billingLines'],
-  ['invoice_line_allocations', 'invoiceAllocations']
+  ['invoice_line_allocations', 'invoiceAllocations'],
+  ['invoice_documents', 'invoiceDocuments']
 ];
 
 // Tabelle introdotte dalla migrazione commesse/WBS. Finche' non e'
@@ -34,8 +35,16 @@ const OPTIONAL_TABLES = new Set([
   'trips',
   // I veicoli: come le trasferte, senza la migrazione non esistono e
   // la chilometrica ricade sul «metti km e tariffa a mano».
-  'vehicles'
+  'vehicles',
+  // Le fatture conservate: senza la migrazione la registrazione scrive
+  // le schede come prima, e il file XML semplicemente non si conserva.
+  'invoice_documents'
 ]);
+// L'elenco delle fatture conservate non si porta dietro gli XML: sono
+// file interi, e caricarli tutti a ogni apertura dell'app crescerebbe
+// con gli anni. Si scaricano uno per volta, quando servono.
+const INVOICE_DOCUMENT_LIST_COLUMNS =
+  'id,client_id,invoice_number,invoice_date,months,total_amount,natures,stamp_base,stamp_amount,file_name,created_at,updated_at';
 
 function isMissingTable(error) {
   const code = String(error && error.code || '');
@@ -46,6 +55,8 @@ function isMissingTable(error) {
 }
 
 function orderedQuery(sb, table) {
+  if (table === 'invoice_documents')
+    return sb.from(table).select(INVOICE_DOCUMENT_LIST_COLUMNS).order('invoice_date', { ascending: false });
   let query = sb.from(table).select('*');
 
   if (table === 'timesheet_entries') return query.order('entry_date', { ascending: false });
@@ -118,6 +129,7 @@ export function createRepository(sb) {
     wbsItems: tableApi(sb, 'wbs_items'),
     billingLines: tableApi(sb, 'billing_lines'),
     invoiceAllocations: tableApi(sb, 'invoice_line_allocations'),
+    invoiceDocuments: tableApi(sb, 'invoice_documents'),
 
     async loadAll() {
       const result = {};
