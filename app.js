@@ -1161,7 +1161,7 @@ function confrontaFattura(f){
   // 5. Mesi coperti.
   if(mesi.length>1)
     nota('nota','La fattura copre piu’ mesi',
-      `${mesi.map(monthLabel).join(', ')}. Oggi una fattura sta su un mese solo: finche’ non cambia il modello, l’aggancio al secondo mese va fatto a mano.`);
+      `${mesi.map(monthLabel).join(', ')}. Registrandola, ogni mese ha la sua scheda, tutte con lo stesso numero.`);
 
   // 6. Rimborsi che l'app si aspettava e in fattura non si vedono.
   if(cliente)mesi.forEach(m=>{
@@ -1177,7 +1177,8 @@ function confrontaFattura(f){
     nota('nota',bolloAddebitato?'Bollo addebitato al cliente':'Bollo a tuo carico',
       `${fmtEUR(f.bolloImporto)} di imposta di bollo${f.bolloVirtuale?', assolta in modo virtuale':''}${bolloAddebitato?', compresa nel totale della fattura.':', non addebitata al cliente.'}`);
 
-  return {esiti,cliente,mesi,abbinamento:ab.come};
+  return {esiti,cliente,mesi,abbinamento:ab.come,
+    perMese,senzaMese,scontoNonRipartibile,bolloAddebitato};
 }
 // La schermata che fa vedere cosa si e' capito, PRIMA di toccare
 // qualunque dato salvato. Qui non si scrive niente: si carica il file,
@@ -1187,12 +1188,129 @@ const LIV={blocco:{t:'Da guardare',c:'orange'},scostamento:{t:'Non torna',c:'ora
 function fatturaCarica(){
   const r=state.fatturaLetta;
   return appShell(`<h1>Carica la fattura emessa</h1>
-<p class="sub">Si legge l’XML della fattura elettronica e lo si confronta coi tuoi consuntivi. <b>Non viene salvato niente</b>: questa schermata guarda e basta.</p>
+<p class="sub">Si legge l’XML della fattura elettronica e lo si confronta coi tuoi consuntivi. <b>Non si salva niente</b> finché non premi «Registra».</p>
 <div class="card"><div class="field"><label>File della fattura (.xml)</label>
 <input type="file" accept=".xml,text/xml,application/xml" onchange="fatturaFileScelto(this)"></div>
-<div class="desc">Il file resta nel browser: non viene caricato da nessuna parte e non tocca il database.</div></div>
+<div class="desc">Il file resta nel browser e non viene caricato da nessuna parte. Registrando si scrivono solo i suoi numeri, sulle schede di fatturazione.</div></div>
 ${r?schedaFatturaLetta(r):''}
 <button type="button" class="secondary" onclick="go('billing')">Torna alla fatturazione</button>`);
+}
+// ─── Registrare la fattura controllata ─────────────────────
+//
+// Registrarla vuol dire scrivere sulle schede di fatturazione i numeri
+// della fattura VERA, mese per mese. Sono quelle che leggono il
+// bilancio e la stima delle imposte — annualMonthData indicizza per
+// mese — quindi e' questo il gesto che fa seguire ai conti la fattura
+// emessa invece della proposta dell'app.
+//
+// Una scheda per mese, tutte con lo stesso numero: mettere una fattura
+// di due mesi su uno solo farebbe risultare l'altro non fatturato, e i
+// totali mensili si sposterebbero.
+// Il numero si confronta senza prefissi: «Fattura #4/2026», «#4/2026»
+// e «4/2026» sono la stessa fattura scritta a mano in tre modi.
+function chiaveNumero(n){return String(n||'').replace(/[^0-9/]/g,'')}
+function pianoRegistrazione(r){
+  const f=r&&r.f;
+  if(!f||f.errore)return {ok:false,perche:'Il file non si è potuto leggere.'};
+  if(!r.cliente)return {ok:false,perche:'Non si sa di quale cliente sia: partita IVA e nome non corrispondono a nessuno dei tuoi clienti.'};
+  const blocchi=(r.esiti||[]).filter(e=>e.liv==='blocco');
+  if(blocchi.length)return {ok:false,perche:'Il controllo ha trovato un problema che blocca: «'+blocchi[0].titolo+'». Una fattura così non si registra.'};
+  if(!r.mesi||!r.mesi.length)return {ok:false,perche:'Nessuna riga dice a che mese si riferisce: non si sa su quale mese registrarla.'};
+  if(r.senzaMese)return {ok:false,perche:(r.senzaMese===1?'Una riga non dice':r.senzaMese+' righe non dicono')+' a che mese si riferisce: non si saprebbe su quale mese metterla.'};
+  if(r.scontoNonRipartibile)return {ok:false,perche:'C’è uno sconto di documento su più mesi: non si sa quanto ne tocchi a ciascuno.'};
+  if(Number(f.imposta||0)>0)return {ok:false,perche:'La fattura ha l’IVA: la registrazione per ora tiene solo le fatture senza IVA, come quelle in regime forfettario.'};
+  const cent=v=>Math.round(Number(v||0)*100)/100;
+  const basi=r.mesi.map(m=>Number(r.perMese[m].importo||0));
+  const sommaBasi=basi.reduce((a,b)=>a+b,0);
+  const rivTot=Number(f.rivalsaImporto||0);
+  let rivUsata=0;
+  const righe=r.mesi.map((m,i)=>{
+    const ultima=i===r.mesi.length-1;
+    const base=cent(basi[i]);
+    // La rivalsa segue la base del mese, di cui e' il 4%: ripartirla in
+    // proporzione e' esatto. L'ultimo mese prende il resto, cosi' la
+    // somma torna al centesimo.
+    const rivalsa=ultima?cent(rivTot-rivUsata):cent(sommaBasi?rivTot*basi[i]/sommaBasi:0);
+    rivUsata+=rivalsa;
+    // Il bollo e' uno per documento, e l'arrotondamento pure: se ci
+    // sono, vanno sull'ultimo mese.
+    const bollo=(ultima&&r.bolloAddebitato)?cent(f.bolloImporto):0;
+    const arrot=ultima?Number(f.arrotondamento||0):0;
+    const [y,mm]=m.split('-').map(Number);
+    const esistente=(data.billingHeaders||[]).find(h=>h.client_id===r.cliente.id&&Number(h.year)===y&&Number(h.month)===mm)||null;
+    return {mese:m,year:y,month:mm,base,rivalsa,bollo,totale:cent(base+rivalsa+bollo+arrot),esistente};
+  });
+  const somma=cent(righe.reduce((a,x)=>a+x.totale,0));
+  // Il totale documento e' facoltativo: assente non vuol dire zero.
+  // Li' la quadratura l'ha gia' fatta il confronto, sulle parti.
+  if(f.totaleDichiarato&&Math.abs(somma-Number(f.totale||0))>0.01)
+    return {ok:false,perche:'Divisa per mese la fattura fa '+fmtEUR(somma)+', ma il totale dichiarato è '+fmtEUR(f.totale)+': un numero che non torna non si registra.'};
+  // Un mese gia' fatturato con un ALTRO numero non si sovrascrive in
+  // silenzio. O quella fattura e' sbagliata, e allora la si elimina
+  // prima; o questa e' la seconda fattura dello stesso mese, che una
+  // scheda per cliente e per mese non sa tenere.
+  const occupato=righe.find(x=>x.esistente&&['invoice_issued','collected'].includes(x.esistente.status)
+    &&chiaveNumero(x.esistente.invoice_number)&&chiaveNumero(x.esistente.invoice_number)!==chiaveNumero(f.numero));
+  if(occupato)return {ok:false,perche:monthLabel(occupato.mese)+' risulta già fatturato con la '+occupato.esistente.invoice_number+'. Se quella è sbagliata eliminala prima, da Fatture emesse.'};
+  const gia=righe.every(x=>x.esistente&&chiaveNumero(x.esistente.invoice_number)===chiaveNumero(f.numero)
+    &&Math.abs(Number(x.esistente.invoice_total_amount||0)-x.totale)<0.01);
+  const scostamenti=(r.esiti||[]).filter(e=>e.liv==='scostamento').length;
+  return {ok:true,righe,gia,scostamenti};
+}
+function cardRegistrazione(r){
+  const p=pianoRegistrazione(r);
+  if(!p.ok)return `<div class="card"><b>Questa fattura non si registra</b><div class="desc" style="margin-top:6px">${esc(p.perche)}</div></div>`;
+  const stesso=x=>x.esistente&&chiaveNumero(x.esistente.invoice_number)===chiaveNumero(r.f.numero);
+  const righe=p.righe.map(x=>`<div class="row"><div></div><div><div class="title">${esc(monthLabel(x.mese))}</div>
+    <div class="desc">${fmtEUR(x.base)} di imponibile${x.rivalsa?' + '+fmtEUR(x.rivalsa)+' di rivalsa':''}${x.bollo?' + '+fmtEUR(x.bollo)+' di bollo':''}</div>
+    <div class="desc">${x.esistente?(stesso(x)?'Già registrata: si aggiorna':'La scheda del mese c’è già: si completa'):'Scheda nuova'}${x.esistente&&x.esistente.status==='collected'?' · resta incassata':''}</div></div>
+    <div class="value">${fmtEUR(x.totale)}</div></div>`).join('');
+  return `<h2>Registra la fattura</h2><p class="sub">Si scrivono sulle schede di fatturazione i numeri di questa fattura, un mese per scheda e tutte con lo stesso numero. Sono quelli che usano il bilancio e la stima delle imposte.</p>
+<div class="list">${righe}</div>
+${p.gia?`<div class="card"><b>Già registrata</b><div class="desc" style="margin-top:6px">Le schede di questi mesi hanno già questo numero e questi importi.</div></div>`
+  :`<button type="button" class="primary" onclick="registraFattura()">Registra su ${p.righe.length===1?'1 mese':p.righe.length+' mesi'}</button>`}`;
+}
+// Se una scheda va in errore a meta', ripetere e' sicuro: lo stesso
+// numero sullo stesso mese si aggiorna, non si duplica.
+async function registraFattura(){
+  // Un secondo tocco mentre la prima registrazione scrive ancora
+  // troverebbe i mesi non ancora scritti, e li scriverebbe due volte.
+  if(state.registrando)return;
+  state.registrando=true;
+  try{await registraFatturaOra()}finally{state.registrando=false}
+}
+async function registraFatturaOra(){
+  const r=state.fatturaLetta;
+  const p=pianoRegistrazione(r);
+  if(!p.ok)return setMsgLeggero(p.perche,9000);
+  if(p.gia)return setMsgLeggero('È già registrata così.',5000);
+  const f=r.f;
+  const elenco=p.righe.map(x=>'· '+monthLabel(x.mese)+': '+fmtEUR(x.totale)).join('\n');
+  if(!confirm('Registrare la fattura '+(f.numero||'senza numero')+'?\n\n'+elenco
+    +(p.scostamenti?'\n\nIl controllo ha trovato '+p.scostamenti+(p.scostamenti===1?' scostamento':' scostamenti')
+      +' dal consuntivato: registrandola, bilancio e imposte seguiranno la fattura, non il consuntivo.':'')
+    +'\n\nBilancio e stima delle imposte useranno questi numeri.'))return;
+  for(const x of p.righe){
+    // Un mese gia' incassato resta incassato: registrare la fattura non
+    // deve far tornare indietro un incasso.
+    const incassata=x.esistente&&x.esistente.status==='collected';
+    const payload={client_id:r.cliente.id,year:x.year,month:x.month,
+      invoice_number:f.numero||null,invoice_date:f.data||null,
+      status:incassata?'collected':'invoice_issued',
+      total_amount:x.base,taxable_base_amount:x.base,
+      inps_recharge_enabled:x.rivalsa>0,inps_recharge_rate:Number(f.rivalsaAliquota||0)||null,
+      inps_recharge_amount:x.rivalsa,
+      stamp_duty_enabled:x.bollo>0,stamp_duty_amount:x.bollo,
+      invoice_total_amount:x.totale};
+    const res=x.esistente
+      ? await updateResilient('billing_headers',payload,x.esistente.id)
+      : await insertResilient('billing_headers',payload);
+    if(res.error)
+      return setMsgLeggero('Registrazione fermata su '+monthLabel(x.mese)+': '+motivoLeggibile(res.error)+' Ripetila: i mesi già scritti si aggiornano, non si duplicano.',10000);
+  }
+  await reload();
+  setMsg('Fattura '+(f.numero||'')+' registrata su '+p.righe.map(x=>monthLabel(x.mese)).join(' e ')
+    +': bilancio e stima delle imposte ora usano questi numeri.',8000);
 }
 function schedaFatturaLetta(r){
   const f=r.f;
@@ -1214,7 +1332,7 @@ ${f.sconto?`<div class="metricLine" style="margin-top:10px">Righe ${fmtEUR(f.rig
 <h2>Il confronto coi tuoi dati</h2>
 <p class="sub">${gravi?'<b>'+gravi+'</b> cosa'+(gravi>1?'e':'')+' da guardare.':'Niente da segnalare.'}</p>
 <div class="list">${esiti}</div>
-<div class="card"><b>Niente è stato salvato</b><div class="desc" style="margin-top:6px">Questa schermata legge e confronta soltanto. L’allineamento dei dati alla fattura arriverà come passo a parte, con una conferma esplicita.</div></div>`;
+${cardRegistrazione(r)}`;
 }
 function fatturaFileScelto(input){
   const file=input&&input.files&&input.files[0];
@@ -1224,7 +1342,7 @@ function fatturaFileScelto(input){
     try{
       const f=leggiFatturaXML(String(reader.result||'').replace(/^﻿/,''));
       const r=confrontaFattura(f);
-      state.fatturaLetta={f,esiti:r.esiti,cliente:r.cliente,mesi:r.mesi,nome:file.name};
+      state.fatturaLetta={f,...r,nome:file.name};
       render();
     }catch(e){
       setMsgLeggero('Non si è potuto leggere il file: '+(e&&e.message||e),9000);
@@ -1672,23 +1790,46 @@ function rigaFattura(h,importo){
 // Sparisce la testata e, dietro, le sue righe e la ripartizione per
 // commessa: sono legate con ON DELETE CASCADE. Le ore e le spese NON
 // si toccano: restano dove sono, e il mese torna «da fatturare».
+// Una fattura su piu' mesi sta su piu' schede, una per mese, tutte con
+// lo stesso numero e la stessa data. Eliminarne una sola lasciava
+// l'altra meta' a contare nei conti dell'anno: se ne vanno insieme.
+// Il numero da solo non basta: due schede con lo stesso numero e date
+// diverse sono un doppione nato per errore, e li' si elimina solo
+// quella scelta.
+function schedeStessaFattura(h){
+  const n=chiaveNumero(h.invoice_number);
+  if(!n||!h.invoice_date)return [h];
+  return (data.billingHeaders||[]).filter(x=>x.client_id===h.client_id
+    &&x.invoice_date===h.invoice_date&&chiaveNumero(x.invoice_number)===n)
+    .sort((a,b)=>(a.year-b.year)||(a.month-b.month));
+}
 async function eliminaFattura(id){
   const h=(data.billingHeaders||[]).find(x=>x.id===id);
   if(!h)return setMsg('Quella fattura non c’è più: ricarica la pagina.',6000);
+  const tutte=schedeStessaFattura(h);
+  const mm=x=>String(x.month).padStart(2,'0')+'/'+x.year;
   const nome=(h.invoice_number?'#'+h.invoice_number:'senza numero')
     +' · '+clientName(h.client_id)
-    +' · '+String(h.month).padStart(2,'0')+'/'+h.year;
+    +' · '+tutte.map(mm).join(' e ');
   if(h.status==='collected')
     return setMsg('La fattura '+nome+' risulta incassata, e così non si elimina. '
       +'Aprila, rimettila su «Da fatturare» e salva: poi la puoi eliminare.',9000);
+  const incassata=tutte.find(x=>x.status==='collected');
+  if(incassata)
+    return setMsg('La fattura '+nome+' copre anche '+mm(incassata)+', che risulta incassato, e così non si elimina. '
+      +'Apri quel mese, rimettilo su «Da fatturare» e salva: poi la puoi eliminare.',9000);
+  const piu=tutte.length>1;
   if(!confirm('Eliminare la fattura '+nome+'?\n\n'
+    +(piu?'Copre '+tutte.length+' mesi: si eliminano tutte le sue schede.\n':'')
     +'Spariscono le sue righe e la ripartizione per commessa.\n'
-    +'Le ore e le spese restano: il mese torna «da fatturare».\n\n'
+    +'Le ore e le spese restano: '+(piu?'i mesi tornano':'il mese torna')+' «da fatturare».\n\n'
     +'L’operazione non è reversibile.'))return;
-  const {error}=await sb.from('billing_headers').delete().eq('id',id);
-  if(error)return setMsg(motivoLeggibile(error),8000);
+  for(const x of tutte){
+    const {error}=await sb.from('billing_headers').delete().eq('id',x.id);
+    if(error){await reload();return setMsg(motivoLeggibile(error),8000)}
+  }
   await reload();
-  setMsg('Fattura '+nome+' eliminata: il mese torna da fatturare.',6000);
+  setMsg('Fattura '+nome+' eliminata: '+(piu?'i mesi tornano':'il mese torna')+' da fatturare.',6000);
 }
 function annualInvoices(modeArg){const year=currentYear();const mode=modeArg||(state.edit==='collected'?'collected':'issued');let rows=data.billingHeaders.filter(h=>Number(h.year)===Number(year)&&['invoice_issued','collected'].includes(h.status));if(mode==='collected')rows=rows.filter(h=>h.status==='collected');rows=rows.sort((a,b)=>(Number(b.month)-Number(a.month))||clientName(a.client_id).localeCompare(clientName(b.client_id)));const title=mode==='collected'?`Incassi ${year}`:`Fatture emesse ${year}`;const amountOf=h=>mode==='collected'?Number(h.collected_amount||h.invoice_total_amount||h.total_amount||0):Number(h.invoice_total_amount||h.total_amount||0);const total=rows.reduce((s,h)=>s+amountOf(h),0);return appShell(`<h1>${title}</h1><p class="sub">Tocca una voce per aprire il dettaglio della fattura.</p><div class="card"><b>Totale ${mode==='collected'?'incassato':'fatturato'} ${year}</b><div class="amount" style="margin-top:8px">${fmtEUR(total)}</div></div>${rows.length?intestazioneFatture():''}<div class="list">${rows.map(h=>rigaFattura(h,amountOf(h))).join('')||`<div class="empty">${mode==='collected'?'Nessun incasso registrato':'Nessuna fattura emessa'} nel ${year}.</div>`}</div>`)}
 function home(){const t=totals();const y=annualTotals(currentYear());return appShell(`<h1 class="srOnly">Dashboard</h1><button class="primary cta" onclick="newEntryChoice()">+ Nuovo consuntivo</button><div class="homeTop">${monthSelector()}</div><div class="card cardLink" onclick="go('timesheet')" role="button" title="Apri il timesheet di ${monthLabel(state.month)}"><b>Consuntivo mese <span class="cardLinkArrow">›</span></b><div class="kpiGrid three" style="margin-top:14px"><div><span>Consuntivate</span><strong>${fmtNum(t.days,2)} gg</strong><small>${fmtNum(t.hours,1)} h</small></div><div><span>Pianificate</span><strong>${fmtNum(t.plannedDays,2)} gg</strong><small>${fmtNum(t.plannedHours,1)} h</small></div><div><span>Totale</span><strong>${fmtNum(t.days+t.plannedDays,2)} gg</strong><small>${fmtNum(t.hours+t.plannedHours,1)} h</small></div></div><div class="metricLine" style="margin-top:12px">${fmtEUR(t.amount)} consuntivato${t.plannedAmount>0?` <span class="dot">·</span> ${fmtEUR(t.plannedAmount)} pianificato <span class="dot">·</span> <b>${fmtEUR(t.amount+t.plannedAmount)}</b> totale`:''}</div>${t.rimborsi>0?`<div class="metricLine rimborsiAparte" style="margin-top:8px"><span class="tag gray">A parte</span> ${fmtEUR(t.rimborsi)} di rimborsi spese, riaddebitati in fattura</div>`:''}</div><div class="dashboardCard heroCard cardLink" onclick="openAnnualMonths()" role="button" title="Dettaglio consuntivato mese per mese"><b>Consuntivato anno ${currentYear()} <span class="cardLinkArrow">›</span></b><div class="kpiGrid" style="${y.pianificato>0?'':'grid-template-columns:1fr;'}margin-top:14px"><div style="${y.pianificato>0?'':'border-right:0'}"><span>Anno in corso</span><strong>${fmtEUR(y.consuntivato)}</strong><small>consuntivato</small></div>${y.pianificato>0?`<div style="border-right:0"><span>Pianificato</span><strong>${fmtEUR(y.pianificato)}</strong><small>giorni futuri</small></div>`:''}</div><div class="chartWrap"><div class="chartTitle"><span>Andamento mese per mese</span><span>consuntivato · pianificato</span></div>${annualChartSvg()}</div>${y.rimborsiFattura>0?`<div class="metricLine rimborsiAparte" style="margin-top:10px"><span class="tag gray">A parte</span> ${fmtEUR(y.rimborsiFattura)} di rimborsi spese nell’anno — riaddebitati in fattura, fuori dal consuntivato</div>`:''}</div>${homeFatturatoCard()}${homeIncassiCard()}${dashFull()?homeBalanceCharts()+homeMultiChart():''}<button type="button" class="secondary dashToggle" onclick="toggleDashFull()">${dashFull()?'▴ Nascondi analisi e grafici':'▾ Mostra analisi e grafici'}</button>`)}
@@ -3559,18 +3700,34 @@ function bolloCalc(year=currentYear()){
   // scelto «non si applica» si vedeva dei costi che non aveva.
   const modo=bolloModo(ts);
   const rows=data.billingHeaders.filter(h=>Number(h.year)===Number(year)&&['invoice_issued','collected'].includes(h.status));
-  let nFatture=0,dovuto=0,addebitato=0;const perTrim=[0,0,0,0];
+  // Il bollo e' uno per DOCUMENTO. Una fattura su piu' mesi sta su piu'
+  // schede — una per mese, stesso numero e stessa data — e contandole
+  // una per una si pagavano due bolli su una fattura sola. Si
+  // raggruppano, e la soglia si misura sulla fattura intera: due mesi
+  // da 50 € fanno una fattura da 100, sopra soglia.
+  // Il numero da solo non basta: due schede con lo stesso numero e
+  // date diverse sono due documenti, o un doppione nato per errore.
+  const fatture=new Map();
   rows.forEach(h=>{
-    const add=Number(h.stamp_duty_amount||0);addebitato+=add;
+    const n=chiaveNumero(h.invoice_number);
+    const k=n&&h.invoice_date?h.client_id+'|'+n+'|'+h.invoice_date:'scheda|'+h.id;
+    const f=fatture.get(k)||{add:0,base:0,month:1};
+    const add=Number(h.stamp_duty_amount||0);f.add+=add;
     // La soglia si misura sugli importi ESENTI, che comprendono la
     // rivalsa: e' il totale della fattura meno il bollo addebitato.
     // Prima si guardava il solo compenso, e una fattura da 76 € con
     // 3,04 € di rivalsa — 79,04, sopra soglia — non veniva contata.
-    const base=Number(h.invoice_total_amount||h.total_amount||0)-add
+    f.base+=Number(h.invoice_total_amount||h.total_amount||0)-add
       ||Number(h.total_amount||0);
-    if(bolloDovuto(modo)&&base>BOLLO_SOGLIA){
+    f.month=Math.max(f.month,Number(h.month||1));
+    fatture.set(k,f);
+  });
+  let nFatture=0,dovuto=0,addebitato=0;const perTrim=[0,0,0,0];
+  fatture.forEach(f=>{
+    addebitato+=f.add;
+    if(bolloDovuto(modo)&&f.base>BOLLO_SOGLIA){
       nFatture++;dovuto+=unit;
-      const m=Number(h.month||1);perTrim[Math.min(3,Math.floor((m-1)/3))]+=unit;}});
+      perTrim[Math.min(3,Math.floor((f.month-1)/3))]+=unit;}});
   const aCarico=Math.max(0,dovuto-addebitato);
   return {unit,soglia:BOLLO_SOGLIA,modo,nFatture,dovuto,addebitato,aCarico,perTrim,rows:rows.length};
 }
@@ -6520,7 +6677,7 @@ Object.assign(window,{
   scomposizioneRimborsi,
   forecastCalc,
   leggiFatturaXML,confrontaFattura,clientePerPiva,giorniConsuntivati,
-  fatturaCarica,fatturaFileScelto,
+  fatturaCarica,fatturaFileScelto,registraFattura,
   annualTaxCalc,
   cambiaClientePolicy,
   savePolicy,
