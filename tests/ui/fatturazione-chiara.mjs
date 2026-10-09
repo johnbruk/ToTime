@@ -90,9 +90,18 @@ console.log('\n=== CI SI ARRIVA DALLA DASHBOARD, COL DITO ===');
   ok(await tocca('☰'),'il menu si apre');
   await pg.waitForTimeout(250);
   ok(await tocca('Fatturazione'),'e c’è la voce Fatturazione');
+  await pg.waitForTimeout(400);
+  // Fatturazione e' un gruppo con due pagine: il mese e l'anno
+  ok(await tocca('Il mese'),'che apre «Il mese»');
   await pg.waitForTimeout(500);
   const t=await testo(pg);
-  ok(/Fatturazione e incassi/.test(t),'si arriva alla pagina',t.slice(0,80));
+  ok(/Fatturazione del mese/.test(t),'si arriva alla pagina del mese',t.slice(0,80));
+  ok(await tocca('☰'),'e dal menu');
+  await pg.waitForTimeout(250);
+  ok(await tocca('L’anno'),'c’è anche «L’anno»');
+  await pg.waitForTimeout(500);
+  const t2=await testo(pg);
+  ok(/Fatturazione dell’anno/.test(t2),'che è una pagina sua',t2.slice(0,80));
   await pg.close();
 }
 
@@ -122,11 +131,8 @@ console.log('\n=== IL TOTALE DEL MESE SI SCOMPONE NEI SUOI PEZZI ===');
 console.log('\n=== LA CASSA TORNA, E DICE SU CHE BASE ===');
 {
   const pg=await apri();
-  await pg.evaluate(()=>window.go('billing'));
-  // la cassa e il prospetto dell’anno stanno nella vista «L’anno»:
-  // la pagina si apre sul mese, ed è giusto così
-  await pg.evaluate(()=>window.setBillingVista('anno'));
-  await pg.waitForTimeout(500);
+  // la cassa e il prospetto dell’anno stanno nella pagina dell’anno
+  await pg.evaluate(()=>window.go('billingAnno'));
   await pg.waitForTimeout(600);
   const t=await testo(pg);
   const daInc=euro(t,'Da incassare');
@@ -150,11 +156,8 @@ console.log('\n=== IL PROSPETTO DELL’ANNO SOMMA DAVVERO ===');
   // rivalsa e da fatturare senza — le righe NON sommano, ed è
   // esattamente l'errore che stavo per fare.
   const pg=await apri();
-  await pg.evaluate(()=>window.go('billing'));
-  // la cassa e il prospetto dell’anno stanno nella vista «L’anno»:
-  // la pagina si apre sul mese, ed è giusto così
-  await pg.evaluate(()=>window.setBillingVista('anno'));
-  await pg.waitForTimeout(500);
+  // la cassa e il prospetto dell’anno stanno nella pagina dell’anno
+  await pg.evaluate(()=>window.go('billingAnno'));
   await pg.waitForTimeout(600);
   const t=await testo(pg);
   const gia=euro(t,'Già fatturato');
@@ -177,11 +180,8 @@ console.log('\n=== LE DUE BASI SONO DIVERSE, E LA PAGINA DICE PERCHÉ ===');
   // 7.000 contro 7.280 è la rivalsa. Prima questa differenza c'era e
   // non era spiegata da nessuna parte: sembrava un errore.
   const pg=await apri();
-  await pg.evaluate(()=>window.go('billing'));
-  // la cassa e il prospetto dell’anno stanno nella vista «L’anno»:
-  // la pagina si apre sul mese, ed è giusto così
-  await pg.evaluate(()=>window.setBillingVista('anno'));
-  await pg.waitForTimeout(500);
+  // la cassa e il prospetto dell’anno stanno nella pagina dell’anno
+  await pg.evaluate(()=>window.go('billingAnno'));
   await pg.waitForTimeout(600);
   const t=await testo(pg);
   ok(/al netto/.test(t),'dice che il prospetto dell’anno è al netto');
@@ -196,11 +196,8 @@ console.log('\n=== SE SI È FATTURATO PIÙ DEL MATURATO, NON SPARISCE ===');
   // Con «ancora da fatturare» a zero le righe non tornerebbero:
   // l'eccedenza si mostra per quello che è.
   const pg=await apri(`S.billing_headers[1].total_amount=20000;S.billing_headers[1].invoice_total_amount=20800;`);
-  await pg.evaluate(()=>window.go('billing'));
-  // la cassa e il prospetto dell’anno stanno nella vista «L’anno»:
-  // la pagina si apre sul mese, ed è giusto così
-  await pg.evaluate(()=>window.setBillingVista('anno'));
-  await pg.waitForTimeout(500);
+  // la cassa e il prospetto dell’anno stanno nella pagina dell’anno
+  await pg.evaluate(()=>window.go('billingAnno'));
   await pg.waitForTimeout(600);
   const t=await testo(pg);
   const gia=euro(t,'Già fatturato');
@@ -213,9 +210,43 @@ console.log('\n=== SE SI È FATTURATO PIÙ DEL MATURATO, NON SPARISCE ===');
   await pg.close();
 }
 
-// l’impostazione si ricorda: la riporto sul mese, se no il prossimo che
-// apre questa pagina la trova sull’anno senza capire perché
-{const pg=await apri();await pg.evaluate(()=>window.setBillingVista('mese'));await pg.waitForTimeout(400);await pg.close();}
+console.log('\n=== IL MESE E L’ANNO SONO DUE PAGINE, OGNUNA COL SUO SELETTORE ===');
+{
+  // Prima erano due linguette della stessa pagina: si saltava dal mese
+  // all'anno restando lì. Adesso il mese parla del mese e l'anno
+  // dell'anno, e ognuno sceglie il suo periodo.
+  const pg=await apri();
+  await pg.evaluate(()=>window.go('billing'));await pg.waitForTimeout(500);
+  const mese=await pg.evaluate(()=>({
+    linguette:!!document.querySelector('#app .tabs'),
+    h2:[...document.querySelectorAll('#app h2')].map(x=>x.textContent.trim()),
+    sel:document.querySelector('#app .month strong')?.textContent.trim()}));
+  ok(!mese.linguette,'nella pagina del mese non ci sono più le linguette');
+  ok(!mese.h2.includes('La cassa'),'né la cassa dell’anno',mese.h2.join(' | ')||'nessun titoletto');
+  ok(/Ottobre 2026/.test(mese.sel||''),'e il selettore sceglie il mese',mese.sel);
+  await pg.evaluate(()=>window.go('billingAnno'));await pg.waitForTimeout(500);
+  const anno=await pg.evaluate(()=>({
+    h2:[...document.querySelectorAll('#app h2')].map(x=>x.textContent.trim()),
+    sel:document.querySelector('#app .month strong')?.textContent.trim()}));
+  ok(anno.sel==='Anno 2026','la pagina dell’anno ha il selettore dell’anno',anno.sel);
+  ok(anno.h2.includes('La cassa')&&anno.h2.includes('Maturato e previsione'),'con la cassa e il prospetto',anno.h2.join(' | '));
+  // Il mese scelto nell'altra pagina non deve affiorare qui: da qui non
+  // si vede ne' si cambia, e una riga «In Ottobre 2026: ...» sarebbe un
+  // numero che dipende da una scelta invisibile.
+  const tAnno=await testo(pg);
+  ok(!/\bIn [A-Z][a-z]+ \d{4}:/.test(tAnno),'e nessuna riga che dipende dal mese scelto altrove',
+     (tAnno.match(/\bIn [A-Z][a-z]+ \d{4}:[^·]{0,30}/)||[''])[0]||'nessuna');
+  // l'anno si cambia da qui, senza passare dal mese
+  await pg.evaluate(()=>[...document.querySelectorAll('#app .month button')].find(b=>/successivo/.test(b.title)).click());
+  await pg.waitForTimeout(400);
+  const t=await testo(pg);
+  ok(/Anno 2027/.test(t),'› porta al 2027',(t.match(/Anno \d{4}/)||[''])[0]);
+  ok(/fatturato nel 2027/.test(t),'e la cassa parla del 2027',(t.match(/[\d.,]+ € fatturato nel \d{4}/)||[''])[0]||'non lo dice');
+  await pg.evaluate(()=>[...document.querySelectorAll('#app .month button')].find(b=>/precedente/.test(b.title)).click());
+  await pg.waitForTimeout(400);
+  ok(/Anno 2026/.test(await testo(pg)),'‹ torna al 2026');
+  await pg.close();
+}
 
 await b.close(); srv.close();
 console.log(`\n=== fatturazione chiara: OK ${pass} · KO ${fail} ===`);

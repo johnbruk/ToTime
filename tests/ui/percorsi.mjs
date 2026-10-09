@@ -68,14 +68,17 @@ const PERCORSI=[
    passi:[/^☰$/,/Consuntivi|Timesheet/,/^Carica da foglio$/], arrivo:/foglio|Carica/i},
   {nome:'Anagrafica clienti dal menu', tetto:3,
    passi:[/^☰$/,/Impostazioni/,/^Clienti/], arrivo:/Clienti/i},
-  // Fatturazione non e' piu' un gruppo: si apre con un tocco in meno.
-  {nome:'Fatturazione dal menu', tetto:2,
-   passi:[/^☰$/,/Fatturazione$/], arrivo:/Fatturazione/i},
+  // Fatturazione e' tornata un gruppo, con due pagine: il mese e
+  // l'anno. Si arriva a ognuna come alle altre sottovoci, in tre tocchi.
+  {nome:'Fatturazione del mese dal menu', tetto:3,
+   passi:[/^☰$/,/Fatturazione/,/^Il mese$/], arrivo:/Fatturazione del mese/i},
+  {nome:'Fatturazione dell’anno dal menu', tetto:3,
+   passi:[/^☰$/,/Fatturazione/,/^L’anno$/], arrivo:/Fatturazione dell’anno/i},
   // Il report economico e' uscito dal menu. Se la porta dalla
   // fatturazione si rompesse, diventerebbe irraggiungibile in silenzio:
   // e' esattamente il guasto che avevo trovato su monthlyForm.
-  {nome:'Report economico dalla fatturazione', tetto:3,
-   passi:[/^☰$/,/Fatturazione$/,/^Report economico/], arrivo:/Report economico/i},
+  {nome:'Report economico dalla fatturazione', tetto:4,
+   passi:[/^☰$/,/Fatturazione/,/^Il mese$/,/^Report economico/], arrivo:/Report economico/i},
 ];
 
 console.log('\n=== I percorsi di ogni giorno ===');
