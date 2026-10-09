@@ -61,6 +61,34 @@ function makeChain(table){
           return {data:null,error:{message:'duplicate key value violates unique constraint "wbs_items_engagement_activity_code_key"'}};
         if(table==='app_settings'&&rows().some(x=>x.setting_key===r.setting_key))
           return {data:null,error:{message:'duplicate key value violates unique constraint "app_settings_user_id_setting_key_key"'}};
+        // I codici li compone il DATABASE, con un trigger, e lo fa
+        // partendo dal codice del progetto: se quello manca, la
+        // commessa viene rifiutata. Senza queste due regole il mock
+        // accettava commesse che in produzione il database respinge, e
+        // mostrava codici vuoti dove la persona vede SOL-BOU-2026-001.
+        if(table==='projects'&&!r.code){
+          const cli=(STORES.clients||[]).find(x=>x.id===r.client_id);
+          if(cli&&cli.code){
+            if(!r.short_code)
+              return {data:null,error:{message:'Il progetto richiede un codice breve'}};
+            r.code=cli.code+'-'+r.short_code;
+          }
+        }
+        if(table==='engagements'&&!r.code){
+          const prj=(STORES.projects||[]).find(x=>x.id===r.project_id);
+          if(!prj||!prj.code)
+            return {data:null,error:{message:'Il progetto non ha un codice: dagli un codice breve, e al cliente il suo, prima di aprire la commessa'}};
+          const anno=Number(r.year)||new Date().getFullYear();
+          const n=(STORES.engagements||[]).filter(x=>x.project_id===r.project_id&&Number(x.year)===anno).length+1;
+          r.client_id=r.client_id||prj.client_id;
+          r.year=anno; r.seq=n;
+          r.code=prj.code+'-'+anno+'-'+String(n).padStart(3,'0');
+        }
+        if(table==='wbs_items'&&!r.code){
+          const e=(STORES.engagements||[]).find(x=>x.id===r.engagement_id);
+          if(!e||!e.code)return {data:null,error:{message:'La commessa non ha un codice completo'}};
+          r.code=e.code+'-'+r.activity_code;
+        }
         // il NOT NULL di un database vecchio: activity_id obbligatoria
         // da prima che la gerarchia prendesse il suo posto
         for(const col of (window.__nonNulle||[]))

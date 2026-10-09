@@ -53,9 +53,14 @@ await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
   const primo=[...f.client_id.options].find(o=>o.value);
   if(primo){f.client_id.value=primo.value;window.refreshProjectsForForm(f)}});
 await pg.waitForTimeout(400);
-// scelto il progetto, la commessa si sceglie da se': e' l'unica, e il
-// suo menu non e' nemmeno visibile
-await pg.selectOption('[name="hier_project_id"]','p1');await pg.waitForTimeout(300);
+// Il progetto non si sceglie piu' a mano: dei due che il cliente ha,
+// uno solo porta a una commessa aperta, quindi si sceglie da se' e il
+// suo menu non compare. (p2 «Alfa» non ha nessuna commessa: offrirlo
+// voleva dire offrire un vicolo cieco, ed e' il blocco di stasera.)
+ok(await campo('hier_project_id')==='p1',
+   'il progetto si prende da se\': e\' l\'unico che porta a una commessa',await campo('hier_project_id'));
+ok(await pg.evaluate(()=>{const e=document.getElementById('prjField');return !e||e.hidden}),
+   'e il suo menu non compare: non c\'e\' niente da scegliere');
 await pg.evaluate(()=>{const f=document.querySelector('#app form.form');f.hours.value='6';f.work_city.value='Milano'});
 const prima=await conta();
 await pg.evaluate(()=>[...document.querySelectorAll('#app button')].find(x=>/Salva e vai al giorno dopo/.test(x.textContent)).click());
@@ -85,9 +90,8 @@ await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
   if(primo&&!f.client_id.value){f.client_id.value=primo.value;window.refreshProjectsForForm(f)}});
 await pg.waitForTimeout(400);
 await pg.evaluate(d=>{document.querySelector('#app form.form').entry_date.value=d},g(8));
-// scelto il progetto, la commessa si sceglie da se': e' l'unica, e il
-// suo menu non e' nemmeno visibile
-await pg.selectOption('[name="hier_project_id"]','p1');await pg.waitForTimeout(300);
+// anche qui il progetto si prende da se'
+ok(await campo('hier_project_id')==='p1','il progetto si prende da se\' anche al secondo giro',await campo('hier_project_id'));
 const prima2=await conta();
 await pg.evaluate(()=>[...document.querySelectorAll('#app button')].find(x=>/Salva e vai al giorno dopo/.test(x.textContent)).click());
 await pg.waitForTimeout(900);
