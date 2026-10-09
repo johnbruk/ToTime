@@ -108,6 +108,15 @@ function makeChain(table){
       // proverebbe piu' che e' l'app a sganciare le spese.
       if(table==='trips'&&(STORES.travel_expenses||[]).some(e=>String(e.trip_id)===String(eqVal)))
         return {data:null,error:{message:'update or delete on table "trips" violates foreign key constraint "travel_expenses_trip_id_fkey" on table "travel_expenses"'}};
+      // Il CASCADE dichiarato nello schema: cancellata una testata di
+      // fattura se ne vanno le sue righe, e con quelle le ripartizioni
+      // per commessa. Senza, il mock lasciava righe orfane che in
+      // produzione non esistono, e il test non poteva dire cosa resta.
+      if(table==='billing_headers'&&eqCol==='id'){
+        const vie=(STORES.billing_lines||[]).filter(l=>String(l.billing_header_id)===String(eqVal)).map(l=>l.id);
+        STORES.billing_lines=(STORES.billing_lines||[]).filter(l=>String(l.billing_header_id)!==String(eqVal));
+        STORES.invoice_line_allocations=(STORES.invoice_line_allocations||[]).filter(a=>vie.indexOf(a.billing_line_id)<0);
+      }
       if(inF)STORES[table]=rows().filter(r=>!inF.vals.includes(r[inF.col]));
       else if(eqCol)STORES[table]=rows().filter(r=>String(r[eqCol])!==String(eqVal));
       return {data:null,error:null};}
