@@ -185,7 +185,9 @@ console.log('\n=== DALLA DASHBOARD FINO AL CONFRONTO A SCHERMO ===');
   ok((await pg.evaluate(()=>document.documentElement.getAttribute('data-view')))==='fatturaCarica',
      'che porta alla schermata di caricamento');
   const t0=await testo(pg);
-  ok(/Non viene salvato niente/i.test(t0),'la quale dice subito che non salva niente');
+  ok(/Non si salva niente/i.test(t0)&&/finché non premi «Registra»/.test(t0),
+     'la quale dice subito che non salva niente finché non lo chiedi',
+     (t0.match(/Non si salva niente[^.]{0,50}/)||[''])[0]||'non lo dice');
   // si sceglie il file, con un vero input[type=file]
   const tmp=path.join(ROOT,'tests/ui/fixtures/fattura-esempio.xml');
   await pg.setInputFiles('#app input[type=file]',tmp);
@@ -199,7 +201,7 @@ console.log('\n=== DALLA DASHBOARD FINO AL CONFRONTO A SCHERMO ===');
   ok(/31\/05\/2026/.test(t),'e la scadenza');
   ok(/Il confronto coi tuoi dati/.test(t),'poi il confronto');
   ok(/piu’ mesi/.test(t),'che segnala i due mesi coperti');
-  ok(/Niente è stato salvato/.test(t),'e ripete in fondo che non ha salvato niente');
+  ok(/Registra la fattura/.test(t),'e in fondo offre di registrarla, invece di fermarsi');
   // e davvero non ha scritto nulla
   const scritture=await pg.evaluate(()=>(window.__ins||[]).length);
   ok(scritture===0,'nessuna scrittura sul database, verificata',String(scritture));

@@ -91,6 +91,10 @@ function makeChain(table){
         }
         // il NOT NULL di un database vecchio: activity_id obbligatoria
         // da prima che la gerarchia prendesse il suo posto
+        // Un rifiuto del database su richiesta del test: per provare
+        // cosa fa l'app quando una scrittura su piu' va storta a meta'.
+        if(window.__rifiutaRiga&&window.__rifiutaRiga(table,r))
+          return {data:null,error:{message:'canceling statement due to statement timeout'}};
         for(const col of (window.__nonNulle||[]))
           if(r[col]===null||r[col]===undefined)
             return {data:null,error:{message:'null value in column "'+col+'" of relation "'+table+'" violates not-null constraint'}};
@@ -131,9 +135,14 @@ function makeChain(table){
       // fattura se ne vanno le sue righe, e con quelle le ripartizioni
       // per commessa. Senza, il mock lasciava righe orfane che in
       // produzione non esistono, e il test non poteva dire cosa resta.
-      if(table==='billing_headers'&&eqCol==='id'){
-        const vie=(STORES.billing_lines||[]).filter(l=>String(l.billing_header_id)===String(eqVal)).map(l=>l.id);
-        STORES.billing_lines=(STORES.billing_lines||[]).filter(l=>String(l.billing_header_id)!==String(eqVal));
+      if(table==='billing_headers'&&(eqCol==='id'||(inF&&inF.col==='id'))){
+        const teste=inF?inF.vals.map(String):[String(eqVal)];
+        // Un'istruzione e' tutta o niente: se il database la rifiuta,
+        // non se ne va nessuna delle righe che nominava.
+        if(window.__rifiutaCancellazione&&teste.includes(String(window.__rifiutaCancellazione)))
+          return {data:null,error:{message:'canceling statement due to statement timeout'}};
+        const vie=(STORES.billing_lines||[]).filter(l=>teste.includes(String(l.billing_header_id))).map(l=>l.id);
+        STORES.billing_lines=(STORES.billing_lines||[]).filter(l=>!teste.includes(String(l.billing_header_id)));
         STORES.invoice_line_allocations=(STORES.invoice_line_allocations||[]).filter(a=>vie.indexOf(a.billing_line_id)<0);
       }
       if(inF)STORES[table]=rows().filter(r=>!inF.vals.includes(r[inF.col]));
