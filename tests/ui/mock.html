@@ -66,6 +66,14 @@ function makeChain(table){
         // commessa viene rifiutata. Senza queste due regole il mock
         // accettava commesse che in produzione il database respinge, e
         // mostrava codici vuoti dove la persona vede SOL-BOU-2026-001.
+        if(table==='projects'&&!r.code){
+          const cli=(STORES.clients||[]).find(x=>x.id===r.client_id);
+          if(cli&&cli.code){
+            if(!r.short_code)
+              return {data:null,error:{message:'Il progetto richiede un codice breve'}};
+            r.code=cli.code+'-'+r.short_code;
+          }
+        }
         if(table==='engagements'&&!r.code){
           const prj=(STORES.projects||[]).find(x=>x.id===r.project_id);
           if(!prj||!prj.code)

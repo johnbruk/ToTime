@@ -189,7 +189,19 @@ await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
   const primo=[...f.client_id.options].find(o=>o.value);
   if(primo){f.client_id.value=primo.value;window.refreshProjectsForForm(f)}});
 await pg.waitForTimeout(400);
-const scegli=async(nome,val)=>{await pg.selectOption(`[name="${nome}"]`,val);await pg.waitForTimeout(250)};
+// Un livello con una scelta sola si prende da se' e il suo menu non
+// compare: selectOption su un campo nascosto resta appeso. Qui si
+// sceglie come fa l'app quando cambia il menu, cosi' il test parla di
+// quello di cui deve parlare — il menu Attivita' — e non della
+// visibilita' del livello sopra, che hanno in carico altre suite.
+const scegli=async(nome,val)=>{
+  await pg.evaluate(({n,v})=>{
+    const f=document.querySelector('#app form.form');
+    f[n].value=v;
+    window.hierChanged(f,n==='hier_project_id'?'project':'engagement');
+  },{n:nome,v:val});
+  await pg.waitForTimeout(250);
+};
 await scegli('hier_project_id','p1');
 await scegli('engagement_id','e1');          // commessa con UNA voce
 let vis=await pg.evaluate(()=>{const f=document.getElementById('wbsField');
