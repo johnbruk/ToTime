@@ -60,10 +60,16 @@ console.log('\n=== CON UN PROGETTO SOLO, IL PROGETTO SI VEDE LO STESSO ===');
   await pg.evaluate(()=>window.go('dailyForm'));
   await pg.waitForTimeout(600);
   await scegliCliente(pg,'sol');
-  const prjNascosto=await pg.evaluate(()=>{
-    const e=document.getElementById('prjField');return !e||e.hidden;
+  // Il progetto si vede SEMPRE, anche con una scelta sola: è il
+  // secondo dei tre dati da indicare — cliente, progetto o cliente
+  // finale, attività — e nasconderlo toglieva l'informazione insieme
+  // al rumore.
+  const prjVisibile=await pg.evaluate(()=>{
+    const e=document.getElementById('prjField');return !!e&&!e.hidden;
   });
-  ok(prjNascosto,'il MENU del progetto resta fuori: non c’è niente da scegliere');
+  ok(prjVisibile,'il menu del progetto si vede: è il secondo dei tre dati');
+  ok(await pg.evaluate(()=>document.querySelector('[name=hier_project_id]')?.value||'')==='equ',
+     'e con un progetto solo è già scelto, senza chiedere niente');
   const t=await testo(pg);
   ok(/Equans/.test(t),'ma il nome di chi si serve si legge comunque',
      (t.match(/Equans[^·]{0,40}/)||[''])[0]||'NON SI LEGGE');
@@ -216,7 +222,10 @@ console.log('\n=== IL BLOCCO NOMINA UN CAMPO CHE PUOI TOCCARE ===');
   const visibili=await pg.evaluate(()=>['prjField','engField','wbsField']
     .filter(id=>{const e=document.getElementById(id);return e&&!e.hidden}));
   ok(visibili.includes('prjField'),'col progetto da scegliere, il suo menu si vede',visibili.join(', '));
-  ok(!visibili.includes('wbsField'),'e quello dell’attività no: non ha niente dentro',visibili.join(', '));
+  ok(visibili.includes('wbsField'),'e anche quello dell’attività: la tripletta si vede sempre',visibili.join(', '));
+  const attesa=await pg.evaluate(()=>[...document.querySelectorAll('[name=wbs_id] option')].map(o=>o.textContent).join(' | '));
+  ok(/prima scegli il progetto/.test(attesa),
+     'e finché il progetto non c’è, rimanda al progetto — non a un menu che non vedi',attesa);
   const prjVuoto=await pg.evaluate(()=>document.querySelector('[name=hier_project_id]')?.value||'');
   ok(prjVuoto==='','il progetto parte non scelto: due sono due',`«${prjVuoto}»`);
   await pg.evaluate(()=>{
@@ -679,16 +688,45 @@ console.log('\n=== SOLUTION NEL PASSATO, CON LA COMMESSA SENZA ATTIVITÀ ===');
   await pg.evaluate(()=>window.go('dailyForm'));
   await pg.waitForTimeout(600);
   await scegliCliente(pg,'sol');
-  const campo=await pg.evaluate(()=>{
-    const s=document.querySelector('#app form.form [name=activity_id]');
-    return !s?'assente':(s.closest('.field')&&s.closest('.field').hidden?'nascosto':'visibile');
-  });
-  ok(campo==='visibile','il tipo di attività si può scegliere: la commessa non ne porta',campo);
+  // Il modulo non chiede piu' il tipo di attivita': il posto dove si
+  // imposta e' l'attivita' della commessa, una volta sola, invece che
+  // a ogni consuntivo. Qui la commessa non ne porta e il database lo
+  // pretende: deve dirlo, e dire dove si mette.
+  const campo=await pg.evaluate(()=>!!document.querySelector('#app form.form [name=activity_id]'));
+  ok(campo===false,'il modulo non chiede il tipo di attività: lo porta la commessa',
+     campo?'campo ancora presente':'assente, giusto');
   await pg.evaluate(()=>{
     const f=document.querySelector('#app form.form');
     f.entry_date.value='2026-02-19';
     if(f.hours)f.hours.value='8';
-    f.activity_id.value='a1';
+    f.requestSubmit();
+  });
+  await pg.waitForTimeout(1400);
+  const t=await testo(pg);
+  const scritte=await pg.evaluate(()=>(window.__stores.timesheet_entries||[]).length);
+  ok(scritte===0,'il database rifiuta, e non resta niente a metà',scritte+' righe');
+  ok(!/null value in column/.test(t),'il rifiuto non arriva col testo grezzo del database',
+     (t.match(/null value[^·]{0,50}/)||[''])[0]||'nessuno');
+  ok(/Commesse/.test(t),'ma dice dove si imposta: sull’attività della commessa',
+     (t.match(/il database vuole[^.]{0,130}/)||[''])[0]||'non lo dice');
+  ok(/2026-10-08_attivita-facoltativa/.test(t),'e qual è la migrazione che lo rende facoltativo');
+  await pg.close();
+}
+
+console.log('\n=== COL TIPO DI ATTIVITÀ SULLA COMMESSA, SI SALVA ===');
+{
+  // L'altra faccia: impostato una volta sola sull'attivita' della
+  // commessa, ogni consuntivo se lo porta dietro — anche col database
+  // vecchio che lo pretende, e anche nel passato.
+  const pg=await apri(`S.wbs_items[0].activity_id='a1';`);
+  await pg.evaluate(()=>{window.__nonNulle=['activity_id']});
+  await pg.evaluate(()=>window.go('dailyForm'));
+  await pg.waitForTimeout(600);
+  await scegliCliente(pg,'sol');
+  await pg.evaluate(()=>{
+    const f=document.querySelector('#app form.form');
+    f.entry_date.value='2026-02-19';
+    if(f.hours)f.hours.value='8';
     f.requestSubmit();
   });
   await pg.waitForTimeout(1400);
@@ -696,7 +734,7 @@ console.log('\n=== SOLUTION NEL PASSATO, CON LA COMMESSA SENZA ATTIVITÀ ===');
   ok(riga.client_id==='sol'&&riga.entry_date==='2026-02-19',
      'il consuntivo si salva, su Solution e col 19 febbraio',
      `${riga.client_id} · ${riga.entry_date}`);
-  ok(riga.activity_id==='a1','con l’attività scelta, che il database pretende',String(riga.activity_id));
+  ok(riga.activity_id==='a1','con l’attività che porta la commessa',String(riga.activity_id));
   const t=await testo(pg);
   ok(/Febbraio 2026/.test(t),'e si finisce su Febbraio 2026, dove la riga sta',
      (t.match(/Timesheet[^›]{0,40}/)||[''])[0]);

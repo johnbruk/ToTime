@@ -1605,7 +1605,7 @@ function refreshProjectsForForm(form){
   const blocco=document.getElementById('hierBlock');
   if(blocco){
     blocco.innerHTML=hierAvailable(cli)
-      ? hierFields(cli,'','')+'<input type="hidden" name="project_id" value="">'
+      ? hierFields(cli,'')+'<input type="hidden" name="project_id" value="">'
       : campiSenzaGerarchia(cli);
     if(form.hier_project_id)hierChanged(form,'client');
     return;
@@ -1917,7 +1917,7 @@ async function dopoIlSalvataggio(f){
   setMsg('Salvato. Ora '+fmtDMY(iso)+'.',4000);
 }
 function prefillDate(){const v=state.editType;return (typeof v==='string'&&v.length===10&&v.charAt(4)==='-')?v:new Date().toISOString().slice(0,10)}
-function dailyForm(){const clients=dailyClients();const pre=state.prefill||{};const selected=(pre.client_id&&clients.some(c=>c.id===pre.client_id))?pre.client_id:'';return appShell(`<h1>Consuntivo giornaliero</h1><p class="sub">Ore effettivamente lavorate, valorizzate secondo tariffa (tariffa oraria = tariffa giornaliera / 8h).</p>${clients.length?`<form class="form" onsubmit="saveDaily(event)"><div class="field"><label>Data</label><input name="entry_date" type="date" required value="${pre.dataVuota?'':prefillDate()}">${pre.dataVuota?'<div class="small">Copia di un consuntivo esistente: scegli la data.</div>':''}</div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)"><option value=""${selected?'':' selected'}>\u2014 scegli il cliente \u2014</option>${clients.map(c=>`<option value="${c.id}"${c.id===selected?' selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div id="hierBlock">${hierAvailable(selected)?hierFields(selected,pre.wbs_id||'',pre.activity_id||'')+'<input type="hidden" name="project_id" value="'+esc(pre.project_id||'')+'">':campiSenzaGerarchia(selected,pre.project_id||'',pre.activity_id||'')}</div><div class="field"><label>Sede</label><select name="work_site">${sediOptions(pre.work_site||SEDE_DEFAULT)}</select></div><div class="field"><label>Luogo/Città</label><input name="work_city" value="${esc(pre.work_city||'')}" placeholder="Es. Verona, Milano, Canicattì"></div><div class="field"><label>Descrizione</label><textarea name="description">${esc(pre.description||'')}</textarea></div><div class="field"><label>Ore consuntivate</label><input name="hours" type="number" step="0.25" value="${pre.hours!=null?esc(String(pre.hours)):'8'}"></div><div class="field"><label>Note</label><textarea name="notes" placeholder="Note interne opzionali"></textarea></div><div class="actions"><button class="primary" data-busy="Salvataggio…">Salva</button><button type="button" class="secondary" onclick="salvaEVai(this,1)">Salva e vai al giorno dopo ›</button><button type="button" class="secondary" onclick="go('home')">Annulla</button></div></form>
+function dailyForm(){const clients=dailyClients();const pre=state.prefill||{};const selected=(pre.client_id&&clients.some(c=>c.id===pre.client_id))?pre.client_id:'';return appShell(`<h1>Consuntivo giornaliero</h1><p class="sub">Ore effettivamente lavorate, valorizzate secondo tariffa (tariffa oraria = tariffa giornaliera / 8h).</p>${clients.length?`<form class="form" onsubmit="saveDaily(event)"><div class="field"><label>Data</label><input name="entry_date" type="date" required value="${pre.dataVuota?'':prefillDate()}">${pre.dataVuota?'<div class="small">Copia di un consuntivo esistente: scegli la data.</div>':''}</div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)"><option value=""${selected?'':' selected'}>\u2014 scegli il cliente \u2014</option>${clients.map(c=>`<option value="${c.id}"${c.id===selected?' selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div id="hierBlock">${hierAvailable(selected)?hierFields(selected,pre.wbs_id||'')+'<input type="hidden" name="project_id" value="'+esc(pre.project_id||'')+'">':campiSenzaGerarchia(selected,pre.project_id||'',pre.activity_id||'')}</div><div class="field"><label>Sede</label><select name="work_site">${sediOptions(pre.work_site||SEDE_DEFAULT)}</select></div><div class="field"><label>Luogo/Città</label><input name="work_city" value="${esc(pre.work_city||'')}" placeholder="Es. Verona, Milano, Canicattì"></div><div class="field"><label>Descrizione</label><textarea name="description">${esc(pre.description||'')}</textarea></div><div class="field"><label>Ore consuntivate</label><input name="hours" type="number" step="0.25" value="${pre.hours!=null?esc(String(pre.hours)):'8'}"></div><div class="field"><label>Note</label><textarea name="notes" placeholder="Note interne opzionali"></textarea></div><div class="actions"><button class="primary" data-busy="Salvataggio…">Salva</button><button type="button" class="secondary" onclick="salvaEVai(this,1)">Salva e vai al giorno dopo ›</button><button type="button" class="secondary" onclick="go('home')">Annulla</button></div></form>
       <div class="altriCompensi"><b>Ti serve un altro tipo di compenso?</b>
         <button type="button" onclick="goForDay('manualForm')">Compenso una tantum ›</button>
         <button type="button" onclick="goForDay('monthlyForm')">Compenso mensile ›</button>
@@ -2252,7 +2252,7 @@ function campiQuandoDove(v={},nuova=false){
 // nonostante la bonifica di settembre.
 function campiCommessaSpesa(clientId,v={}){
   if(hierAvailable(clientId))
-    return hierFields(clientId,v.wbs_id||'',v.activity_id||'')+`<input type="hidden" name="project_id" value="${esc(v.project_id||'')}">`;
+    return hierFields(clientId,v.wbs_id||'')+`<input type="hidden" name="project_id" value="${esc(v.project_id||'')}">`;
   return `<div class="field"><label>Cliente/Progetto</label><select name="project_id">${projectOptions(clientId,v.project_id||'')}</select></div>`;
 }
 function clienteSpesaCambiato(form){
@@ -4939,7 +4939,7 @@ function motivoLeggibile(e){
   // non c'era nemmeno.
   const vuoto=/null value in column "([^"]+)"/.exec(m);
   if(vuoto)
-    return 'il database vuole '+(NOME_COLONNA[vuoto[1]]||vuoto[1])+', che qui è rimasto vuoto: scegli un valore nel modulo, oppure lancia la migrazione 2026-10-08_attivita-facoltativa.sql';
+    return 'il database vuole '+(NOME_COLONNA[vuoto[1]]||vuoto[1])+', e qui è rimasto vuoto: lo porta l’attività della commessa, che si imposta in Configurazione › Commesse, oppure lancia la migrazione 2026-10-08_attivita-facoltativa.sql';
   if(/duplicate key value/.test(m))return 'questa riga risulta già inserita';
   if(/violates foreign key/.test(m))
     return 'un collegamento (cliente, progetto o commessa) non esiste più';
@@ -5318,7 +5318,7 @@ function cosaMancaNellaCatena(cli,prj,eng,wbs){
     const e=engagementById(eng);
     return 'La commessa '+((e&&(e.name||e.code))||'scelta')+' non ha attività aperte: scegline un’altra, oppure aggiungine una da Configurazione › Commesse.';
   }
-  return 'Scegli su quale attività della commessa registrare le ore.';
+  return 'Scegli l’attività su cui registrare le ore.';
 }
 // «Questo cliente lavora a commessa» vuol dire una cosa sola: esiste
 // almeno un posto aperto dove mettere delle ore nuove. E' la stessa
@@ -5440,7 +5440,7 @@ async function creaCommessaDi(projectId){
     const cli=(form.client_id&&form.client_id.value)||p.client_id;
     blocco.innerHTML=spese
       ? campiCommessaSpesa(cli,{})
-      : hierFields(cli,'','')+'<input type="hidden" name="project_id" value="">';
+      : hierFields(cli,'')+'<input type="hidden" name="project_id" value="">';
     if(form.hier_project_id){
       form.hier_project_id.value=projectId;
       hierChanged(form,'project');
@@ -5478,7 +5478,7 @@ async function creaCommessaDi(projectId){
 // dice: SOL-EQU-2026-001-10 lo sa leggere chi lo ha scritto.
 function catenaWbs(wbsId){
   const lin=wbsId?wbsLineage(wbsId):null;
-  if(!lin)return 'Le ore si registrano sulla commessa. In fattura confluiscono nel progetto.';
+  if(!lin)return 'Le ore si registrano su un’attività. In fattura confluiscono nel progetto.';
   // Prima viene PER CHI si lavora: il cliente finale, se c'e';
   // altrimenti il cliente dell'anagrafica, quello che paga. E' il nome
   // che si riconosce al volo, e il codice WBS da solo non lo dice.
@@ -5493,7 +5493,23 @@ function catenaWbs(wbsId){
   pezzi.push(lin.wbs.code);
   return pezzi.join(' · ')+(lin.wbs.billable?'':' · non fatturabile');
 }
-function hierFields(clientId,wbsId,attSel=''){
+// La tripletta, e basta: CLIENTE, PROGETTO (o cliente finale),
+// ATTIVITA' svolta. Era finita a vista la gerarchia interna, con
+// quattro livelli e due campi che si chiamavano tutti e due
+// «attivita'» — quella della commessa e il tipo di attivita' — mentre
+// il progetto spariva perche' ce n'era uno solo. Tre cose da indicare
+// sono diventate due menu omonimi e un'assenza.
+//
+// Progetto e attivita' si vedono SEMPRE, anche con una scelta sola:
+// nascondere un menu con una voce toglieva rumore ma toglieva anche
+// l'informazione, e sono due dei tre dati che bisogna indicare.
+// La commessa invece e' un dettaglio della struttura: compare solo
+// quando ce n'e' piu' d'una, e li' serve davvero a scegliere. Quando
+// compare, sceglierla riempie l'attivita' da se'.
+// Il tipo di attivita' non si chiede piu': lo porta l'attivita' della
+// commessa, che e' il posto dove si imposta una volta sola
+// (Configurazione › Commesse) invece che a ogni consuntivo.
+function hierFields(clientId,wbsId){
   const lin=wbsId?wbsLineage(wbsId):null;
   // La voce gia' salvata entra in elenco anche se intanto e' stata
   // chiusa: modificare un vecchio consuntivo non deve spostarlo.
@@ -5505,21 +5521,23 @@ function hierFields(clientId,wbsId,attSel=''){
   const engSel=engPre||soloUno(engList);
   const wList=engSel?wbsSelezionabili(engSel,wbsId):[];
   const wSel=wbsId||soloUno(wList);
-  // Se la commessa porta gia' la sua attivita' il campo resta
-  // nascosto: il salvataggio preferisce comunque quella della commessa.
-  const attDallaWbs=wSel&&wbsById(wSel)?wbsById(wSel).activity_id:null;
   const nota=notaVicoliCiechi(clientId,prjSel);
-  return `<div class="field" id="prjField" ${prjList.length<2?'hidden':''}><label>Progetto / cliente finale</label>
+  return `<div class="field" id="prjField"><label>Progetto / cliente finale</label>
       <select name="hier_project_id" onchange="hierChanged(this.form,'project')">${projectOptionsOfClient(clientId,prjSel,prjList)}</select></div>
     <div class="field" id="engField" ${engList.length<2?'hidden':''}><label>Commessa</label>
       <select name="engagement_id" onchange="hierChanged(this.form,'engagement')">${prjSel?engagementOptionsOfProject(prjSel,engSel,engList):'<option value="">— prima scegli il progetto —</option>'}</select></div>
-    <div class="field" id="wbsField" ${wList.length<2?'hidden':''}><label>Attività della commessa</label>
-      <select name="wbs_id" onchange="hierChanged(this.form,'wbs')">${engSel?wbsOptions(engSel,wSel,wList):'<option value="">— prima scegli la commessa —</option>'}</select></div>
+    <div class="field" id="wbsField"><label>Attività</label>
+      <select name="wbs_id" onchange="hierChanged(this.form,'wbs')">${engSel?wbsOptions(engSel,wSel,wList):attesaAttivita(engList)}</select></div>
     <div class="small" id="wbsHint">${catenaWbs(wSel)}</div>
-    <div class="small" id="hierNota" ${nota?'':'hidden'}>${nota}</div>
-    <div class="field" id="attField" ${attDallaWbs?'hidden':''}><label>Tipo di attività</label>
-      <select name="activity_id">${activityOptions(attSel)}</select>
-      <div class="small">Serve ai report e ai colori. La «commessa» qui sopra è un'altra cosa: questo lo scegli solo quando la commessa non ne porta già uno.</div></div>`;
+    <div class="small" id="hierNota" ${nota?'':'hidden'}>${nota}</div>`;
+}
+// Il menu dell'attivita' quando non c'e' ancora niente da elencare.
+// Mandare a «scegli la commessa» chi la commessa non ce l'ha a schermo
+// sarebbe un altro cartello su una porta che non si vede.
+function attesaAttivita(engList){
+  return engList.length>1
+    ? '<option value="">— prima scegli la commessa —</option>'
+    : '<option value="">— prima scegli il progetto —</option>';
 }
 function hierChanged(form,livello){
   if(!form)return;
@@ -5529,7 +5547,6 @@ function hierChanged(form,livello){
     const prj=prjPercorribili(cli);
     if(form.hier_project_id){form.hier_project_id.innerHTML=projectOptionsOfClient(cli,'',prj);
       if(prj.length===1)form.hier_project_id.value=prj[0].id;}
-    mostra('prjField',prj.length>1);
     livello='project';
   }
   if(livello==='project'){
@@ -5543,18 +5560,9 @@ function hierChanged(form,livello){
   if(livello==='engagement'){
     const engId=form.engagement_id?form.engagement_id.value:'';
     const w=engId?wbsSelezionabili(engId):[];
-    if(form.wbs_id){form.wbs_id.innerHTML=engId?wbsOptions(engId,'',w):'<option value="">— prima scegli la commessa —</option>';
+    const prjId=form.hier_project_id?form.hier_project_id.value:'';
+    if(form.wbs_id){form.wbs_id.innerHTML=engId?wbsOptions(engId,'',w):attesaAttivita(prjId?engPercorribili(prjId):[]);
       if(w.length===1)form.wbs_id.value=w[0].id;}
-    mostra('wbsField',w.length>1);
-  }
-  // Il tipo di attivita' si chiede solo quando la commessa non ne
-  // porta uno. hierChanged non ridisegna il blocco, quindi il campo
-  // resta nel modulo e qui si accende o si spegne come gli altri
-  // livelli: toglierlo dal disegno lo renderebbe irraggiungibile a chi
-  // cambia commessa dopo aver aperto il modulo.
-  {
-    const w=form.wbs_id&&form.wbs_id.value?wbsById(form.wbs_id.value):null;
-    mostra('attField',!(w&&w.activity_id));
   }
   const hint=document.getElementById('wbsHint');
   if(hint)hint.textContent=catenaWbs(form.wbs_id&&form.wbs_id.value);

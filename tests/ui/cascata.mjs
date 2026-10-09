@@ -206,8 +206,8 @@ await scegli('hier_project_id','p1');
 await scegli('engagement_id','e1');          // commessa con UNA voce
 let vis=await pg.evaluate(()=>{const f=document.getElementById('wbsField');
   return {nascosto:f?f.hidden:null,valore:document.querySelector('[name="wbs_id"]')?.value||''}});
-ok(vis.nascosto===true,'con una voce sola il menu Attività non compare',JSON.stringify(vis));
-ok(vis.valore==='w10','e la voce è già scelta, senza chiedere niente',vis.valore||'vuoto');
+ok(vis.nascosto===false,'il menu Attività resta a schermo: è il terzo dato da indicare',JSON.stringify(vis));
+ok(vis.valore==='w10','e con una voce sola è già scelto, senza chiedere niente',vis.valore||'vuoto');
 
 await scegli('engagement_id','e2');          // commessa con DUE voci
 vis=await pg.evaluate(()=>{const f=document.getElementById('wbsField');

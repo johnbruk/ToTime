@@ -1,16 +1,18 @@
 // «Non mi fa piu' inserire i consuntivi: mi chiede l'attivita'
 // obbligatoria, informazione che non c'e' nemmeno.»
 //
-// In modalita' gerarchia il modulo mostra «Attivita' della commessa»,
-// che e' la WBS: un'altra cosa con quasi lo stesso nome. L'attivita'
-// vera — quella dell'anagrafica, che serve a report e colori — non si
-// poteva scegliere da nessuna parte. Se la commessa non ne portava una,
-// il salvataggio partiva con activity_id vuota; e un database che la
-// pretende rifiutava, mostrando il testo grezzo di Postgres che nomina
-// un campo invisibile a schermo.
+// Il modulo in gerarchia era diventato quattro livelli con due campi
+// che si chiamavano tutti e due «attivita'»: quella della commessa (la
+// WBS) e il tipo di attivita' dell'anagrafica. Chi consuntiva ne ha
+// tre, di dati, e sono sempre gli stessi: CLIENTE, PROGETTO o cliente
+// finale, ATTIVITA' svolta.
 //
-// Qui si riproduce ESATTAMENTE quella condizione: commessa senza
-// attivita' + database che non accetta il campo vuoto.
+// Quindi il tipo di attivita' e' uscito dal modulo. Non e' sparito:
+// lo porta l'attivita' della commessa, dove si imposta una volta sola
+// invece che a ogni consuntivo. Qui si verifica che la tripletta sia
+// quella, che con l'attivita' sulla commessa il consuntivo si salvi
+// anche col database vecchio che la pretende, e che quando non c'e' il
+// rifiuto si legga in italiano dicendo dove si mette.
 import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
 import http from 'node:http'; import fs from 'node:fs'; import path from 'node:path';
 const ROOT=new URL('../..',import.meta.url).pathname.replace(/\/$/,'');
@@ -64,102 +66,94 @@ const compila=async(pg)=>{
   return r;
 };
 
-console.log('\n=== IL CAMPO C’È, QUANDO LA COMMESSA NON PORTA L’ATTIVITÀ ===');
+console.log('\n=== IL MODULO È LA TRIPLETTA, E BASTA ===');
 {
   const pg=await apri();
   await pg.evaluate(()=>window.go('dailyForm'));
   await pg.waitForTimeout(600);
-  // la gerarchia si disegna dopo aver scelto il cliente: prima non c’è
-  // niente da disegnare, perché non si sa di chi
   await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
     const primo=[...f.client_id.options].find(o=>o.value);
     if(primo){f.client_id.value=primo.value;window.refreshProjectsForForm(f)}});
   await pg.waitForTimeout(400);
-  const campo=await pg.evaluate(()=>{
-    const s=document.querySelector('#app form.form [name=activity_id]');
-    if(!s)return 'assente';
-    return s.closest('.field')?.hasAttribute('hidden')?'nascosto':'visibile';
-  });
-  ok(campo==='visibile','si può scegliere il tipo di attività',campo);
-  const t=await testo(pg);
-  ok(/Tipo di attività/.test(t),'e si chiama «Tipo di attività», non come la commessa',
-     (t.match(/Tipo di attivit[^·]{0,40}/)||[''])[0]);
+  const etichette=await pg.evaluate(()=>[...document.querySelectorAll('#app form.form .field')]
+    .filter(d=>!d.hidden).map(d=>(d.querySelector('label')?.textContent||'').trim()));
+  ok(etichette.includes('Cliente'),'c’è il cliente',etichette.join(' | '));
+  ok(etichette.includes('Progetto / cliente finale'),'c’è il progetto o cliente finale',etichette.join(' | '));
+  ok(etichette.includes('Attività'),'c’è l’attività svolta',etichette.join(' | '));
+  ok(etichette.filter(x=>/attivit/i.test(x)).length===1,
+     'e di campi che si chiamano «attività» ce n’è UNO solo',etichette.join(' | '));
+  ok(!etichette.includes('Commessa'),
+     'la commessa non si chiede: ce n’è una sola, e sceglierla sarebbe una scelta finta',etichette.join(' | '));
+  const att=await pg.evaluate(()=>!!document.querySelector('#app form.form [name=activity_id]'));
+  ok(att===false,'e il tipo di attività non è nel modulo: lo porta la commessa',
+     att?'campo ancora presente':'assente, giusto');
   await pg.close();
 }
 
-console.log('\n=== CON LA COMMESSA CHE PORTA L’ATTIVITÀ, NON SI CHIEDE DUE VOLTE ===');
+console.log('\n=== DOVE LE COMMESSE SONO DUE, LA COMMESSA COMPARE ===');
 {
+  // L'alternativa: dove c'e' davvero da scegliere, il menu della
+  // commessa c'e', e sceglierla riempie l'attivita' da se'.
+  const pg=await apri(`
+    S.engagements.push({id:'e2',project_id:'p1',code:'ACM-P1-C2',name:'Commessa 2026',status:'active'});
+    S.wbs_items.push({id:'w2',engagement_id:'e2',code:'ACM-P1-C2-01',activity_code:'01',
+      name:'Sviluppo',kind:'activity',status:'active',billable:true,activity_id:'a2'});`);
+  await pg.evaluate(()=>window.go('dailyForm'));
+  await pg.waitForTimeout(600);
+  await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
+    const primo=[...f.client_id.options].find(o=>o.value);
+    if(primo){f.client_id.value=primo.value;window.refreshProjectsForForm(f)}});
+  await pg.waitForTimeout(400);
+  const etichette=await pg.evaluate(()=>[...document.querySelectorAll('#app form.form .field')]
+    .filter(d=>!d.hidden).map(d=>(d.querySelector('label')?.textContent||'').trim()));
+  ok(etichette.includes('Commessa'),'adesso la commessa si chiede: sono due',etichette.join(' | '));
+  // scelta la commessa, l'attivita' si riempie da se'
+  await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
+    f.engagement_id.value='e2'; window.hierChanged(f,'engagement');});
+  await pg.waitForTimeout(400);
+  const w=await pg.evaluate(()=>document.querySelector('[name=wbs_id]')?.value||'');
+  ok(w==='w2','e scegliendola alimenta l’attività, senza chiedere altro',w||'vuota');
+  await pg.close();
+}
+
+console.log('\n=== CON L’ATTIVITÀ SULLA COMMESSA, SI SALVA ANCHE COL DATABASE VECCHIO ===');
+{
+  // Il caso vero: database con activity_id NOT NULL, da prima della
+  // migrazione. L'attivita' la porta la commessa, e basta.
   const pg=await apri(`S.wbs_items[0].activity_id='a1';`);
-  await pg.evaluate(()=>window.go('dailyForm'));
-  await pg.waitForTimeout(600);
-  // la gerarchia si disegna dopo aver scelto il cliente: prima non c’è
-  // niente da disegnare, perché non si sa di chi
-  await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
-    const primo=[...f.client_id.options].find(o=>o.value);
-    if(primo){f.client_id.value=primo.value;window.refreshProjectsForForm(f)}});
-  await pg.waitForTimeout(400);
-  const campo=await pg.evaluate(()=>{
-    const s=document.querySelector('#app form.form [name=activity_id]');
-    if(!s)return 'assente';
-    return s.closest('.field')?.hasAttribute('hidden')?'nascosto':'visibile';
-  });
-  ok(campo==='nascosto','il campo resta fuori strada: l’attività la dà la commessa',campo);
-  await pg.close();
-}
-
-console.log('\n=== IL CONSUNTIVO SI SALVA, COL DATABASE CHE PRETENDE L’ATTIVITÀ ===');
-{
-  // E' il caso vero: database vecchio con activity_id NOT NULL.
-  const pg=await apri();
   await pg.evaluate(()=>{window.__nonNulle=['activity_id']});
   await pg.evaluate(()=>window.go('dailyForm'));
   await pg.waitForTimeout(600);
-  // la gerarchia si disegna dopo aver scelto il cliente: prima non c’è
-  // niente da disegnare, perché non si sa di chi
-  await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
-    const primo=[...f.client_id.options].find(o=>o.value);
-    if(primo){f.client_id.value=primo.value;window.refreshProjectsForForm(f)}});
-  await pg.waitForTimeout(400);
   ok(await compila(pg)==='ok','il modulo si compila');
-  await pg.evaluate(()=>{
-    const f=document.querySelector('#app form.form');
-    f.activity_id.value='a2';
-    f.requestSubmit();
-  });
-  await pg.waitForTimeout(1200);
+  await pg.evaluate(()=>document.querySelector('#app form.form').requestSubmit());
+  await pg.waitForTimeout(1300);
   const righe=await pg.evaluate(()=>(window.__stores.timesheet_entries||[]).length);
   ok(righe===1,'il consuntivo si salva: il blocco è sparito',String(righe));
   const salvata=await pg.evaluate(()=>(window.__stores.timesheet_entries||[])[0]?.activity_id);
-  ok(salvata==='a2','con l’attività che hai scelto',String(salvata));
+  ok(salvata==='a1','con l’attività che porta la commessa',String(salvata));
   await pg.close();
 }
 
-console.log('\n=== E SE IL DATABASE RIFIUTA LO STESSO, LO DICE IN ITALIANO ===');
+console.log('\n=== SE LA COMMESSA NON LA PORTA, LO DICE IN ITALIANO ===');
 {
-  // Scegliere di non scegliere: il campo resta vuoto e il database
-  // rifiuta. Il messaggio non deve essere il testo grezzo di Postgres.
+  // Commessa senza attivita' + database che la pretende. Il messaggio
+  // non deve essere il testo grezzo di Postgres, e deve dire DOVE si
+  // mette: sull'attivita' della commessa, non in un campo del modulo
+  // che non esiste piu'.
   const pg=await apri();
   await pg.evaluate(()=>{window.__nonNulle=['activity_id']});
   await pg.evaluate(()=>window.go('dailyForm'));
   await pg.waitForTimeout(600);
-  // la gerarchia si disegna dopo aver scelto il cliente: prima non c’è
-  // niente da disegnare, perché non si sa di chi
-  await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
-    const primo=[...f.client_id.options].find(o=>o.value);
-    if(primo){f.client_id.value=primo.value;window.refreshProjectsForForm(f)}});
-  await pg.waitForTimeout(400);
   await compila(pg);
-  await pg.evaluate(()=>{
-    const f=document.querySelector('#app form.form');
-    f.activity_id.value='';
-    f.requestSubmit();
-  });
-  await pg.waitForTimeout(1200);
+  await pg.evaluate(()=>document.querySelector('#app form.form').requestSubmit());
+  await pg.waitForTimeout(1300);
   const t=await testo(pg);
+  const scritte=await pg.evaluate(()=>(window.__stores.timesheet_entries||[]).length);
+  ok(scritte===0,'il database rifiuta, e non resta niente a metà',scritte+' righe');
   ok(!/null value in column/.test(t),'niente testo grezzo del database',
      (t.match(/null value[^·]{0,60}/)||[''])[0]||'nessuno');
-  ok(/tipo di attività/i.test(t),'dice qual è il campo, col nome che ha a schermo',
-     (t.match(/il database vuole[^.]{0,120}/)||[''])[0]);
+  ok(/Commesse/.test(t),'dice dove si imposta: sull’attività della commessa',
+     (t.match(/il database vuole[^.]{0,140}/)||[''])[0]);
   ok(/2026-10-08_attivita-facoltativa\.sql/.test(t),'e la migrazione che toglie il vincolo');
   await pg.close();
 }
