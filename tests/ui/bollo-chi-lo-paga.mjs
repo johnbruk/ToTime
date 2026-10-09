@@ -54,32 +54,47 @@ const apri=async(modo,extra='')=>{
   await pg.waitForTimeout(700);
   return pg;
 };
-console.log('\n=== DALLA CONFIGURAZIONE SI LEGGE CHE IN FATTURA CI VA, E CHI LA PAGA ===');
+console.log('\n=== DALLA CONFIGURAZIONE SI LEGGE CHI LA PAGA ===');
 {
   const pg=await apri('mine');
   await pg.evaluate(()=>window.go('taxSettings'));
   await pg.waitForTimeout(700);
   const voci=await pg.evaluate(()=>[...document.querySelectorAll('[name=stamp_duty_mode] option')]
     .map(o=>o.textContent.trim()));
-  ok(voci.some(v=>/addebitata al cliente/.test(v)),'c’è la scelta «la addebito al cliente»',voci.join(' | '));
-  ok(voci.some(v=>/la pago io/.test(v)),'e la scelta «la pago io»',voci.join(' | '));
-  ok(voci.some(v=>/Non si applica/.test(v)),'e «non si applica»',voci.join(' | '));
-  ok(voci.filter(v=>/In fattura/.test(v)).length===2,
-     'e tutte e due le prime dicono «In fattura»: il bollo ci va comunque',voci.join(' | '));
+  ok(voci.includes('La addebito al cliente'),'c’è la scelta «La addebito al cliente»',voci.join(' | '));
+  ok(voci.includes('La pago io'),'e la scelta «La pago io»',voci.join(' | '));
+  ok(voci.includes('Non si applica'),'e «Non si applica»',voci.join(' | '));
+  // «In fattura, ma la pago io» si leggeva come una contraddizione, e
+  // lo era: chi il bollo lo paga in fattura non lo mette e non lo
+  // addebita. La dicitura del bollo virtuale la aggiunge Fiscozen da sé
+  // nei dati dell'XML, senza voce e senza toccare il totale. Questo
+  // controllo, prima, pretendeva proprio l'etichetta sbagliata.
+  ok(!voci.some(v=>/in fattura/i.test(v)),
+     'e nessuna scelta dice «in fattura»: chi lo paga non lo mette',voci.join(' | '));
   const scelto=await pg.evaluate(()=>document.querySelector('[name=stamp_duty_mode]')?.value||'');
   ok(scelto==='mine','la scelta salvata è quella che si legge',scelto||'nessuna');
   const t=await testo(pg);
   ok(/è dovuto/.test(t)&&/chi lo paga/.test(t),
      'e la spiegazione separa le due cose: è dovuto, e chi lo paga',
      (t.match(/Sopra[^.]{0,120}/)||[''])[0]);
+  ok(/non lo aggiungi fra le voci e non lo addebiti/.test(t),
+     'dicendo che pagandolo tu non lo aggiungi fra le voci e non lo addebiti',
+     (t.match(/Pagandolo tu[^.]{0,90}/)||[''])[0]);
+  // Ma non che la fattura lo taccia: sopra soglia il bollo va
+  // dichiarato chiunque lo paghi, e il lettore dell'XML lo pretende.
+  // Dire «in fattura non lo metti» e poi segnalarne la mancanza erano
+  // due verita' opposte nella stessa app.
+  ok(/lo dichiara comunque, come bollo virtuale/.test(t),
+     'e che la fattura elettronica lo dichiara lo stesso, senza addebitarlo',
+     (t.match(/La fattura elettronica[^.]{0,120}/)||[''])[0]||'non lo dice');
   ok(/non lo comprende/.test(t)&&/tuo costo/.test(t),
-     'dicendo che pagandolo tu il totale non lo comprende e resta un tuo costo',
-     (t.match(/Pagandolo tu[^.]{0,140}/)||[''])[0]);
+     'che il totale non lo comprende e resta un tuo costo',
+     (t.match(/il totale non lo comprende[^.]{0,90}/)||[''])[0]);
   ok(/trimestrali/.test(t),'e dove si versa');
   await pg.close();
 }
 
-console.log('\n=== PAGANDOLO TU, IN FATTURA C’È MA NON NEL TOTALE ===');
+console.log('\n=== PAGANDOLO TU, NON SI ADDEBITA E NON È NEL TOTALE ===');
 {
   const pg=await apri('mine');
   await pg.evaluate(()=>window.openBillingClient('ac'));
@@ -89,8 +104,11 @@ console.log('\n=== PAGANDOLO TU, IN FATTURA C’È MA NON NEL TOTALE ===');
      (t.match(/Marca da bollo[^·]{0,60}/)||[''])[0]);
   ok(/a tuo carico/.test(t),'ed è marcata «a tuo carico»',
      (t.match(/Marca da bollo[\s\S]{0,80}/)||[''])[0]);
-  ok(/la paghi tu/.test(t),'e il modulo lo dice per esteso',
-     (t.match(/In fattura, ma la paghi tu[^.]{0,80}/)||[''])[0]);
+  ok(/La paghi tu: il totale della fattura non la comprende/.test(t),
+     'e la pagina lo dice per esteso',(t.match(/La paghi tu[^.]{0,90}/)||[''])[0]);
+  ok(/non si aggiunge fra le voci/.test(t),
+     'dicendo anche che non è una prestazione da incollare',
+     (t.match(/Non è una prestazione[^.]{0,60}/)||[''])[0]);
   ok(!/name="stamp_duty_enabled"/.test(await pg.content()),
      'e sulla singola fattura non si ridiscute: niente interruttore qui');
   // il totale: 500 € di lavoro, nessuna rivalsa, nessun bollo addebitato
@@ -113,8 +131,8 @@ console.log('\n=== ADDEBITANDOLO, ENTRA NEL TOTALE ===');
   await pg.evaluate(()=>window.openBillingClient('ac'));
   await pg.waitForTimeout(800);
   const t=await testo(pg);
-  ok(/addebitata al cliente/.test(t),'il modulo dice che è addebitata',
-     (t.match(/In fattura e addebitata[^.]{0,60}/)||[''])[0]);
+  ok(/Addebitata al cliente: entra nel totale/.test(t),'la pagina dice che è addebitata',
+     (t.match(/Addebitata al cliente[^.]{0,60}/)||[''])[0]);
   ok(!/a tuo carico/.test(t),'e non «a tuo carico»');
   await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
     f.status.value='invoice_issued'; f.requestSubmit();});
@@ -152,7 +170,10 @@ console.log('\n=== «NON SI APPLICA» RESTA UNA SCELTA POSSIBILE ===');
   await pg.evaluate(()=>window.openBillingClient('ac'));
   await pg.waitForTimeout(800);
   const t=await testo(pg);
-  ok(/Non si applica/.test(t),'il modulo lo dice',(t.match(/Non si applica[^.]{0,40}/)||[''])[0]);
+  // Dove il bollo non si applica non c'e' niente da dire: la riga non
+  // compare proprio, invece di comparire a zero.
+  ok(!/Marca da bollo/.test(t),'la riga del bollo non compare affatto',
+     (t.match(/Marca da bollo[^.]{0,50}/)||[''])[0]||'assente, giusto');
   await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
     f.status.value='invoice_issued'; f.requestSubmit();});
   await pg.waitForTimeout(1300);

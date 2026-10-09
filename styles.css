@@ -215,9 +215,13 @@ button,input,select,textarea{font-family:var(--font-body)} button{cursor:pointer
 .fatMese,.fatData{color:var(--soft);font-size:13.5px;font-weight:600;font-variant-numeric:tabular-nums}
 .rowFattura .value{text-align:left;font-size:16px;font-weight:750}
 .fatDel{margin-top:9px}
-/* La riga che dice chi paga il bollo: e un testo da leggere, non
-   un blocco da copiare, quindi prende il carattere del modulo. */
-.copybox.bolloNota{font-family:var(--font-body);font-size:var(--t-sm)}
+/* I campi nell'ordine in cui il modulo di Fiscozen li chiede: si
+   trascrivono uno a uno, quindi portano gli stessi nomi. */
+.fzCampi{display:grid;gap:var(--sp-2);margin-top:var(--sp-2)}
+.fzCampi>div>span{display:block;color:var(--muted);font-size:var(--t-xs);font-weight:var(--w-bold);
+  text-transform:uppercase;letter-spacing:.03em;margin-bottom:3px}
+.fzCampi>div>b{font-size:var(--t-md);font-weight:var(--w-bold);font-variant-numeric:tabular-nums}
+@media(min-width:560px){.fzCampi{grid-template-columns:1fr 7.5rem 5.5rem;gap:var(--sp-4);align-items:start}}
 @media(min-width:720px){
   .fatTestata{display:grid;grid-template-columns:7.5rem 6rem 7rem 1fr 7.5rem;gap:14px;
     padding:8px 16px;color:var(--muted);font-size:11.5px;font-weight:750;

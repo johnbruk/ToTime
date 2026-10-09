@@ -178,18 +178,31 @@ console.log('\n=== F. Aperto da una libreria Excel indipendente ===');
 // con noi stessi. Qui lo apre openpyxl, che non sa niente di questo
 // codice: se lo apre lei, lo apre Excel.
 fs.writeFileSync('/tmp/totime-verifica.xlsx',Buffer.from(g));
-let esito='';
-try{
-  esito=execFileSync('python3',['-c',`
+const SCRIPT=`
 import openpyxl,sys
 wb=openpyxl.load_workbook('/tmp/totime-verifica.xlsx')
 ws=wb.worksheets[0]
 d=[c for r in ws.iter_rows() for c in r if c.is_date]
 print('%s|%d|%s|%s'%('|'.join(wb.sheetnames),ws.max_row,len(d),ws['A1'].value))
-`],{encoding:'utf8',stdio:['pipe','pipe','pipe']}).trim();
-}catch(e){ esito='ERRORE:'+String(e.stderr||e.message).split('\n').pop(); }
-if(esito.startsWith('ERRORE')){
-  ok(false,'openpyxl apre il file',esito.slice(0,120));
+`;
+// Il container puo' avere piu' di un python sul PATH, e openpyxl
+// installato solo in uno: si provano in ordine invece di arrendersi al
+// primo. E quando nessuno ce l'ha, si dice PERCHE': prima il messaggio
+// usciva vuoto — l'ultima riga di uno stderr che finisce con a capo e'
+// la stringa vuota — e un «ERRORE:» senza motivo non aiuta nessuno.
+let esito='',perche='';
+for(const py of ['python3','python3.13','python3.12','python3.11']){
+  try{
+    esito=execFileSync(py,['-c',SCRIPT],{encoding:'utf8',stdio:['pipe','pipe','pipe']}).trim();
+    perche=''; break;
+  }catch(e){
+    const righe=String(e.stderr||e.message||'').split('\n').map(x=>x.trim()).filter(Boolean);
+    perche=(righe[righe.length-1]||'nessun messaggio')+'  ('+py+')';
+    esito='';
+  }
+}
+if(!esito){
+  ok(false,'openpyxl apre il file',perche.slice(0,140));
 }else{
   const [n1,n2,righe,date,a1]=esito.split('|');
   ok(true,'openpyxl apre il file senza protestare',`fogli: ${n1}, ${n2}`);
