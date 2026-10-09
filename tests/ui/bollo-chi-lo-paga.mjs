@@ -77,9 +77,16 @@ console.log('\n=== DALLA CONFIGURAZIONE SI LEGGE CHI LA PAGA ===');
   ok(/è dovuto/.test(t)&&/chi lo paga/.test(t),
      'e la spiegazione separa le due cose: è dovuto, e chi lo paga',
      (t.match(/Sopra[^.]{0,120}/)||[''])[0]);
-  ok(/non lo metti e non lo addebiti/.test(t),
-     'dicendo che pagandolo tu in fattura non lo metti e non lo addebiti',
+  ok(/non lo aggiungi fra le voci e non lo addebiti/.test(t),
+     'dicendo che pagandolo tu non lo aggiungi fra le voci e non lo addebiti',
      (t.match(/Pagandolo tu[^.]{0,90}/)||[''])[0]);
+  // Ma non che la fattura lo taccia: sopra soglia il bollo va
+  // dichiarato chiunque lo paghi, e il lettore dell'XML lo pretende.
+  // Dire «in fattura non lo metti» e poi segnalarne la mancanza erano
+  // due verita' opposte nella stessa app.
+  ok(/lo dichiara comunque, come bollo virtuale/.test(t),
+     'e che la fattura elettronica lo dichiara lo stesso, senza addebitarlo',
+     (t.match(/La fattura elettronica[^.]{0,120}/)||[''])[0]||'non lo dice');
   ok(/non lo comprende/.test(t)&&/tuo costo/.test(t),
      'che il totale non lo comprende e resta un tuo costo',
      (t.match(/il totale non lo comprende[^.]{0,90}/)||[''])[0]);
