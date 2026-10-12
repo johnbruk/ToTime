@@ -134,10 +134,12 @@ console.log('\n=== REGISTRANDOLA, I CONTI SEGUONO LA FATTURA ===');
   // quella che qui servirebbe a confrontare i numeri: una seconda
   // dichiarazione con lo stesso nome la sostituiva, e ogni fattura
   // dell'elenco diventava «senza numero».
+  // Ed e' UNA fattura: una riga sola col suo numero, che si apre sui
+  // due mesi.
   const numeri=await pg.evaluate(()=>[...document.querySelectorAll('#app .rowFattura .fatNum')]
     .map(x=>x.textContent.trim()));
-  ok(numeri.length===2&&numeri.every(n=>n==='1/2026'),
-     'e in elenco ogni mese porta il numero della fattura',numeri.join(' | ')||'nessuna riga');
+  ok(numeri.length===1&&numeri[0]==='1/2026',
+     'e in elenco è una fattura sola, col suo numero',numeri.join(' | ')||'nessuna riga');
   await pg.close();
 }
 
@@ -263,13 +265,12 @@ const DUE_MESI=`S.billing_headers=[
      invoice_date:'2026-04-08',total_amount:2530,invoice_total_amount:2631.2},
     {id:'h4',client_id:'sol',year:2026,month:4,status:'invoice_issued',invoice_number:'2/2026',
      invoice_date:'2026-05-04',total_amount:920,invoice_total_amount:956.8}];`;
+// La fattura su due mesi e' una riga sola in elenco: si elimina da li'.
+const rigaDiFebbraio=`[...document.querySelectorAll('#app .rowFattura')]
+    .find(x=>(x.dataset.mesi||'').split(',').includes('2026-02'))`;
 const eliminaFebbraio=async pg=>{
   await elenco(pg);
-  await pg.evaluate(()=>{
-    const r=[...document.querySelectorAll('#app .rowFattura')]
-      .find(x=>/02\/2026/.test(x.querySelector('.fatMese')?.textContent||''));
-    r.querySelector('.fatDel').click();
-  });
+  await pg.evaluate(src=>{const r=eval(src);r.querySelector('.fatDel').click()},rigaDiFebbraio);
   await pg.waitForTimeout(1500);
 };
 {
@@ -286,7 +287,12 @@ const eliminaFebbraio=async pg=>{
   // Se uno dei mesi e' incassato non si elimina niente: neanche la
   // meta' non incassata, che lascerebbe la fattura spezzata.
   const pg=await apri(DUE_MESI.replace(`month:3,status:'invoice_issued'`,`month:3,status:'collected'`));
-  await eliminaFebbraio(pg);
+  await elenco(pg);
+  const conPulsante=await pg.evaluate(src=>!!eval(src)?.querySelector('.fatDel'),rigaDiFebbraio);
+  ok(!conPulsante,'in elenco la fattura in parte incassata non ha «Elimina fattura»');
+  // e anche chiamandolo lo stesso non si elimina niente
+  await pg.evaluate(()=>window.eliminaFattura('h2'));
+  await pg.waitForTimeout(1200);
   const h=await schede(pg);
   ok(h.map(x=>x.id).join(',')==='h2,h3,h4','con marzo incassato non si elimina niente',h.map(x=>x.id).join(','));
   const t=await testo(pg);

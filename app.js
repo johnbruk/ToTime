@@ -480,16 +480,25 @@ const MENU=[
     {v:'tmManage',l:'Incarichi continuativi'},
     {v:'pivot',l:'Analisi consuntivi'}]},
   {main:'expenses',ic:'▦',l:'Spese',sub:[{v:'expenseForm',l:'Nuova spesa'},{v:'tripNew',l:'Nuova trasferta'}]},
-  // «Per commessa» e «Report analitico WBS» non stanno piu' qui: si
-  // aprono dalla commessa a cui si riferiscono, che e' il posto dove
-  // uno le cerca. Il menu non e' un elenco di tutto quello che esiste.
-  // Il report economico non sta a menu: si apre dalla fatturazione, in
-  // fondo, dove i suoi numeri hanno il contesto da cui vengono.
+  // «Report analitico WBS» non sta piu' qui: si apre dalla commessa a
+  // cui si riferisce, che e' il posto dove uno lo cerca. «Per commessa»
+  // invece sta sotto Fatturazione, con le altre pagine della
+  // fatturazione.
   // Il mese e l'anno sono due pagine, non due linguette della stessa:
   // ognuna col suo selettore, e dal menu si va diritti a quella che serve.
+  // E sotto Fatturazione stanno tutte le pagine della fatturazione:
+  // prima fatture emesse, incassi, report e il resto si raggiungevano
+  // solo dai pulsanti dentro le pagine, e chi non sapeva dove cercarli
+  // non li trovava.
   {main:'billing',ic:'€',l:'Fatturazione',sub:[
     {v:'billing',l:'Il mese'},
-    {v:'billingAnno',l:'L’anno'}]},
+    {v:'billingAnno',l:'L’anno'},
+    {v:'annualInvoices',l:'Fatture emesse',edit:'issued'},
+    {v:'annualInvoices',l:'Incassi',edit:'collected'},
+    {v:'fatturatoDetail',l:'Da fatturare'},
+    {v:'fatturazioneCommessa',l:'Per commessa'},
+    {v:'reportEconomico',l:'Report economico'},
+    {v:'fatturaCarica',l:'Carica fattura emessa'}]},
   {v:'balance',ic:'∑',l:'Bilancio'},
   {main:'tax',ic:'%',l:'Tassazione',sub:[
     {v:'tasseFuture',l:'Tasse future'},
@@ -513,7 +522,7 @@ const MENU=[
 const NAV_CHILDREN={
   timesheet:['timesheet','calendario','giorno','griglia','pivot','reportWbs','tmManage','tmForm','importaConsuntivi','dailyForm','dailyEdit','monthlyForm','monthlyEdit','manualForm','manualEdit','annualMonths'],
   expenses:['expenses','expenseForm','expenseEdit','tripNew','tripEdit'],
-  billing:['billing','billingAnno','billingDetail','annualInvoices','fatturatoDetail','fatturazioneCommessa','reportEconomico'],
+  billing:['billing','billingAnno','billingDetail','annualInvoices','fatturaCarica','fatturatoDetail','fatturazioneCommessa','reportEconomico'],
   tax:['tax','tasseFuture','taxPayments','taxPaymentEdit','taxSettings'],
   settings:['settings','clients','clientEdit','clientDetail','engagements','engagementDetail','engagementNew','engagementEdit','projects','projectEdit','projectDetail','projectNew','wbsEdit','activities','activityEdit','expenseCategories','expenseCategoryEdit','invoiceTemplates','invoiceTemplateEdit','appearance','account','exportTimesheet']
 };
@@ -526,7 +535,7 @@ function navMenu(){const cur=state.gruppoAperto||navSectionLabel(state.view);ret
   if(!m.sub)return `<button class="${cur===m.l?'active':''}" onclick="go('${m.v}')"><span>${m.ic}</span><b>${m.l}</b></button>`;
   const open=cur===m.l;
   const parent=`<button class="navParentBtn ${open?'active':''}" onclick="apriGruppo('${m.main}')"><span>${m.ic}</span><b>${m.l}</b><i class="navChev">${open?'▾':'▸'}</i></button>`;
-  const subs=open?`<div class="navSubList">${m.sub.map(s=>`<button class="navSubItem ${state.view===s.v?'active':''}" onclick="${s.edit?`goNav('${s.v}','${s.edit}')`:`go('${s.v}')`}">${s.l}</button>`).join('')}</div>`:'';
+  const subs=open?`<div class="navSubList">${m.sub.map(s=>`<button class="navSubItem ${state.view===s.v&&(!s.edit||(state.edit||'issued')===s.edit)?'active':''}" onclick="${s.edit?`goNav('${s.v}','${s.edit}')`:`go('${s.v}')`}">${s.l}</button>`).join('')}</div>`:'';
   return parent+subs;
 }).join('')}
 function goNav(v,edit){navigateTo(v,{edit:edit||null})}
@@ -1962,7 +1971,71 @@ function rigaFattura(h,importo){
     <div class="fatCli"><div class="title">${esc(clientName(h.client_id))}</div>
       <div class="desc"><span class="tag ${statusClass(h.status)}">${statusLabel(h.status)}</span></div>
       ${h.status==='collected'?'':`<button type="button" class="miniBtn danger fatDel" onclick="event.stopPropagation();eliminaFattura('${h.id}')">Elimina fattura</button>`}</div>
-    <div class="value">${fmtEUR(importo)}</div></div>`;
+    <div class="value">${eurMigliaia(importo)}</div></div>`;
+}
+// Le fatture si elencano per FATTURA, non per scheda. Una fattura su
+// piu' mesi sta su piu' schede — una per mese, stesso numero e stessa
+// data — e l'elenco ne mostrava una riga per mese: il totale della
+// fattura non si vedeva da nessuna parte. Adesso e' una riga sola, col
+// totale e i mesi che copre; toccandola si apre, e sotto ci sono i mesi
+// col loro importo, ognuno col suo dettaglio.
+// Le schede si riconoscono come la stessa fattura con la regola del
+// bollo e dell'eliminazione: cliente, numero e data.
+function gruppiFatture(rows){
+  const m=new Map();
+  rows.forEach(h=>{
+    const n=chiaveNumero(h.invoice_number);
+    const k=n&&h.invoice_date?h.client_id+'|'+n+'|'+h.invoice_date:'scheda|'+h.id;
+    if(!m.has(k))m.set(k,[]);
+    m.get(k).push(h);
+  });
+  return [...m.values()].map(g=>g.sort((a,b)=>(a.year-b.year)||(a.month-b.month)));
+}
+// I mesi che una fattura copre. «02–03/2026» solo se sono di fila:
+// una fattura su gennaio e marzo scritta «01–03» direbbe che copre
+// anche febbraio, e non e' vero. Allora si elencano: «01, 03/2026».
+function periodoFattura(schede){
+  const mm=x=>String(x.month).padStart(2,'0');
+  const i=x=>Number(x.year)*12+Number(x.month);
+  const a=schede[0],z=schede[schede.length-1];
+  const diFila=schede.every((x,k)=>!k||i(x)===i(schede[k-1])+1);
+  if(diFila)return Number(a.year)===Number(z.year)?`${mm(a)}–${mm(z)}/${a.year}`:`${mm(a)}/${a.year}–${mm(z)}/${z.year}`;
+  if(schede.every(x=>Number(x.year)===Number(a.year)))return schede.map(mm).join(', ')+'/'+a.year;
+  return schede.map(x=>mm(x)+'/'+x.year).join(', ');
+}
+function apriChiudiFattura(id){
+  state.fattureAperte=state.fattureAperte||{};
+  state.fattureAperte[id]=!state.fattureAperte[id];
+  render();
+}
+function rigaGruppoFatture(schede,amountOf){
+  const h=schede[0],ultima=schede[schede.length-1];
+  const aperto=!!(state.fattureAperte&&state.fattureAperte[h.id]);
+  const n=numeroFattura(h);
+  const mm=x=>String(x.month).padStart(2,'0');
+  const mesi=periodoFattura(schede);
+  const stati=[...new Set(schede.map(x=>x.status))];
+  const stato=stati.length===1
+    ?`<span class="tag ${statusClass(stati[0])}">${statusLabel(stati[0])}</span>`
+    :`<span class="tag orange">In parte incassata</span>`;
+  // Una fattura con un mese incassato non si elimina da qui, come una
+  // incassata sola: prima quel mese si riporta a «Da fatturare».
+  const incassata=schede.some(x=>x.status==='collected');
+  const totale=schede.reduce((a,x)=>a+amountOf(x),0);
+  const sotto=aperto?schede.map(x=>`<div class="row rowFattura rowMese" onclick="openInvoiceDetail('${x.client_id}',${x.year},${x.month})">
+    <div class="fatNum"><span class="fatRamo" aria-hidden="true">↳</span></div>
+    <div class="fatMese"><span class="fatEtic">Mese</span>${mm(x)}/${x.year}</div>
+    <div class="fatData"></div>
+    <div class="fatCli"><div class="desc"><span class="tag ${statusClass(x.status)}">${statusLabel(x.status)}</span></div></div>
+    <div class="value">${eurMigliaia(amountOf(x))}</div></div>`).join(''):'';
+  return `<div class="row rowFattura rowGruppo${aperto?' aperto':''}" role="button" aria-expanded="${aperto}" data-mesi="${schede.map(x=>x.year+'-'+mm(x)).join(',')}" onclick="apriChiudiFattura('${h.id}')">
+    <div class="fatNum">${n?esc(n):'<span class="fatVuoto">senza numero</span>'}</div>
+    <div class="fatMese"><span class="fatEtic">Mesi</span>${mesi}<span class="fatQuanti">${schede.length} mesi ${aperto?'▾':'▸'}</span></div>
+    <div class="fatData"><span class="fatEtic">Data</span>${h.invoice_date?dateIT(h.invoice_date)+'/'+String(h.invoice_date).slice(0,4):'<span class="fatVuoto">—</span>'}</div>
+    <div class="fatCli"><div class="title">${esc(clientName(h.client_id))}</div>
+      <div class="desc">${stato}</div>
+      ${incassata?'':`<button type="button" class="miniBtn danger fatDel" onclick="event.stopPropagation();eliminaFattura('${h.id}')">Elimina fattura</button>`}</div>
+    <div class="value">${eurMigliaia(totale)}</div></div>${sotto}`;
 }
 // Cancellare una fattura non si poteva: l'app sapeva crearla e
 // modificarla, e basta. Un numero sbagliato o una fattura nata per
@@ -2018,7 +2091,13 @@ async function eliminaFattura(id){
   await reload();
   setMsg('Fattura '+nome+' eliminata: '+(piu?'i mesi tornano':'il mese torna')+' da fatturare.',6000);
 }
-function annualInvoices(modeArg){const year=currentYear();const mode=modeArg||(state.edit==='collected'?'collected':'issued');let rows=data.billingHeaders.filter(h=>Number(h.year)===Number(year)&&['invoice_issued','collected'].includes(h.status));if(mode==='collected')rows=rows.filter(h=>h.status==='collected');rows=rows.sort((a,b)=>(Number(b.month)-Number(a.month))||clientName(a.client_id).localeCompare(clientName(b.client_id)));const title=mode==='collected'?`Incassi ${year}`:`Fatture emesse ${year}`;const amountOf=h=>mode==='collected'?Number(h.collected_amount||h.invoice_total_amount||h.total_amount||0):Number(h.invoice_total_amount||h.total_amount||0);const total=rows.reduce((s,h)=>s+amountOf(h),0);return appShell(`<h1>${title}</h1><p class="sub">Tocca una voce per aprire il dettaglio della fattura.</p><div class="card"><b>Totale ${mode==='collected'?'incassato':'fatturato'} ${year}</b><div class="amount" style="margin-top:8px">${fmtEUR(total)}</div></div>${rows.length?intestazioneFatture():''}<div class="list">${rows.map(h=>rigaFattura(h,amountOf(h))).join('')||`<div class="empty">${mode==='collected'?'Nessun incasso registrato':'Nessuna fattura emessa'} nel ${year}.</div>`}</div>`)}
+// Le fatture si raggruppano PRIMA di tenere quelle dell'anno: una
+// fattura su dicembre e gennaio, tagliata al confine dell'anno,
+// diventava due righe da un mese, e il suo totale non si vedeva in
+// nessuno dei due anni. Adesso compare per intero in tutti e due; il
+// totale dell'anno resta per competenza, cioe' conta solo i mesi
+// dell'anno, e quando le due cifre non si sommano la scheda lo dice.
+function annualInvoices(modeArg){const year=currentYear();const mode=modeArg||(state.edit==='collected'?'collected':'issued');let emesse=data.billingHeaders.filter(h=>['invoice_issued','collected'].includes(h.status));if(mode==='collected')emesse=emesse.filter(h=>h.status==='collected');const diAnno=h=>Number(h.year)===Number(year);const rows=emesse.filter(diAnno);const ordine=x=>Number(x.year)*12+Number(x.month);const gruppi=gruppiFatture(emesse).filter(g=>g.some(diAnno)).sort((A,B)=>{const a=A[A.length-1],b=B[B.length-1];return (ordine(b)-ordine(a))||clientName(a.client_id).localeCompare(clientName(b.client_id))});const aCavallo=gruppi.filter(g=>!g.every(diAnno));const title=mode==='collected'?`Incassi ${year}`:`Fatture emesse ${year}`;const amountOf=h=>mode==='collected'?Number(h.collected_amount||h.invoice_total_amount||h.total_amount||0):Number(h.invoice_total_amount||h.total_amount||0);const total=rows.reduce((s,h)=>s+amountOf(h),0);const nota=aCavallo.length?`<p class="small notaCavallo">Nel totale contano solo i mesi del ${year}. ${aCavallo.length>1?'Le fatture':'La fattura'} ${aCavallo.map(g=>esc(numeroFattura(g[0])||'senza numero')).join(', ')} ${aCavallo.length>1?'coprono':'copre'} anche mesi di un altro anno: nell’elenco ${aCavallo.length>1?'compaiono':'compare'} per intero.</p>`:'';return appShell(`<h1>${title}</h1><p class="sub">Tocca una voce per aprire il dettaglio della fattura.</p><div class="card"><b>Totale ${mode==='collected'?'incassato':'fatturato'} ${year}</b><div class="amount" style="margin-top:8px">${eurMigliaia(total)}</div>${nota}</div>${rows.length?intestazioneFatture():''}<div class="list">${gruppi.map(g=>g.length>1?rigaGruppoFatture(g,amountOf):rigaFattura(g[0],amountOf(g[0]))).join('')||`<div class="empty">${mode==='collected'?'Nessun incasso registrato':'Nessuna fattura emessa'} nel ${year}.</div>`}</div>`)}
 // ─── Il riquadro del mese, in dashboard ─────────────────────
 //
 // Prima erano tre colonne di giorni con lo stesso peso —
@@ -6936,7 +7015,7 @@ Object.assign(window,{
   scomposizioneRimborsi,
   forecastCalc,
   leggiFatturaXML,confrontaFattura,clientePerPiva,giorniConsuntivati,
-  fatturaCarica,fatturaFileScelto,registraFattura,scaricaFatturaConservata,
+  fatturaCarica,fatturaFileScelto,registraFattura,scaricaFatturaConservata,apriChiudiFattura,
   annualTaxCalc,
   cambiaClientePolicy,
   savePolicy,

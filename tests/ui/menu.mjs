@@ -64,9 +64,19 @@ ok(spente.length===0,'le voci dirette restano evidenziate da dentro le loro sche
 // e' resta accesa.
 await pg.evaluate(()=>window.go('billingAnno'));await pg.waitForTimeout(160);
 const fat=await gruppo();
-ok(fat.sottovoci.join(',')==='Il mese,L’anno','Fatturazione ha due pagine: «Il mese» e «L’anno»',fat.sottovoci.join(', '));
+ok(fat.sottovoci.join(',')==='Il mese,L’anno,Fatture emesse,Incassi,Da fatturare,Per commessa,Report economico,Carica fattura emessa',
+   'sotto Fatturazione stanno tutte le pagine della fatturazione',fat.sottovoci.join(', '));
 const accesa=await pg.evaluate(()=>[...document.querySelectorAll('.sidebarNav .navSubItem.active')].map(b=>b.textContent.trim()));
 ok(accesa.join(',')==='L’anno','e dalla pagina dell’anno è accesa «L’anno»',accesa.join(', ')||'nessuna');
+// Fatture emesse e Incassi sono la stessa vista con un filtro diverso:
+// deve accendersi una sola delle due, quella giusta.
+for(const [modo,attesa] of [['issued','Fatture emesse'],['collected','Incassi']]){
+  await pg.evaluate(m=>window.openAnnualInvoices(m),modo);await pg.waitForTimeout(160);
+  const acc=await pg.evaluate(()=>[...document.querySelectorAll('.sidebarNav .navSubItem.active')].map(b=>b.textContent.trim()));
+  ok(acc.join(',')===attesa,`dagli ${attesa.toLowerCase()} è accesa «${attesa}», e solo quella`,acc.join(', ')||'nessuna');
+}
+await pg.evaluate(()=>window.go('fatturaCarica'));await pg.waitForTimeout(160);
+ok((await gruppo()).aperto==='Fatturazione','e caricando una fattura il gruppo resta aperto',(await gruppo()).aperto||'chiuso');
 
 ok(persi.length===0,'nessuna vista fa richiudere il menu',persi.slice(0,4).join(' | ')||Object.keys(ATTESI).length+' viste controllate');
 
@@ -95,13 +105,49 @@ const bloccoMenu=sorgente.slice(im,k+1);
 const etichette=[...bloccoMenu.matchAll(/\{v:'([a-zA-Z]+)',l:'([^']+)'/g)].map(m=>m[2]);
 const viste=[...bloccoMenu.matchAll(/\{v:'([a-zA-Z]+)'/g)].map(m=>m[1]);
 console.log('  voci di menu:',etichette.length,'→',etichette.join(', '));
-ok(etichette.length<=20,'il menu resta sotto le venti voci',etichette.length+' voci');
-for(const [vista,nome] of [['fatturazioneCommessa','Per commessa'],['reportWbs','Report analitico WBS'],
-                           ['reportEconomico','Report economico'],
+// Il tetto era venti. Le pagine della fatturazione sono andate tutte
+// sotto la loro voce perche' chi le cercava non le trovava: e' stata
+// una scelta, e il tetto la segue. Resta un tetto, perche' il menu non
+// diventi l'elenco di tutto quello che esiste.
+ok(etichette.length<=25,'il menu resta sotto le venticinque voci',etichette.length+' voci');
+for(const [vista,nome] of [['reportWbs','Report analitico WBS'],
                            ['engagements','Commesse'],['projects','Progetti'],['newChoice','la scheda di scelta']])
   ok(!viste.includes(vista),`«${nome}» non e\' piu\' una voce di menu`);
 // ...ma il menu deve puntare al modulo, non a un bivio prima del modulo
 ok(viste.includes('dailyForm'),'e «Nuovo consuntivo» punta diritto al modulo',viste.slice(0,4).join(', '));
+
+// La barra laterale e' alta quanto lo schermo e resta ferma mentre la
+// pagina scorre. Col gruppo Fatturazione aperto — otto voci — su un
+// portatile da 720 px Impostazioni e la versione finivano sotto il
+// bordo, e ci si arrivava solo portando in fondo tutta la pagina.
+console.log('\n=== Su un portatile basso la barra laterale scorre per conto suo ===');
+{
+  const lp=await b.newPage({viewport:{width:1280,height:720}});
+  await lp.goto(`http://127.0.0.1:${srv.address().port}/tests/ui/mock.html`,{waitUntil:'networkidle'});
+  await lp.waitForTimeout(800);
+  // una pagina corta: la barra traboccava sotto e allungava la pagina
+  await lp.evaluate(()=>window.openAnnualInvoices('issued'));await lp.waitForTimeout(300);
+  await lp.evaluate(()=>window.apriGruppo('billing'));await lp.waitForTimeout(300);
+  const m=await lp.evaluate(()=>{
+    const s=document.querySelector('.sidebar');
+    s.scrollTop=s.scrollHeight;
+    const bt=[...s.querySelectorAll('.sidebarNav button')],ultimo=bt[bt.length-1];
+    const foot=s.querySelector('.sidebarFoot');
+    return {ultimo:ultimo.textContent.replace(/[^A-Za-zÀ-ú ]/g,'').trim(),
+      basso:Math.round(ultimo.getBoundingClientRect().bottom),
+      versione:Math.round(foot.getBoundingClientRect().bottom),
+      vh:innerHeight,pagina:Math.round(scrollY),
+      sotto:document.documentElement.scrollHeight-document.querySelector('.shellMain').scrollHeight}});
+  ok(m.ultimo==='Impostazioni'&&m.basso<=m.vh,'scorrendo la barra, l’ultima voce entra nello schermo',`${m.ultimo}: ${m.basso} su ${m.vh} px`);
+  ok(m.versione<=m.vh,'e anche la versione, in fondo',`${m.versione} su ${m.vh} px`);
+  ok(m.pagina===0,'senza spostare la pagina',m.pagina+' px');
+  ok(m.sotto<=1,'e la barra non allunga più la pagina sotto il contenuto',m.sotto+' px');
+  // su uno schermo alto tutto ci sta, e la barra non scorre
+  await lp.setViewportSize({width:1920,height:1080});await lp.waitForTimeout(300);
+  const alto=await lp.evaluate(()=>{const s=document.querySelector('.sidebar');return s.scrollHeight-s.clientHeight});
+  ok(alto<=0,'su uno schermo alto ci sta tutto, e non c’è niente da scorrere',alto+' px');
+  await lp.close();
+}
 
 await b.close();srv.close();
 console.log(`\nRISULTATO: ${pass} OK / ${fail} KO`);
