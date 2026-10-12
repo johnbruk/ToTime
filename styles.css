@@ -221,6 +221,7 @@ button,input,select,textarea{font-family:var(--font-body)} button{cursor:pointer
 .rowGruppo{cursor:pointer}
 .fatQuanti{display:block;margin-top:2px;color:var(--muted);font-size:var(--t-xs);font-weight:var(--w-bold)}
 .rowGruppo.aperto{background:rgba(124,137,166,.06)}
+.notaCavallo{margin:var(--sp-2) 0 0}
 .row.rowMese{background:rgba(124,137,166,.06)}
 .rowMese .fatRamo{color:var(--muted);font-family:var(--font-body);font-weight:var(--w-med)}
 .rowMese .value{font-weight:var(--w-med)}
@@ -976,3 +977,9 @@ table.griglia.numeriRiga td.riga .n{font-variant-numeric:tabular-nums}
 .meseCard .meseClienti div{display:flex;justify-content:space-between;gap:var(--sp-3)}
 .meseCard .meseClienti span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media(max-width:560px){.meseCard .meseLegenda{grid-template-columns:1fr}}
+/* La barra laterale scorre per conto suo. E' alta quanto lo schermo e
+   resta ferma mentre la pagina scorre: col gruppo Fatturazione aperto,
+   otto voci, su un portatile da 720 px Impostazioni e la versione
+   finivano sotto il bordo, e ci si arrivava solo portando in fondo
+   tutta la pagina. */
+.sidebar{overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}

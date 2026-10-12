@@ -1991,6 +1991,18 @@ function gruppiFatture(rows){
   });
   return [...m.values()].map(g=>g.sort((a,b)=>(a.year-b.year)||(a.month-b.month)));
 }
+// I mesi che una fattura copre. «02–03/2026» solo se sono di fila:
+// una fattura su gennaio e marzo scritta «01–03» direbbe che copre
+// anche febbraio, e non e' vero. Allora si elencano: «01, 03/2026».
+function periodoFattura(schede){
+  const mm=x=>String(x.month).padStart(2,'0');
+  const i=x=>Number(x.year)*12+Number(x.month);
+  const a=schede[0],z=schede[schede.length-1];
+  const diFila=schede.every((x,k)=>!k||i(x)===i(schede[k-1])+1);
+  if(diFila)return Number(a.year)===Number(z.year)?`${mm(a)}–${mm(z)}/${a.year}`:`${mm(a)}/${a.year}–${mm(z)}/${z.year}`;
+  if(schede.every(x=>Number(x.year)===Number(a.year)))return schede.map(mm).join(', ')+'/'+a.year;
+  return schede.map(x=>mm(x)+'/'+x.year).join(', ');
+}
 function apriChiudiFattura(id){
   state.fattureAperte=state.fattureAperte||{};
   state.fattureAperte[id]=!state.fattureAperte[id];
@@ -2001,7 +2013,7 @@ function rigaGruppoFatture(schede,amountOf){
   const aperto=!!(state.fattureAperte&&state.fattureAperte[h.id]);
   const n=numeroFattura(h);
   const mm=x=>String(x.month).padStart(2,'0');
-  const mesi=h.year===ultima.year?`${mm(h)}–${mm(ultima)}/${h.year}`:`${mm(h)}/${h.year}–${mm(ultima)}/${ultima.year}`;
+  const mesi=periodoFattura(schede);
   const stati=[...new Set(schede.map(x=>x.status))];
   const stato=stati.length===1
     ?`<span class="tag ${statusClass(stati[0])}">${statusLabel(stati[0])}</span>`
@@ -2079,7 +2091,13 @@ async function eliminaFattura(id){
   await reload();
   setMsg('Fattura '+nome+' eliminata: '+(piu?'i mesi tornano':'il mese torna')+' da fatturare.',6000);
 }
-function annualInvoices(modeArg){const year=currentYear();const mode=modeArg||(state.edit==='collected'?'collected':'issued');let rows=data.billingHeaders.filter(h=>Number(h.year)===Number(year)&&['invoice_issued','collected'].includes(h.status));if(mode==='collected')rows=rows.filter(h=>h.status==='collected');const gruppi=gruppiFatture(rows).sort((A,B)=>{const a=A[A.length-1],b=B[B.length-1];return (Number(b.month)-Number(a.month))||clientName(a.client_id).localeCompare(clientName(b.client_id))});const title=mode==='collected'?`Incassi ${year}`:`Fatture emesse ${year}`;const amountOf=h=>mode==='collected'?Number(h.collected_amount||h.invoice_total_amount||h.total_amount||0):Number(h.invoice_total_amount||h.total_amount||0);const total=rows.reduce((s,h)=>s+amountOf(h),0);return appShell(`<h1>${title}</h1><p class="sub">Tocca una voce per aprire il dettaglio della fattura.</p><div class="card"><b>Totale ${mode==='collected'?'incassato':'fatturato'} ${year}</b><div class="amount" style="margin-top:8px">${eurMigliaia(total)}</div></div>${rows.length?intestazioneFatture():''}<div class="list">${gruppi.map(g=>g.length>1?rigaGruppoFatture(g,amountOf):rigaFattura(g[0],amountOf(g[0]))).join('')||`<div class="empty">${mode==='collected'?'Nessun incasso registrato':'Nessuna fattura emessa'} nel ${year}.</div>`}</div>`)}
+// Le fatture si raggruppano PRIMA di tenere quelle dell'anno: una
+// fattura su dicembre e gennaio, tagliata al confine dell'anno,
+// diventava due righe da un mese, e il suo totale non si vedeva in
+// nessuno dei due anni. Adesso compare per intero in tutti e due; il
+// totale dell'anno resta per competenza, cioe' conta solo i mesi
+// dell'anno, e quando le due cifre non si sommano la scheda lo dice.
+function annualInvoices(modeArg){const year=currentYear();const mode=modeArg||(state.edit==='collected'?'collected':'issued');let emesse=data.billingHeaders.filter(h=>['invoice_issued','collected'].includes(h.status));if(mode==='collected')emesse=emesse.filter(h=>h.status==='collected');const diAnno=h=>Number(h.year)===Number(year);const rows=emesse.filter(diAnno);const ordine=x=>Number(x.year)*12+Number(x.month);const gruppi=gruppiFatture(emesse).filter(g=>g.some(diAnno)).sort((A,B)=>{const a=A[A.length-1],b=B[B.length-1];return (ordine(b)-ordine(a))||clientName(a.client_id).localeCompare(clientName(b.client_id))});const aCavallo=gruppi.filter(g=>!g.every(diAnno));const title=mode==='collected'?`Incassi ${year}`:`Fatture emesse ${year}`;const amountOf=h=>mode==='collected'?Number(h.collected_amount||h.invoice_total_amount||h.total_amount||0):Number(h.invoice_total_amount||h.total_amount||0);const total=rows.reduce((s,h)=>s+amountOf(h),0);const nota=aCavallo.length?`<p class="small notaCavallo">Nel totale contano solo i mesi del ${year}. ${aCavallo.length>1?'Le fatture':'La fattura'} ${aCavallo.map(g=>esc(numeroFattura(g[0])||'senza numero')).join(', ')} ${aCavallo.length>1?'coprono':'copre'} anche mesi di un altro anno: nell’elenco ${aCavallo.length>1?'compaiono':'compare'} per intero.</p>`:'';return appShell(`<h1>${title}</h1><p class="sub">Tocca una voce per aprire il dettaglio della fattura.</p><div class="card"><b>Totale ${mode==='collected'?'incassato':'fatturato'} ${year}</b><div class="amount" style="margin-top:8px">${eurMigliaia(total)}</div>${nota}</div>${rows.length?intestazioneFatture():''}<div class="list">${gruppi.map(g=>g.length>1?rigaGruppoFatture(g,amountOf):rigaFattura(g[0],amountOf(g[0]))).join('')||`<div class="empty">${mode==='collected'?'Nessun incasso registrato':'Nessuna fattura emessa'} nel ${year}.</div>`}</div>`)}
 // ─── Il riquadro del mese, in dashboard ─────────────────────
 //
 // Prima erano tre colonne di giorni con lo stesso peso —

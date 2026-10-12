@@ -116,6 +116,39 @@ for(const [vista,nome] of [['reportWbs','Report analitico WBS'],
 // ...ma il menu deve puntare al modulo, non a un bivio prima del modulo
 ok(viste.includes('dailyForm'),'e «Nuovo consuntivo» punta diritto al modulo',viste.slice(0,4).join(', '));
 
+// La barra laterale e' alta quanto lo schermo e resta ferma mentre la
+// pagina scorre. Col gruppo Fatturazione aperto — otto voci — su un
+// portatile da 720 px Impostazioni e la versione finivano sotto il
+// bordo, e ci si arrivava solo portando in fondo tutta la pagina.
+console.log('\n=== Su un portatile basso la barra laterale scorre per conto suo ===');
+{
+  const lp=await b.newPage({viewport:{width:1280,height:720}});
+  await lp.goto(`http://127.0.0.1:${srv.address().port}/tests/ui/mock.html`,{waitUntil:'networkidle'});
+  await lp.waitForTimeout(800);
+  // una pagina corta: la barra traboccava sotto e allungava la pagina
+  await lp.evaluate(()=>window.openAnnualInvoices('issued'));await lp.waitForTimeout(300);
+  await lp.evaluate(()=>window.apriGruppo('billing'));await lp.waitForTimeout(300);
+  const m=await lp.evaluate(()=>{
+    const s=document.querySelector('.sidebar');
+    s.scrollTop=s.scrollHeight;
+    const bt=[...s.querySelectorAll('.sidebarNav button')],ultimo=bt[bt.length-1];
+    const foot=s.querySelector('.sidebarFoot');
+    return {ultimo:ultimo.textContent.replace(/[^A-Za-zÀ-ú ]/g,'').trim(),
+      basso:Math.round(ultimo.getBoundingClientRect().bottom),
+      versione:Math.round(foot.getBoundingClientRect().bottom),
+      vh:innerHeight,pagina:Math.round(scrollY),
+      sotto:document.documentElement.scrollHeight-document.querySelector('.shellMain').scrollHeight}});
+  ok(m.ultimo==='Impostazioni'&&m.basso<=m.vh,'scorrendo la barra, l’ultima voce entra nello schermo',`${m.ultimo}: ${m.basso} su ${m.vh} px`);
+  ok(m.versione<=m.vh,'e anche la versione, in fondo',`${m.versione} su ${m.vh} px`);
+  ok(m.pagina===0,'senza spostare la pagina',m.pagina+' px');
+  ok(m.sotto<=1,'e la barra non allunga più la pagina sotto il contenuto',m.sotto+' px');
+  // su uno schermo alto tutto ci sta, e la barra non scorre
+  await lp.setViewportSize({width:1920,height:1080});await lp.waitForTimeout(300);
+  const alto=await lp.evaluate(()=>{const s=document.querySelector('.sidebar');return s.scrollHeight-s.clientHeight});
+  ok(alto<=0,'su uno schermo alto ci sta tutto, e non c’è niente da scorrere',alto+' px');
+  await lp.close();
+}
+
 await b.close();srv.close();
 console.log(`\nRISULTATO: ${pass} OK / ${fail} KO`);
 if(fail)process.exitCode=1;

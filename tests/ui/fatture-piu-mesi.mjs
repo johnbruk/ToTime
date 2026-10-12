@@ -35,14 +35,14 @@ const SEMI=`
     h('h5',5,'invoice_issued','3/2026','2026-06-01',4903.6),h('h4',4,'invoice_issued','3/2026','2026-05-05',3827.2),
     h('h3',3,'collected','1/2026','2026-04-08',2631.2),h('h2',2,'collected','1/2026','2026-04-08',478.4)];
 `;
-const apri=async(w=1280,modo='issued')=>{
+const apri=async(w=1280,modo='issued',semi=SEMI,[anno,mese]=[2026,9])=>{
   const pg=await b.newPage({viewport:{width:w,height:1600},hasTouch:w<900});
   pg.on('dialog',d=>d.accept());
   await pg.goto(`http://127.0.0.1:${port}/tests/ui/mock.html`,{waitUntil:'networkidle'});
   await pg.waitForTimeout(800);
-  await pg.evaluate(SEMI);await pg.evaluate(()=>window.reload());await pg.waitForTimeout(700);
+  await pg.evaluate(semi);await pg.evaluate(()=>window.reload());await pg.waitForTimeout(700);
   // l'anno degli elenchi e' quello del mese che l'app ha davanti
-  await pg.evaluate(()=>window.openInvoiceDetail('sol',2026,9));await pg.waitForTimeout(400);
+  await pg.evaluate(([a,m])=>window.openInvoiceDetail('sol',a,m),[anno,mese]);await pg.waitForTimeout(400);
   await pg.evaluate(m=>window.openAnnualInvoices(m),modo);await pg.waitForTimeout(600);
   return pg;
 };
@@ -73,6 +73,7 @@ console.log('\n=== UNA FATTURA SU DUE MESI È UNA RIGA SOLA, COL SUO TOTALE ==='
   const tot=eur((t.match(/Totale fatturato 2026 ([\d.,]+)\s?€/)||[])[1]);
   const somma=r.filter(x=>!x.mese).reduce((a,x)=>a+eur(x.importo),0);
   ok(Math.abs(tot-somma)<0.005,'e il totale dell’anno è la somma delle righe',`${tot} contro ${somma.toFixed(2)}`);
+  ok(!(await pg.$('#app .notaCavallo')),'e senza fatture a cavallo d’anno non c’è nessuna nota da leggere');
   await pg.close();
 }
 
@@ -120,6 +121,86 @@ console.log('\n=== NEGLI INCASSI, LO STESSO ===');
   const r=await righe(pg);
   const uno=r.filter(x=>x.numero==='1/2026');
   ok(uno.length===1&&uno[0].gruppo&&Math.abs(eur(uno[0].importo)-3109.6)<0.005,'la 1/2026 incassata è una riga sola, col suo totale',uno.map(x=>x.importo).join(' | '));
+  await pg.close();
+}
+
+// Una fattura su dicembre e gennaio. Gli elenchi sono per anno, e le
+// schede si filtravano per anno PRIMA di raggrupparle: la fattura
+// diventava due righe da un mese, una nel 2026 e una nel 2027, e il suo
+// totale non si vedeva in nessuno dei due. Adesso compare per intero in
+// tutti e due gli anni; il totale dell'anno conta solo i suoi mesi, e
+// lo dice.
+const CAVALLO=st=>`
+  const S=window.__stores;
+  S.clients=[{id:'sol',name:'Solution',daily_rate:460,standard_hours:8,compensation_type:'daily_rate_8h',active:true}];
+  const h=(id,y,m,st,n,d,t)=>({id,client_id:'sol',year:y,month:m,status:st,invoice_number:n,invoice_date:d,
+    invoice_total_amount:t,collected_amount:st==='collected'?t:null});
+  S.billing_headers=[
+    h('x11',2026,11,'${st}','8/2026','2026-11-30',3000),
+    h('x12',2026,12,'${st}','1/2027','2027-01-31',4600),h('x01',2027,1,'${st}','1/2027','2027-01-31',920),
+    h('x02',2027,2,'${st}','2/2027','2027-02-28',1500)];
+`;
+console.log('\n=== UNA FATTURA SU DICEMBRE E GENNAIO SI VEDE PER INTERO, IN TUTTI E DUE GLI ANNI ===');
+for(const [anno,mese,totAnno,altra] of [[2026,11,7600,'8/2026'],[2027,2,2420,'2/2027']]){
+  const pg=await apri(1280,'issued',CAVALLO('invoice_issued'),[anno,mese]);
+  const r=await righe(pg);
+  const una=r.filter(x=>x.numero==='1/2027');
+  ok(una.length===1&&una[0].gruppo,`nel ${anno} la 1/2027 è una riga sola, la riga della fattura`,JSON.stringify(una.map(x=>x.periodo)));
+  const g=una[0]||{};
+  ok(g.mesi==='2026-12,2027-01'&&/^12\/2026–01\/2027/.test(g.periodo),'con tutti e due i mesi, anche quello dell’altro anno',g.mesi+' · '+g.periodo);
+  ok(Math.abs(eur(g.importo)-5520)<0.005,'e il totale della fattura: 4.600,00 + 920,00',g.importo);
+  ok(r.some(x=>x.numero===altra&&!x.gruppo),`la ${altra}, di un mese solo, resta com’era`);
+  const t=await testo(pg);
+  const tot=eur((t.match(new RegExp('Totale fatturato '+anno+' ([\\d.,]+)\\s?€'))||[])[1]);
+  ok(Math.abs(tot-totAnno)<0.005,`il totale del ${anno} conta solo i mesi del ${anno}`,`${tot}, atteso ${totAnno}`);
+  const nota=await pg.evaluate(()=>document.querySelector('#app .notaCavallo')?.textContent.replace(/\s+/g,' ').trim()||'');
+  ok(new RegExp('solo i mesi del '+anno).test(nota)&&/La fattura 1\/2027 copre anche mesi di un altro anno/.test(nota),
+     'e una nota spiega perché le righe non si sommano al totale',nota||'nessuna nota');
+  if(anno===2026){
+    ok(r[0]?.numero==='1/2027','è la fattura più recente, e sta in cima',r.map(x=>x.numero).join(', '));
+    await tocca(pg,'2026-12,2027-01');await pg.waitForTimeout(400);
+    const sotto=(await righe(pg)).filter(x=>x.mese);
+    ok(sotto.map(x=>x.periodo+' '+x.importo).join(' | ').replace(/\s+/g,' ')==='12/2026 4.600,00 € | 01/2027 920,00 €',
+       'aperta, mostra dicembre e gennaio con i loro importi',sotto.map(x=>x.periodo+' '+x.importo).join(' | '));
+  }
+  await pg.close();
+}
+{
+  const pg=await apri(1280,'collected',CAVALLO('collected'),[2026,11]);
+  const r=await righe(pg);
+  const una=r.filter(x=>x.numero==='1/2027');
+  ok(una.length===1&&una[0].gruppo&&Math.abs(eur(una[0].importo)-5520)<0.005,'negli Incassi, lo stesso',JSON.stringify(una.map(x=>x.importo)));
+  await pg.close();
+}
+{
+  const pg=await apri(390,'issued',CAVALLO('invoice_issued'),[2026,11]);
+  await tocca(pg,'2026-12,2027-01');await pg.waitForTimeout(400);
+  const m=await pg.evaluate(()=>({scroll:document.documentElement.scrollWidth-document.documentElement.clientWidth,
+    nota:!!document.querySelector('#app .notaCavallo')}));
+  ok(m.nota&&m.scroll<=1,'e sul telefono, nota compresa, niente scorre di lato',m.scroll+'px');
+  await pg.close();
+}
+
+// Una fattura su gennaio e marzo, senza febbraio: «01–03/2026» direbbe
+// che copre anche febbraio. I mesi si elencano.
+const SALTO=`
+  const S=window.__stores;
+  S.clients=[{id:'sol',name:'Solution',daily_rate:460,standard_hours:8,compensation_type:'daily_rate_8h',active:true}];
+  const h=(id,y,m,n,d,t)=>({id,client_id:'sol',year:y,month:m,status:'invoice_issued',invoice_number:n,invoice_date:d,invoice_total_amount:t});
+  S.billing_headers=[
+    h('n1',2026,1,'4/2026','2026-03-31',1000),h('n3',2026,3,'4/2026','2026-03-31',2000),
+    h('c5',2026,5,'5/2026','2026-06-30',1100),h('c6',2026,6,'5/2026','2026-06-30',1200),
+    h('s5',2026,4,'6/2026','2026-07-15',300),h('s6',2026,7,'6/2026','2026-07-15',400),h('s7',2026,9,'6/2026','2026-07-15',500)];
+`;
+console.log('\n=== MESI NON DI FILA: SI ELENCANO, NON SI SCRIVE UN INTERVALLO ===');
+{
+  const pg=await apri(1280,'issued',SALTO,[2026,9]);
+  const r=await righe(pg);
+  const per=n=>(r.find(x=>x.numero===n)||{}).periodo||'';
+  ok(/^01, 03\/2026/.test(per('4/2026')),'gennaio e marzo: «01, 03/2026», non «01–03/2026»',per('4/2026'));
+  ok(!/01–03/.test(per('4/2026')),'che direbbe che c’è anche febbraio');
+  ok(/^04, 07, 09\/2026/.test(per('6/2026'))&&/3 mesi/.test(per('6/2026')),'aprile, luglio e settembre: «04, 07, 09/2026», 3 mesi',per('6/2026'));
+  ok(/^05–06\/2026/.test(per('5/2026')),'maggio e giugno, di fila, restano un intervallo: «05–06/2026»',per('5/2026'));
   await pg.close();
 }
 
