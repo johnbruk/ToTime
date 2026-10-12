@@ -89,7 +89,7 @@ console.log('\n=== TOCCANDOLA SI APRE SUI MESI, CIASCUNO COL SUO IMPORTO ===');
   ok(Math.abs(eur(sotto[0].importo)+eur(sotto[1].importo)-eur(r[i].importo))<0.005,'che sommano al totale della fattura');
   // un mese porta al suo dettaglio, come prima
   await pg.evaluate(()=>[...document.querySelectorAll('#app .rowMese')][1].click());await pg.waitForTimeout(500);
-  const dove=await pg.evaluate(()=>({v:document.documentElement.getAttribute('data-view'),t:document.getElementById('app').innerText.replace(/\s+/g,' ').slice(0,200)}));
+  const dove=await pg.evaluate(()=>({v:document.documentElement.getAttribute('data-view'),t:(document.querySelector('#app .app')||document.getElementById('app')).innerText.replace(/\s+/g,' ')}));
   ok(dove.v==='billingDetail'&&/Marzo 2026/.test(dove.t),'e toccando marzo si apre il dettaglio di marzo',dove.v+' · '+(dove.t.match(/[A-Z][a-z]+ 2026/)||[''])[0]);
   await pg.evaluate(()=>window.back());await pg.waitForTimeout(500);
   const ancora=await righe(pg);
