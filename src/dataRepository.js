@@ -54,10 +54,10 @@ function isMissingTable(error) {
     msg.includes('could not find the table');
 }
 
-function orderedQuery(sb, table) {
+function orderedQuery(sb, table, opzioni) {
   if (table === 'invoice_documents')
-    return sb.from(table).select(INVOICE_DOCUMENT_LIST_COLUMNS).order('invoice_date', { ascending: false });
-  let query = sb.from(table).select('*');
+    return sb.from(table).select(INVOICE_DOCUMENT_LIST_COLUMNS, opzioni).order('invoice_date', { ascending: false });
+  let query = sb.from(table).select('*', opzioni);
 
   if (table === 'timesheet_entries') return query.order('entry_date', { ascending: false });
   if (table === 'travel_expenses') return query.order('expense_date', { ascending: false });
@@ -76,12 +76,53 @@ function orderedQuery(sb, table) {
   return query.order('created_at', { ascending: true });
 }
 
+// Supabase consegna al massimo 1000 righe per richiesta: e'
+// l'impostazione «Max rows» dell'API. Con una richiesta sola, oltre le
+// 1000 righe le altre non arrivavano e nessuno lo diceva: con i
+// consuntivi in ordine di data sparivano gli anni piu' vecchi, e i loro
+// totali risultavano sbagliati in silenzio.
+//
+// Si scarica a pagine finche' non arrivano tutte. Il database dice
+// quante sono (count), cosi' una tabella piccola resta una richiesta
+// sola, e un tetto piu' basso della pagina — «Max rows» abbassato — non
+// si scambia per la fine. L'ordine deve essere stabile, o fra una
+// pagina e l'altra righe con la stessa data si ripeterebbero o
+// salterebbero: l'id fa da spareggio.
+const PAGINA = 1000;
+const PAGINE_MASSIME = 500;
+
+async function tuttaLaTabella(sb, table) {
+  const righe = [];
+  let totale = null;
+  for (let giro = 0; giro < PAGINE_MASSIME; giro++) {
+    const { data, error, count } = await orderedQuery(sb, table, giro === 0 ? { count: 'exact' } : undefined)
+      .order('id', { ascending: true })
+      .range(righe.length, righe.length + PAGINA - 1);
+    if (error) throw error;
+    const pagina = data || [];
+    if (giro === 0 && typeof count === 'number') totale = count;
+    righe.push(...pagina);
+    if (!pagina.length) break;
+    if (totale !== null ? righe.length >= totale : pagina.length < PAGINA) break;
+  }
+  return righe;
+}
+
 function tableApi(sb, table) {
   return {
     async list() {
-      const { data, error } = await orderedQuery(sb, table);
-      if (error) throw error;
-      return data || [];
+      try {
+        return await tuttaLaTabella(sb, table);
+      } catch (paginaFallita) {
+        // Se le pagine non si possono chiedere — un client che non
+        // conosce range, una tabella che rifiuta l'ordinamento per id —
+        // si torna alla richiesta unica di prima: al peggio si vede
+        // quello che si vedeva, mai meno. Una tabella che non esiste
+        // fallisce anche qui, con l'errore di sempre.
+        const { data, error } = await orderedQuery(sb, table);
+        if (error) throw error;
+        return data || [];
+      }
     },
 
     async create(payload) {
