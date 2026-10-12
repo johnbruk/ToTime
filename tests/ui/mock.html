@@ -21,7 +21,7 @@ const STORES={
 };
 let seq=0;
 function makeChain(table){
-  let op='select',single=false,pl=null,inF=null,eqCol=null,eqVal=null;
+  let op='select',single=false,pl=null,inF=null,eqCol=null,eqVal=null,rng=null,conteggio=false;
   const rows=()=>(STORES[table]=STORES[table]||[]);
   const resolve=()=>{
     // Una tabella che il database non ha ancora: e' quello che vede chi
@@ -148,9 +148,25 @@ function makeChain(table){
       if(inF)STORES[table]=rows().filter(r=>!inF.vals.includes(r[inF.col]));
       else if(eqCol)STORES[table]=rows().filter(r=>String(r[eqCol])!==String(eqVal));
       return {data:null,error:null};}
-    return {data:single?(rows()[0]||null):rows().slice(),error:null};
+    if(single)return {data:rows()[0]||null,error:null};
+    // Il tetto del database vero: Supabase consegna al massimo «Max
+    // rows» righe per richiesta, 1000 se non lo si cambia. Senza il
+    // tetto qui, un'app che chiede una tabella tutta in una volta
+    // sembrava funzionare con qualunque numero di righe.
+    window.__richieste=window.__richieste||{};window.__richieste[table]=(window.__richieste[table]||0)+1;
+    // Una pagina che cade: la richiesta che comincia da «da» fallisce
+    // per «volte» volte, come una connessione che si interrompe a meta'.
+    const fp=window.__falliscePagina;
+    if(fp&&fp.table===table&&rng&&rng[0]===fp.da&&fp.volte>0){fp.volte--;return {data:null,error:{message:'Failed to fetch'}};}
+    const tutte=rows().slice(),tetto=window.__maxRighe||1000;
+    const pagina=(rng?tutte.slice(rng[0],rng[1]+1):tutte).slice(0,tetto);
+    // Un altro dispositivo che aggiunge una riga mentre si scarica:
+    // arriva dopo la prima pagina e sposta tutte le successive.
+    const ad=window.__aggiungeDopoPrimaPagina;
+    if(ad&&ad.table===table&&rng&&rng[0]===0&&!ad.fatto){ad.fatto=true;rows().unshift(ad.riga);if(ad.toglieUltima)rows().pop();}
+    return {data:pagina,error:null,count:conteggio&&!window.__senzaConteggio?tutte.length:null};
   };
-  const h={select(){if(op==='select')op='select';return proxy},order(){return proxy},eq(c,v){eqCol=c;eqVal=v;return proxy},in(c,v){inF={col:c,vals:v};return proxy},gte(){return proxy},lte(){return proxy},ilike(){return proxy},is(){return proxy},limit(){return proxy},insert(v){op='insert';pl=v;return proxy},update(v){op='update';pl=v;return proxy},delete(){op='delete';return proxy},single(){single=true;return proxy},maybeSingle(){single=true;return proxy}};
+  const h={select(c,o){if(o&&o.count)conteggio=true;return proxy},range(a,z){if(window.__senzaRange)throw new TypeError('range is not a function');rng=[a,z];return proxy},order(){return proxy},eq(c,v){eqCol=c;eqVal=v;return proxy},in(c,v){inF={col:c,vals:v};return proxy},gte(){return proxy},lte(){return proxy},ilike(){return proxy},is(){return proxy},limit(){return proxy},insert(v){op='insert';pl=v;return proxy},update(v){op='update';pl=v;return proxy},delete(){op='delete';return proxy},single(){single=true;return proxy},maybeSingle(){single=true;return proxy}};
   const proxy=new Proxy({},{get(t,k){if(k==='then'){const p=Promise.resolve(resolve());return p.then.bind(p);}return h[k]||(()=>proxy);}});
   return proxy;
 }

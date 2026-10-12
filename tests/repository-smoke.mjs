@@ -3,14 +3,24 @@ import assert from 'node:assert/strict';
 import { createRepository } from '../src/dataRepository.js';
 import { APP_DATA_KEYS } from '../src/appDataShape.js';
 
-function makeQuery(table, calls, errorTables = new Set(), errorObj = null) {
+// Il finto Supabase ha il tetto del vero: al massimo «tetto» righe per
+// richiesta, 1000 se non si dice altro. Le pagine si chiedono con range,
+// e con count:'exact' il database dice quante righe ci sono in tutto.
+function makeQuery(table, calls, errorTables = new Set(), errorObj = null, righe = {}, tetto = 1000) {
+  let rng = null, conteggio = false;
   const query = {
-    select(value) {
-      calls.push([table, 'select', value]);
+    select(value, options) {
+      calls.push([table, 'select', value, options]);
+      conteggio = !!(options && options.count);
       return this;
     },
     order(column, options) {
       calls.push([table, 'order', column, options]);
+      return this;
+    },
+    range(from, to) {
+      calls.push([table, 'range', from, to]);
+      rng = [from, to];
       return this;
     },
     async then(resolve) {
@@ -18,20 +28,22 @@ function makeQuery(table, calls, errorTables = new Set(), errorObj = null) {
         resolve({ data: null, error: errorObj || new Error(`${table} failed`) });
         return;
       }
-      resolve({ data: [{ id: `${table}-1` }], error: null });
+      const tutte = righe[table] || [{ id: `${table}-1` }];
+      const pagina = (rng ? tutte.slice(rng[0], rng[1] + 1) : tutte).slice(0, tetto);
+      resolve({ data: pagina, error: null, count: conteggio ? tutte.length : null });
     }
   };
   return query;
 }
 
-function makeSupabaseMock(errorTables = new Set(), errorObj = null) {
+function makeSupabaseMock(errorTables = new Set(), errorObj = null, righe = {}, tetto = 1000) {
   const calls = [];
   return {
     calls,
     sb: {
       from(table) {
         calls.push([table, 'from']);
-        return makeQuery(table, calls, errorTables, errorObj);
+        return makeQuery(table, calls, errorTables, errorObj, righe, tetto);
       }
     }
   };
@@ -70,6 +82,39 @@ assert.equal(failingResult.errors.length, 1);
 assert.equal(failingResult.errors[0].table, 'tax_payments');
 assert.deepEqual(failingResult.data.taxPayments, []);
 assert.deepEqual(failingResult.data.clients, [{ id: 'clients-1' }]);
+
+// Oltre le 1000 righe arrivano tutte: a pagine, in ordine stabile.
+const tante = Array.from({ length: 2345 }, (_, i) => ({ id: `t-${String(i).padStart(4, '0')}` }));
+const pagMock = makeSupabaseMock(new Set(), null, { timesheet_entries: tante });
+const tutte = await createRepository(pagMock.sb).timesheet.list();
+assert.equal(tutte.length, 2345, 'oltre le 1000 righe arrivano tutte');
+assert.equal(new Set(tutte.map(r => r.id)).size, 2345, 'senza doppioni');
+assert.deepEqual(pagMock.calls.filter(c => c[1] === 'range').map(c => [c[2], c[3]]),
+  [[0, 999], [1000, 1999], [2000, 2999]], 'in tre pagine da 1000');
+assert.ok(pagMock.calls.some(c => c[1] === 'order' && c[2] === 'entry_date'), 'nell\'ordine di sempre');
+assert.ok(pagMock.calls.some(c => c[1] === 'order' && c[2] === 'id'), 'con l\'id come spareggio');
+// con «Max rows» piu' basso della pagina non si scambia il tetto per la fine
+const basso = makeSupabaseMock(new Set(), null, { timesheet_entries: tante }, 400);
+assert.equal((await createRepository(basso.sb).timesheet.list()).length, 2345, 'anche col tetto a 400');
+// una pagina che cade sempre a meta': niente mezza tabella come se fosse
+// intera — l'errore arriva a chi carica, che lo dice
+const cade = makeSupabaseMock(new Set(), null, { timesheet_entries: tante });
+const fromOrig = cade.sb.from;
+cade.sb.from = table => {
+  const q = fromOrig(table);
+  const thenOrig = q.then.bind(q);
+  let da = 0;
+  const rangeOrig = q.range.bind(q);
+  q.range = (a, z) => { da = a; return rangeOrig(a, z); };
+  q.then = resolve => da >= 1000 ? resolve({ data: null, error: new Error('Failed to fetch') }) : thenOrig(resolve);
+  return q;
+};
+await assert.rejects(createRepository(cade.sb).timesheet.list(), /ricarica la pagina/,
+  'una pagina che cade sempre fa errore, non restituisce le prime 1000 righe');
+// e una tabella piccola resta una richiesta sola
+const piccola = makeSupabaseMock();
+await createRepository(piccola.sb).clients.list();
+assert.equal(piccola.calls.filter(c => c[0] === 'clients' && c[1] === 'from').length, 1, 'una tabella piccola, una richiesta');
 
 console.log('Repository smoke tests passed.');
 
