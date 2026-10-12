@@ -163,7 +163,7 @@ function makeChain(table){
     // Un altro dispositivo che aggiunge una riga mentre si scarica:
     // arriva dopo la prima pagina e sposta tutte le successive.
     const ad=window.__aggiungeDopoPrimaPagina;
-    if(ad&&ad.table===table&&rng&&rng[0]===0&&!ad.fatto){ad.fatto=true;rows().unshift(ad.riga);}
+    if(ad&&ad.table===table&&rng&&rng[0]===0&&!ad.fatto){ad.fatto=true;rows().unshift(ad.riga);if(ad.toglieUltima)rows().pop();}
     return {data:pagina,error:null,count:conteggio&&!window.__senzaConteggio?tutte.length:null};
   };
   const h={select(c,o){if(o&&o.count)conteggio=true;return proxy},range(a,z){if(window.__senzaRange)throw new TypeError('range is not a function');rng=[a,z];return proxy},order(){return proxy},eq(c,v){eqCol=c;eqVal=v;return proxy},in(c,v){inF={col:c,vals:v};return proxy},gte(){return proxy},lte(){return proxy},ilike(){return proxy},is(){return proxy},limit(){return proxy},insert(v){op='insert';pl=v;return proxy},update(v){op='update';pl=v;return proxy},delete(){op='delete';return proxy},single(){single=true;return proxy},maybeSingle(){single=true;return proxy}};

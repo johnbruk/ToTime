@@ -122,6 +122,15 @@ console.log('\n=== UN ALTRO DISPOSITIVO AGGIUNGE UNA RIGA MENTRE SI SCARICA ==='
   ok(!(await messaggio(pg)),'senza nessun messaggio di errore');
   await pg.close();
 }
+{
+  // e se nello stesso momento ne toglie un'altra il conteggio torna
+  // uguale: a tradire la lettura sbagliata e' solo la riga ripetuta
+  const nuova={id:'nuova',entry_date:'2026-09-30',client_id:'c1',project_id:null,activity_id:'a1',hours:8,daily_rate_snapshot:400,standard_hours_snapshot:8};
+  const pg=await apri({__aggiungeDopoPrimaPagina:{table:'timesheet_entries',riga:nuova,toglieUltima:true}});
+  const t=await totali(pg);
+  ok(t.join(',')===ATTESI.join(','),'una riga aggiunta e una tolta: il conteggio è uguale, ma il doppione si vede e si rilegge',t.join(' · '));
+  await pg.close();
+}
 
 console.log('\n=== SE LE PAGINE NON SI POSSONO CHIEDERE, SI TORNA A COM’ERA: MA SOLO SE CI STA ===');
 {
