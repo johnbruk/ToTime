@@ -1896,22 +1896,27 @@ function fmtK(n){n=Number(n)||0;const a=Math.abs(n);if(a>=1000)return (n/1000).t
 function margineMesi(year=currentYear()){
   const ts=currentTaxSetting(year);
   const coeff=Number(ts.profitability_coefficient||0)/100,gsRate=Number(ts.inps_gs_rate??26.07)/100,taxRate=Number(ts.substitute_tax_rate||0)/100;
-  const rivRate=(ts.inps_recharge_enabled??true)?Number(ts.inps_recharge_rate??4)/100:0;
   const md=annualMonthData(year),fuori=rimborsiFuoriReddito(),bo=bolloCalc(year);
   const mesi=md.map((m,i)=>({i,emesso:0,daFatturare:0,bolloAddebitato:0,
     costi:Number(m.costi||0),fuoriReddito:fuori?Number(m.rimborsiAnalitici||0):0,bollo:Number(bo.perMese[i]||0)}));
   // un cliente con la fattura del mese gia' emessa, o escluso, non ha
   // niente da fatturare in quel mese
-  const chiuso=new Set();
+  const chiuso=new Set(),scheda={};
   data.billingHeaders.filter(h=>Number(h.year)===Number(year)).forEach(h=>{
     const i=Number(h.month||1)-1;if(i<0||i>11)return;
+    scheda[h.client_id+'|'+i]=h;
     if(['invoice_issued','collected'].includes(h.status)){
       mesi[i].emesso+=Number(h.invoice_total_amount||h.total_amount||0);
       mesi[i].bolloAddebitato+=Number(h.stamp_duty_amount||0);
       chiuso.add(h.client_id+'|'+i);
     }else if(h.status==='excluded')chiuso.add(h.client_id+'|'+i);
   });
-  const daFatturare=(clientId,i,v)=>{if(!chiuso.has(clientId+'|'+i))mesi[i].daFatturare+=v*(1+rivRate)};
+  // La rivalsa come la calcola la pagina di fatturazione: quella salvata
+  // sulla scheda del mese, se c'e' — spenta per un cliente estero, o con
+  // un'aliquota sua — altrimenti quella della Configurazione fiscale.
+  const rivalsa=k=>{const h=scheda[k]||{};
+    return (h.inps_recharge_enabled??ts.inps_recharge_enabled??true)?Number(h.inps_recharge_rate??ts.inps_recharge_rate??4)/100:0};
+  const daFatturare=(clientId,i,v)=>{const k=clientId+'|'+i;if(!chiuso.has(k))mesi[i].daFatturare+=v*(1+rivalsa(k))};
   rowsForYear(year).forEach(e=>{if(!isPlanned(e))daFatturare(e.client_id,monthIndexFromDate(e.entry_date),dailyAmount(e))});
   monthlyRowsForYear(year).forEach(e=>daFatturare(e.client_id,Number(e.month||1)-1,Number(e.amount||0)));
   manualRowsForYear(year).forEach(e=>{if(!isPlanned(e))daFatturare(e.client_id,monthIndexFromDate(e.entry_date),Number(e.amount||0))});

@@ -184,6 +184,24 @@ console.log('\n=== SUL TELEFONO E AL BUIO ===');
   await pg.close();
 }
 
+console.log('\n=== LA RIVALSA È QUELLA SALVATA SULLA SCHEDA DEL MESE ===');
+{
+  // La pagina di fatturazione usa la rivalsa della scheda del mese, se
+  // e' salvata: spenta per un cliente estero, o con un'aliquota sua.
+  // Il riquadro usava sempre il 4% della Configurazione fiscale, e
+  // sbagliava il «da fatturare» e le tasse.
+  const scheda=(extra)=>SEMI+`S.billing_headers.push(Object.assign({id:'h10',client_id:'sol',year:2026,month:10,status:'to_invoice'},${JSON.stringify(extra)}));`;
+  for(const [extra,atteso,detto] of [
+    [{inps_recharge_enabled:false},'2.400,00 € da fatturare','con la rivalsa spenta: 2.300 + 100, senza 4%'],
+    [{inps_recharge_enabled:true,inps_recharge_rate:2},'2.448,00 € da fatturare','con la rivalsa al 2%: 2.400 + 48'],
+    [{},'2.496,00 € da fatturare','e senza niente di salvato, quella della Configurazione fiscale: 4%']]){
+    const pg=await apri(1280,scheda(extra));
+    const ott=riga(await righe(pg),10);
+    ok(ott.sotto===atteso,'ottobre '+detto,ott.sotto);
+    await pg.close();
+  }
+}
+
 // ─── Il Bilancio, con la stessa regola ───
 const leggiBilancio=pg=>pg.evaluate(()=>{
   const t=document.getElementById('app').innerText.replace(/\s+/g,' ');
