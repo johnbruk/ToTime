@@ -85,11 +85,21 @@ function orderedQuery(sb, table, opzioni) {
 // Si scarica a pagine finche' non arrivano tutte. Il database dice
 // quante sono (count), cosi' una tabella piccola resta una richiesta
 // sola, e un tetto piu' basso della pagina — «Max rows» abbassato — non
-// si scambia per la fine. L'ordine deve essere stabile, o fra una
-// pagina e l'altra righe con la stessa data si ripeterebbero o
-// salterebbero: l'id fa da spareggio.
+// si scambia per la fine; senza il conteggio si va avanti fino alla
+// prima pagina vuota. L'ordine deve essere stabile, o fra una pagina e
+// l'altra righe con la stessa data si ripeterebbero o salterebbero:
+// l'id fa da spareggio.
+//
+// E la regola di tutto il resto: una tabella che non torna non si
+// mostra come se fosse intera. Una pagina caduta a meta', righe che
+// non arrivano al conteggio, un id ripetuto — un altro dispositivo che
+// aggiunge o toglie righe mentre si scarica — sono una lettura
+// incompleta: si riprova una volta da capo, e se non torna ancora si
+// dice, invece di far fare i conti su mezza tabella.
 const PAGINA = 1000;
 const PAGINE_MASSIME = 500;
+
+class LetturaIncompleta extends Error {}
 
 async function tuttaLaTabella(sb, table) {
   const righe = [];
@@ -98,14 +108,21 @@ async function tuttaLaTabella(sb, table) {
     const { data, error, count } = await orderedQuery(sb, table, giro === 0 ? { count: 'exact' } : undefined)
       .order('id', { ascending: true })
       .range(righe.length, righe.length + PAGINA - 1);
-    if (error) throw error;
+    if (error) {
+      if (giro === 0) throw error;
+      throw new LetturaIncompleta(`lettura interrotta dopo ${righe.length} righe (${error.message || error}): ricarica la pagina`);
+    }
     const pagina = data || [];
     if (giro === 0 && typeof count === 'number') totale = count;
     righe.push(...pagina);
-    if (!pagina.length) break;
-    if (totale !== null ? righe.length >= totale : pagina.length < PAGINA) break;
+    if (!pagina.length || (totale !== null && righe.length >= totale)) {
+      const doppioni = righe.length - new Set(righe.map(r => r.id)).size;
+      if ((totale !== null && righe.length !== totale) || doppioni)
+        throw new LetturaIncompleta(`lette ${righe.length} righe su ${totale ?? righe.length - doppioni}: i dati cambiavano durante il caricamento, ricarica la pagina`);
+      return righe;
+    }
   }
-  return righe;
+  throw new LetturaIncompleta(`più di ${PAGINE_MASSIME} pagine: la tabella non si è potuta leggere tutta, ricarica la pagina`);
 }
 
 function tableApi(sb, table) {
@@ -113,15 +130,22 @@ function tableApi(sb, table) {
     async list() {
       try {
         return await tuttaLaTabella(sb, table);
-      } catch (paginaFallita) {
-        // Se le pagine non si possono chiedere — un client che non
-        // conosce range, una tabella che rifiuta l'ordinamento per id —
-        // si torna alla richiesta unica di prima: al peggio si vede
-        // quello che si vedeva, mai meno. Una tabella che non esiste
-        // fallisce anche qui, con l'errore di sempre.
+      } catch (primo) {
+        // Una lettura che non torna si riprova una volta da capo; se non
+        // torna ancora, l'errore arriva a chi carica, che lo dice.
+        if (primo instanceof LetturaIncompleta) return await tuttaLaTabella(sb, table);
+        // La prima richiesta e' fallita: forse le pagine non si possono
+        // chiedere — un client che non conosce range, una tabella che
+        // rifiuta l'ordinamento per id. Si torna alla richiesta unica di
+        // prima, ma solo finche' la tabella ci sta: una risposta piena e'
+        // probabilmente tagliata, e allora meglio l'errore. Una tabella
+        // che non esiste fallisce anche qui, con l'errore di sempre.
         const { data, error } = await orderedQuery(sb, table);
         if (error) throw error;
-        return data || [];
+        const rows = data || [];
+        if (rows.length >= PAGINA)
+          throw new LetturaIncompleta(`almeno ${PAGINA} righe e le pagine non si possono chiedere (${primo && primo.message || primo}): ricarica la pagina`);
+        return rows;
       }
     },
 

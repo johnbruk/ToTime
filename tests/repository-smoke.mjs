@@ -96,6 +96,21 @@ assert.ok(pagMock.calls.some(c => c[1] === 'order' && c[2] === 'id'), 'con l\'id
 // con «Max rows» piu' basso della pagina non si scambia il tetto per la fine
 const basso = makeSupabaseMock(new Set(), null, { timesheet_entries: tante }, 400);
 assert.equal((await createRepository(basso.sb).timesheet.list()).length, 2345, 'anche col tetto a 400');
+// una pagina che cade sempre a meta': niente mezza tabella come se fosse
+// intera — l'errore arriva a chi carica, che lo dice
+const cade = makeSupabaseMock(new Set(), null, { timesheet_entries: tante });
+const fromOrig = cade.sb.from;
+cade.sb.from = table => {
+  const q = fromOrig(table);
+  const thenOrig = q.then.bind(q);
+  let da = 0;
+  const rangeOrig = q.range.bind(q);
+  q.range = (a, z) => { da = a; return rangeOrig(a, z); };
+  q.then = resolve => da >= 1000 ? resolve({ data: null, error: new Error('Failed to fetch') }) : thenOrig(resolve);
+  return q;
+};
+await assert.rejects(createRepository(cade.sb).timesheet.list(), /ricarica la pagina/,
+  'una pagina che cade sempre fa errore, non restituisce le prime 1000 righe');
 // e una tabella piccola resta una richiesta sola
 const piccola = makeSupabaseMock();
 await createRepository(piccola.sb).clients.list();

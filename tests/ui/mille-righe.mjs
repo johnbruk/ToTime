@@ -75,24 +75,80 @@ console.log('\n=== ANCHE SE IL TETTO DEL DATABASE È PIÙ BASSO DELLA PAGINA ===
 }
 
 console.log('\n=== ANCHE SE IL DATABASE NON DICE QUANTE SONO ===');
-{
-  const pg=await apri({__senzaConteggio:true});
+for(const tetto of [1000,400]){
+  // senza conteggio una pagina corta non vuol dire «finite»: puo' essere
+  // il tetto. Si va avanti fino alla prima pagina vuota.
+  const pg=await apri({__senzaConteggio:true,__maxRighe:tetto});
   const t=await totali(pg);
-  ok(t.join(',')===ATTESI.join(','),'senza il conteggio si va avanti finché una pagina non è piena',t.join(' · '));
+  ok(t.join(',')===ATTESI.join(','),`senza conteggio e col tetto a ${tetto} arrivano tutte`,t.join(' · '));
   await pg.close();
 }
 
-console.log('\n=== SE LE PAGINE NON SI POSSONO CHIEDERE, SI TORNA A COM’ERA ===');
+// Quello che l'utente vede quando qualcosa non torna: il messaggio di
+// errore del caricamento, non dei totali fatti su mezza tabella.
+const messaggio=pg=>pg.evaluate(()=>(document.querySelector('#app .toast')?.innerText||'').replace(/\s+/g,' ').trim());
+
+console.log('\n=== UNA PAGINA CHE CADE A METÀ ===');
 {
-  // un client che non conosce range, o una tabella che rifiuta
-  // l'ordinamento per id: l'app non si deve rompere, e mostra al
-  // peggio quello che mostrava prima
-  const pg=await apri({__senzaRange:true});
+  // la seconda pagina dei consuntivi fallisce una volta: si riprova da
+  // capo, e i totali sono quelli veri
+  const pg=await apri({__falliscePagina:{table:'timesheet_entries',da:1000,volte:1}});
   const t=await totali(pg);
-  ok(t[0]===ATTESI[0],'l’app parte e il 2024 c’è, come prima',String(t[0]));
+  ok(t.join(',')===ATTESI.join(','),'una pagina caduta una volta: si riprova e arrivano tutte',t.join(' · '));
+  ok(!(await messaggio(pg)),'senza nessun messaggio di errore');
+  await pg.close();
+}
+{
+  // fallisce sempre: niente totali fatti sulle prime 1000 righe come se
+  // fossero tutte. Si dice.
+  const pg=await apri({__falliscePagina:{table:'timesheet_entries',da:1000,volte:9}});
+  const t=await totali(pg);
+  ok(t[0]!==ATTESI[0]||t[1]!==80000,'una pagina che cade sempre non lascia i totali sulle prime 1000 righe',t.join(' · '));
+  const m=await messaggio(pg);
+  ok(/Errore caricamento timesheet_entries.*ricarica la pagina/.test(m),'e l’app lo dice',m||'nessun messaggio');
+  ok(pg.errs.length===0,'senza errori JS',pg.errs.slice(0,2).join(' | ')||'nessuno');
+  await pg.close();
+}
+
+console.log('\n=== UN ALTRO DISPOSITIVO AGGIUNGE UNA RIGA MENTRE SI SCARICA ===');
+{
+  // la riga nuova arriva dopo la prima pagina e sposta le altre: una
+  // si ripeterebbe e la piu' vecchia salterebbe. Si vede dal doppione,
+  // si riprova da capo, e la seconda lettura e' quella giusta
+  const nuova={id:'nuova',entry_date:'2026-09-30',client_id:'c1',project_id:null,activity_id:'a1',hours:8,daily_rate_snapshot:400,standard_hours_snapshot:8};
+  const pg=await apri({__aggiungeDopoPrimaPagina:{table:'timesheet_entries',riga:nuova}});
+  const t=await totali(pg);
+  ok(t.join(',')===[320000,320000,298400].join(','),'nessuna riga ripetuta né saltata, e c’è anche quella nuova',t.join(' · '));
+  ok(!(await messaggio(pg)),'senza nessun messaggio di errore');
+  await pg.close();
+}
+
+console.log('\n=== SE LE PAGINE NON SI POSSONO CHIEDERE, SI TORNA A COM’ERA: MA SOLO SE CI STA ===');
+{
+  // un client che non conosce range: le tabelle piccole si leggono con
+  // la richiesta unica di prima, come prima
+  const pg=await apri({__senzaRange:true});
+  const clienti=await pg.evaluate(()=>window.__stores.clients.length);
+  const sta=await pg.evaluate(()=>typeof window.clientName==='function'?window.clientName('c1'):'');
+  ok(sta==='Cliente','le tabelle piccole si leggono lo stesso',sta);
+  // la tabella grande no: una risposta piena e' tagliata, e lo si dice
+  const m=await messaggio(pg);
+  ok(/Errore caricamento timesheet_entries.*ricarica la pagina/.test(m),'quella da 2.345 righe non si mostra tagliata a 1000: si dice',m||'nessun messaggio');
+  const t=await totali(pg);
+  ok(t[1]!==80000,'e il 2025 non risulta 80.000',t.join(' · '));
   ok(pg.errs.length===0,'senza errori JS',pg.errs.slice(0,2).join(' | ')||'nessuno');
   const h=await pg.evaluate(()=>document.getElementById('app').innerText.length);
   ok(h>50,'e la pagina si disegna',String(h));
+  await pg.close();
+}
+
+console.log('\n=== TROPPE PAGINE: SI DICE, NON SI TAGLIA ===');
+{
+  // con un tetto di 2 righe servirebbero 1.173 pagine, oltre il limite
+  // di 500: la tabella non si mostra a metà
+  const pg=await apri({__maxRighe:2});
+  const m=await messaggio(pg);
+  ok(/Errore caricamento timesheet_entries.*500 pagine/.test(m),'oltre le 500 pagine l’app lo dice',m||'nessun messaggio');
   await pg.close();
 }
 
