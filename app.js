@@ -1962,7 +1962,59 @@ function rigaFattura(h,importo){
     <div class="fatCli"><div class="title">${esc(clientName(h.client_id))}</div>
       <div class="desc"><span class="tag ${statusClass(h.status)}">${statusLabel(h.status)}</span></div>
       ${h.status==='collected'?'':`<button type="button" class="miniBtn danger fatDel" onclick="event.stopPropagation();eliminaFattura('${h.id}')">Elimina fattura</button>`}</div>
-    <div class="value">${fmtEUR(importo)}</div></div>`;
+    <div class="value">${eurMigliaia(importo)}</div></div>`;
+}
+// Le fatture si elencano per FATTURA, non per scheda. Una fattura su
+// piu' mesi sta su piu' schede — una per mese, stesso numero e stessa
+// data — e l'elenco ne mostrava una riga per mese: il totale della
+// fattura non si vedeva da nessuna parte. Adesso e' una riga sola, col
+// totale e i mesi che copre; toccandola si apre, e sotto ci sono i mesi
+// col loro importo, ognuno col suo dettaglio.
+// Le schede si riconoscono come la stessa fattura con la regola del
+// bollo e dell'eliminazione: cliente, numero e data.
+function gruppiFatture(rows){
+  const m=new Map();
+  rows.forEach(h=>{
+    const n=chiaveNumero(h.invoice_number);
+    const k=n&&h.invoice_date?h.client_id+'|'+n+'|'+h.invoice_date:'scheda|'+h.id;
+    if(!m.has(k))m.set(k,[]);
+    m.get(k).push(h);
+  });
+  return [...m.values()].map(g=>g.sort((a,b)=>(a.year-b.year)||(a.month-b.month)));
+}
+function apriChiudiFattura(id){
+  state.fattureAperte=state.fattureAperte||{};
+  state.fattureAperte[id]=!state.fattureAperte[id];
+  render();
+}
+function rigaGruppoFatture(schede,amountOf){
+  const h=schede[0],ultima=schede[schede.length-1];
+  const aperto=!!(state.fattureAperte&&state.fattureAperte[h.id]);
+  const n=numeroFattura(h);
+  const mm=x=>String(x.month).padStart(2,'0');
+  const mesi=h.year===ultima.year?`${mm(h)}–${mm(ultima)}/${h.year}`:`${mm(h)}/${h.year}–${mm(ultima)}/${ultima.year}`;
+  const stati=[...new Set(schede.map(x=>x.status))];
+  const stato=stati.length===1
+    ?`<span class="tag ${statusClass(stati[0])}">${statusLabel(stati[0])}</span>`
+    :`<span class="tag orange">In parte incassata</span>`;
+  // Una fattura con un mese incassato non si elimina da qui, come una
+  // incassata sola: prima quel mese si riporta a «Da fatturare».
+  const incassata=schede.some(x=>x.status==='collected');
+  const totale=schede.reduce((a,x)=>a+amountOf(x),0);
+  const sotto=aperto?schede.map(x=>`<div class="row rowFattura rowMese" onclick="openInvoiceDetail('${x.client_id}',${x.year},${x.month})">
+    <div class="fatNum"><span class="fatRamo" aria-hidden="true">↳</span></div>
+    <div class="fatMese"><span class="fatEtic">Mese</span>${mm(x)}/${x.year}</div>
+    <div class="fatData"></div>
+    <div class="fatCli"><div class="desc"><span class="tag ${statusClass(x.status)}">${statusLabel(x.status)}</span></div></div>
+    <div class="value">${eurMigliaia(amountOf(x))}</div></div>`).join(''):'';
+  return `<div class="row rowFattura rowGruppo${aperto?' aperto':''}" role="button" aria-expanded="${aperto}" data-mesi="${schede.map(x=>x.year+'-'+mm(x)).join(',')}" onclick="apriChiudiFattura('${h.id}')">
+    <div class="fatNum">${n?esc(n):'<span class="fatVuoto">senza numero</span>'}</div>
+    <div class="fatMese"><span class="fatEtic">Mesi</span>${mesi}<span class="fatQuanti">${schede.length} mesi ${aperto?'▾':'▸'}</span></div>
+    <div class="fatData"><span class="fatEtic">Data</span>${h.invoice_date?dateIT(h.invoice_date)+'/'+String(h.invoice_date).slice(0,4):'<span class="fatVuoto">—</span>'}</div>
+    <div class="fatCli"><div class="title">${esc(clientName(h.client_id))}</div>
+      <div class="desc">${stato}</div>
+      ${incassata?'':`<button type="button" class="miniBtn danger fatDel" onclick="event.stopPropagation();eliminaFattura('${h.id}')">Elimina fattura</button>`}</div>
+    <div class="value">${eurMigliaia(totale)}</div></div>${sotto}`;
 }
 // Cancellare una fattura non si poteva: l'app sapeva crearla e
 // modificarla, e basta. Un numero sbagliato o una fattura nata per
@@ -2018,7 +2070,7 @@ async function eliminaFattura(id){
   await reload();
   setMsg('Fattura '+nome+' eliminata: '+(piu?'i mesi tornano':'il mese torna')+' da fatturare.',6000);
 }
-function annualInvoices(modeArg){const year=currentYear();const mode=modeArg||(state.edit==='collected'?'collected':'issued');let rows=data.billingHeaders.filter(h=>Number(h.year)===Number(year)&&['invoice_issued','collected'].includes(h.status));if(mode==='collected')rows=rows.filter(h=>h.status==='collected');rows=rows.sort((a,b)=>(Number(b.month)-Number(a.month))||clientName(a.client_id).localeCompare(clientName(b.client_id)));const title=mode==='collected'?`Incassi ${year}`:`Fatture emesse ${year}`;const amountOf=h=>mode==='collected'?Number(h.collected_amount||h.invoice_total_amount||h.total_amount||0):Number(h.invoice_total_amount||h.total_amount||0);const total=rows.reduce((s,h)=>s+amountOf(h),0);return appShell(`<h1>${title}</h1><p class="sub">Tocca una voce per aprire il dettaglio della fattura.</p><div class="card"><b>Totale ${mode==='collected'?'incassato':'fatturato'} ${year}</b><div class="amount" style="margin-top:8px">${fmtEUR(total)}</div></div>${rows.length?intestazioneFatture():''}<div class="list">${rows.map(h=>rigaFattura(h,amountOf(h))).join('')||`<div class="empty">${mode==='collected'?'Nessun incasso registrato':'Nessuna fattura emessa'} nel ${year}.</div>`}</div>`)}
+function annualInvoices(modeArg){const year=currentYear();const mode=modeArg||(state.edit==='collected'?'collected':'issued');let rows=data.billingHeaders.filter(h=>Number(h.year)===Number(year)&&['invoice_issued','collected'].includes(h.status));if(mode==='collected')rows=rows.filter(h=>h.status==='collected');const gruppi=gruppiFatture(rows).sort((A,B)=>{const a=A[A.length-1],b=B[B.length-1];return (Number(b.month)-Number(a.month))||clientName(a.client_id).localeCompare(clientName(b.client_id))});const title=mode==='collected'?`Incassi ${year}`:`Fatture emesse ${year}`;const amountOf=h=>mode==='collected'?Number(h.collected_amount||h.invoice_total_amount||h.total_amount||0):Number(h.invoice_total_amount||h.total_amount||0);const total=rows.reduce((s,h)=>s+amountOf(h),0);return appShell(`<h1>${title}</h1><p class="sub">Tocca una voce per aprire il dettaglio della fattura.</p><div class="card"><b>Totale ${mode==='collected'?'incassato':'fatturato'} ${year}</b><div class="amount" style="margin-top:8px">${eurMigliaia(total)}</div></div>${rows.length?intestazioneFatture():''}<div class="list">${gruppi.map(g=>g.length>1?rigaGruppoFatture(g,amountOf):rigaFattura(g[0],amountOf(g[0]))).join('')||`<div class="empty">${mode==='collected'?'Nessun incasso registrato':'Nessuna fattura emessa'} nel ${year}.</div>`}</div>`)}
 // ─── Il riquadro del mese, in dashboard ─────────────────────
 //
 // Prima erano tre colonne di giorni con lo stesso peso —
@@ -6936,7 +6988,7 @@ Object.assign(window,{
   scomposizioneRimborsi,
   forecastCalc,
   leggiFatturaXML,confrontaFattura,clientePerPiva,giorniConsuntivati,
-  fatturaCarica,fatturaFileScelto,registraFattura,scaricaFatturaConservata,
+  fatturaCarica,fatturaFileScelto,registraFattura,scaricaFatturaConservata,apriChiudiFattura,
   annualTaxCalc,
   cambiaClientePolicy,
   savePolicy,

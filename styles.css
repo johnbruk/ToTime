@@ -215,6 +215,24 @@ button,input,select,textarea{font-family:var(--font-body)} button{cursor:pointer
 .fatMese,.fatData{color:var(--soft);font-size:13.5px;font-weight:600;font-variant-numeric:tabular-nums}
 .rowFattura .value{text-align:left;font-size:16px;font-weight:750}
 .fatDel{margin-top:9px}
+/* Una fattura su piu' mesi: una riga col totale, che si apre sui mesi.
+   I mesi stanno sotto, rientrati e su fondo appena piu' scuro, cosi' si
+   vede che sono parti della riga sopra e non fatture a se'. */
+.rowGruppo{cursor:pointer}
+.fatQuanti{display:block;margin-top:2px;color:var(--muted);font-size:var(--t-xs);font-weight:var(--w-bold)}
+.rowGruppo.aperto{background:rgba(124,137,166,.06)}
+.row.rowMese{background:rgba(124,137,166,.06)}
+.rowMese .fatRamo{color:var(--muted);font-family:var(--font-body);font-weight:var(--w-med)}
+.rowMese .value{font-weight:var(--w-med)}
+/* Sul telefono un mese della fattura sta su una riga sola: freccia,
+   mese, stato, importo. Impilato come le fatture, ogni mese era alto
+   quanto una fattura intera. */
+@media(max-width:719px){
+  .row.rowMese{grid-template-columns:auto 1fr auto auto;gap:4px 10px;align-items:center;padding-top:10px;padding-bottom:10px}
+  .rowMese .fatData,.rowMese .fatEtic{display:none}
+  .rowMese .fatCli .tag{margin-top:0}
+  .rowMese .value{text-align:right}
+}
 /* I campi nell'ordine in cui il modulo di Fiscozen li chiede: si
    trascrivono uno a uno, quindi portano gli stessi nomi. */
 .fzCampi{display:grid;gap:var(--sp-2);margin-top:var(--sp-2)}
