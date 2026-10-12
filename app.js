@@ -610,9 +610,9 @@ function meseDaDescrizione(d){
   let x;
   while((x=re.exec(t))){
     const i=monthNames.findIndex(n=>n.toLowerCase()===x[1].toLowerCase());
-    const prima=t.slice(Math.max(0,x.index-4),x.index);
+    const prima=t.slice(Math.max(0,x.index-6),x.index);
     const dopo=t.slice(x.index+x[1].length).match(/^\s*(20\d{2})\b/);
-    nomi.push({i,anno:dopo?dopo[1]:null,conGiorno:/\b\d{1,2}\s+$/.test(prima)});
+    nomi.push({i,anno:dopo?dopo[1]:null,conGiorno:/\b\d{1,2}\s*[°º]?\s+$/.test(prima)});
   }
   const pieno=nomi.find(n=>n.anno&&!n.conGiorno);
   if(pieno)return pieno.anno+'-'+mm(pieno.i);
@@ -1068,15 +1068,21 @@ function confrontaFattura(f){
   //        cliente — o con le spese di un mese, sommate — e il mese letto
   //        dal testo non ne ha nessuna, vale il mese della spesa. E lo si
   //        dice: e' una correzione, non deve passare in silenzio.
+  // Lo si sposta solo verso un mese che la fattura gia' copre col
+  //        lavoro: un rimborso si fattura insieme al lavoro del suo
+  //        mese. Col solo importo, una spesa vecchia di un altro mese
+  //        con la stessa cifra poteva trascinarsi la riga.
+  const pareRimborso=r=>/rimbors|\bspes[ae]\b|trasfert|\bkm\b|chilometr/i.test(r.descrizione||'');
+  const mesiLavoro=new Set(f.righe.filter(r=>r.mese&&!pareRimborso(r)).map(r=>r.mese));
   if(cliente)f.righe.forEach(r=>{
-    if(!/rimbors|\bspes[ae]\b|trasfert|\bkm\b|chilometr/i.test(r.descrizione||''))return;
+    if(!pareRimborso(r))return;
     const sue=(data.travelExpenses||[]).filter(e=>e.client_id===cliente.id&&expIsInvoice(e));
     const meseDi=e=>String(e.expense_date||'').slice(0,7);
     const perMeseSpese={};
     sue.forEach(e=>{perMeseSpese[meseDi(e)]=(perMeseSpese[meseDi(e)]||0)+Number(e.amount||0)});
     const combacia=m=>sue.some(e=>meseDi(e)===m&&vicini(e.amount,r.importo))||vicini(perMeseSpese[m],r.importo);
     if(r.mese&&combacia(r.mese))return;
-    const candidati=Object.keys(perMeseSpese).filter(combacia);
+    const candidati=Object.keys(perMeseSpese).filter(m=>mesiLavoro.has(m)&&combacia(m));
     if(candidati.length!==1)return;
     const letto=r.mese;
     r.mese=candidati[0];
@@ -2051,13 +2057,17 @@ function homeMeseCard(t){
     {k:'f',nome:'Consuntivato',gg:t.days,v:fatto},
     {k:'p',nome:'Pianificato',gg:t.plannedDays,v:pian},
     {k:'r',nome:'Rimborsi spese',v:rimb}].filter(x=>x.k==='f'||x.v>0);
-  const pct=v=>tot>0?Math.max(0,v)/tot*100:0;
+  // La barra si misura sulle parti che si disegnano: un compenso
+  // negativo — una rettifica — col totale netto come denominatore
+  // allargava gli altri pezzi oltre la barra.
+  const positivi=voci.reduce((a,x)=>a+Math.max(0,x.v),0);
+  const pct=v=>positivi>0?Math.max(0,v)/positivi*100:0;
   const clienti=previstoPerCliente();
   return `<div class="card cardLink meseCard" onclick="go('timesheet')" role="button" title="Apri il timesheet di ${monthLabel(state.month)}">
 <div class="meseTesta"><b>Consuntivo · ${monthLabel(state.month)}</b><span class="cardLinkArrow">›</span></div>
 <div class="meseGrande">${eurMigliaia(fatto)}</div>
 <div class="meseSotto">consuntivato: ${fmtNum(t.days,2)} giorni · ${fmtNum(t.hours,1)} h</div>
-${tot>0?`<div class="meseBarra" aria-hidden="true">${voci.filter(x=>x.v>0).map(x=>`<i class="${x.k}" style="width:${pct(x.v).toFixed(2)}%"></i>`).join('')}</div>`:''}
+${positivi>0?`<div class="meseBarra" aria-hidden="true">${voci.filter(x=>x.v>0).map(x=>`<i class="${x.k}" style="width:${pct(x.v).toFixed(2)}%"></i>`).join('')}</div>`:''}
 <div class="meseLegenda">${voci.map(x=>`<div class="voce ${x.k}"><s></s><span>${x.nome}${x.gg!==undefined?` <b>${fmtNum(x.gg,2)} gg</b>`:''} · ${eurMigliaia(x.v)}</span></div>`).join('')}</div>
 <div class="rigaPrevisto mesePrevisto"><span>Previsto del mese</span><b>${fmtNum(t.days+t.plannedDays,2)} gg · ${eurMigliaia(tot)}</b></div>
 ${clienti.length?`<div class="meseClienti">${clienti.map(c=>`<div><span>${esc(c.client_id?clientName(c.client_id):'Senza cliente')}</span><span>${eurMigliaia(c.totale)}</span></div>`).join('')}</div>`:''}

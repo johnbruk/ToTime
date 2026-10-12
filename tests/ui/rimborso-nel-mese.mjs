@@ -87,12 +87,14 @@ console.log('\n=== IL MESE DI UNA RIGA: QUELLO DI COMPETENZA, NON UNA DATA CITAT
      'Rimborso KM · 30/06/2026 · Riferimento : Trasferta 23 Aprile 2026',
      'Consulenza - Giugno 2026 · rif. ordine del 23 Aprile 2026',
      'Consulenza - Luglio 2026 (recupero Marzo 2026)',
-     'Trasferta del 23 aprile 2026']);
+     'Trasferta del 23 aprile 2026',
+     'Rimborso KM · 30/06/2026 · Trasferta 1° Aprile 2026']);
   ok(mesi[0]==='2026-03','«Consulenza - Marzo 2026» resta marzo',mesi[0]);
   ok(mesi[1]==='2026-06','«30/06/2026 · Trasferta 23 Aprile 2026» è giugno: la data citata non comanda',mesi[1]);
   ok(mesi[2]==='2026-06','«Giugno 2026 · ordine del 23 Aprile 2026» è giugno',mesi[2]);
   ok(mesi[3]==='2026-07','con due mesi vale il primo nel testo, non il primo del calendario',mesi[3]);
   ok(mesi[4]==='2026-04','una data sola in lettere resta quella',mesi[4]);
+  ok(mesi[5]==='2026-06','«1° Aprile 2026» è una data citata anche con l’ordinale',mesi[5]);
   await pg.close();
 }
 
@@ -136,6 +138,19 @@ console.log('\n=== SENZA DATA IN CIFRE, IL MESE LO DICE LA SPESA ===');
   await carica(pg,fattura(SENZA_DATA));
   const t=await testo(pg);
   ok(!/Rimborso spese attribuito/.test(t),'senza una spesa che combaci, nessuna attribuzione inventata');
+  await pg.close();
+}
+
+console.log('\n=== UNA SPESA LONTANA NON SI TRASCINA LA RIGA ===');
+{
+  // La stessa cifra in un mese che la fattura non copre — una vecchia
+  // spesa da 160 € di gennaio — non basta: un rimborso si fattura col
+  // lavoro del suo mese.
+  const pg=await apri(`S.travel_expenses=[{id:'old',expense_date:'2026-01-15',client_id:'sol',amount:160,expense_type:'invoice',reimbursable:true}];`);
+  await carica(pg,fattura(SENZA_DATA));
+  const t=await testo(pg);
+  ok(!/Rimborso spese attribuito a Gennaio 2026/.test(t),'la riga non va a gennaio, che la fattura non copre',
+     (t.match(/Rimborso spese attribuito[^»]{0,40}/)||[''])[0]||'nessuna attribuzione');
   await pg.close();
 }
 

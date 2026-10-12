@@ -158,6 +158,18 @@ console.log('\n=== QUELLO CHE NON C’È NON SI MOSTRA ===');
   await vuoto.close();
 }
 
+console.log('\n=== UNA RETTIFICA NEGATIVA NON DEFORMA LA BARRA ===');
+{
+  // Un compenso del mese puo' essere negativo: una rettifica. La barra
+  // si misura sulle parti positive, e i pezzi non escono dalla barra.
+  const pg=await apri(`S.monthly_compensations=[{id:'neg',client_id:'b',year:${MESE.slice(0,4)},month:${Number(MESE.slice(5,7))},amount:-2000}];`);
+  const r=await leggi(pg);
+  const somma=r.barra.reduce((a,x)=>a+x.w,0);
+  ok(Math.abs(somma-100)<0.05,'i pezzi della barra fanno 100%, non di più',r.barra.map(x=>x.k+' '+x.w.toFixed(1)+'%').join(' · '));
+  ok(!r.barra.some(x=>x.k==='f'),'e il consuntivato negativo non ha un pezzo',r.barra.map(x=>x.k).join(','));
+  await pg.close();
+}
+
 console.log('\n=== SUL TELEFONO SI LEGGE ===');
 {
   const pg=await apri('',390);
