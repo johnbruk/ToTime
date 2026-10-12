@@ -480,16 +480,25 @@ const MENU=[
     {v:'tmManage',l:'Incarichi continuativi'},
     {v:'pivot',l:'Analisi consuntivi'}]},
   {main:'expenses',ic:'▦',l:'Spese',sub:[{v:'expenseForm',l:'Nuova spesa'},{v:'tripNew',l:'Nuova trasferta'}]},
-  // «Per commessa» e «Report analitico WBS» non stanno piu' qui: si
-  // aprono dalla commessa a cui si riferiscono, che e' il posto dove
-  // uno le cerca. Il menu non e' un elenco di tutto quello che esiste.
-  // Il report economico non sta a menu: si apre dalla fatturazione, in
-  // fondo, dove i suoi numeri hanno il contesto da cui vengono.
+  // «Report analitico WBS» non sta piu' qui: si apre dalla commessa a
+  // cui si riferisce, che e' il posto dove uno lo cerca. «Per commessa»
+  // invece sta sotto Fatturazione, con le altre pagine della
+  // fatturazione.
   // Il mese e l'anno sono due pagine, non due linguette della stessa:
   // ognuna col suo selettore, e dal menu si va diritti a quella che serve.
+  // E sotto Fatturazione stanno tutte le pagine della fatturazione:
+  // prima fatture emesse, incassi, report e il resto si raggiungevano
+  // solo dai pulsanti dentro le pagine, e chi non sapeva dove cercarli
+  // non li trovava.
   {main:'billing',ic:'€',l:'Fatturazione',sub:[
     {v:'billing',l:'Il mese'},
-    {v:'billingAnno',l:'L’anno'}]},
+    {v:'billingAnno',l:'L’anno'},
+    {v:'annualInvoices',l:'Fatture emesse',edit:'issued'},
+    {v:'annualInvoices',l:'Incassi',edit:'collected'},
+    {v:'fatturatoDetail',l:'Da fatturare'},
+    {v:'fatturazioneCommessa',l:'Per commessa'},
+    {v:'reportEconomico',l:'Report economico'},
+    {v:'fatturaCarica',l:'Carica fattura emessa'}]},
   {v:'balance',ic:'∑',l:'Bilancio'},
   {main:'tax',ic:'%',l:'Tassazione',sub:[
     {v:'tasseFuture',l:'Tasse future'},
@@ -513,7 +522,7 @@ const MENU=[
 const NAV_CHILDREN={
   timesheet:['timesheet','calendario','giorno','griglia','pivot','reportWbs','tmManage','tmForm','importaConsuntivi','dailyForm','dailyEdit','monthlyForm','monthlyEdit','manualForm','manualEdit','annualMonths'],
   expenses:['expenses','expenseForm','expenseEdit','tripNew','tripEdit'],
-  billing:['billing','billingAnno','billingDetail','annualInvoices','fatturatoDetail','fatturazioneCommessa','reportEconomico'],
+  billing:['billing','billingAnno','billingDetail','annualInvoices','fatturaCarica','fatturatoDetail','fatturazioneCommessa','reportEconomico'],
   tax:['tax','tasseFuture','taxPayments','taxPaymentEdit','taxSettings'],
   settings:['settings','clients','clientEdit','clientDetail','engagements','engagementDetail','engagementNew','engagementEdit','projects','projectEdit','projectDetail','projectNew','wbsEdit','activities','activityEdit','expenseCategories','expenseCategoryEdit','invoiceTemplates','invoiceTemplateEdit','appearance','account','exportTimesheet']
 };
@@ -526,7 +535,7 @@ function navMenu(){const cur=state.gruppoAperto||navSectionLabel(state.view);ret
   if(!m.sub)return `<button class="${cur===m.l?'active':''}" onclick="go('${m.v}')"><span>${m.ic}</span><b>${m.l}</b></button>`;
   const open=cur===m.l;
   const parent=`<button class="navParentBtn ${open?'active':''}" onclick="apriGruppo('${m.main}')"><span>${m.ic}</span><b>${m.l}</b><i class="navChev">${open?'▾':'▸'}</i></button>`;
-  const subs=open?`<div class="navSubList">${m.sub.map(s=>`<button class="navSubItem ${state.view===s.v?'active':''}" onclick="${s.edit?`goNav('${s.v}','${s.edit}')`:`go('${s.v}')`}">${s.l}</button>`).join('')}</div>`:'';
+  const subs=open?`<div class="navSubList">${m.sub.map(s=>`<button class="navSubItem ${state.view===s.v&&(!s.edit||(state.edit||'issued')===s.edit)?'active':''}" onclick="${s.edit?`goNav('${s.v}','${s.edit}')`:`go('${s.v}')`}">${s.l}</button>`).join('')}</div>`:'';
   return parent+subs;
 }).join('')}
 function goNav(v,edit){navigateTo(v,{edit:edit||null})}

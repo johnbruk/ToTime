@@ -74,11 +74,16 @@ const PERCORSI=[
    passi:[/^☰$/,/Fatturazione/,/^Il mese$/], arrivo:/Fatturazione del mese/i},
   {nome:'Fatturazione dell’anno dal menu', tetto:3,
    passi:[/^☰$/,/Fatturazione/,/^L’anno$/], arrivo:/Fatturazione dell’anno/i},
-  // Il report economico e' uscito dal menu. Se la porta dalla
-  // fatturazione si rompesse, diventerebbe irraggiungibile in silenzio:
-  // e' esattamente il guasto che avevo trovato su monthlyForm.
-  {nome:'Report economico dalla fatturazione', tetto:4,
-   passi:[/^☰$/,/Fatturazione/,/^Il mese$/,/^Report economico/], arrivo:/Report economico/i},
+  // Le altre pagine della fatturazione stanno nel suo gruppo: tre tocchi
+  // come le altre sottovoci.
+  {nome:'Report economico dal menu', tetto:3,
+   passi:[/^☰$/,/Fatturazione/,/^Report economico$/], arrivo:/Report economico/i},
+  {nome:'Fatture emesse dal menu', tetto:3,
+   passi:[/^☰$/,/Fatturazione/,/^Fatture emesse$/], arrivo:/Fatture emesse/i},
+  // E la porta dalla pagina del mese resta: se si rompesse, quella dal
+  // menu non se ne accorgerebbe.
+  {nome:'Report economico dalla fatturazione del mese', tetto:4,
+   passi:[/^☰$/,/Fatturazione/,/^Il mese$/,/^Report economico\s*Ricavi/], arrivo:/Report economico/i},
 ];
 
 console.log('\n=== I percorsi di ogni giorno ===');
@@ -114,7 +119,9 @@ let d=0,k=sorgente.indexOf('[',im);
 for(;k<sorgente.length;k++){ if(sorgente[k]==='[')d++; else if(sorgente[k]===']'){d--;if(!d)break} }
 const foglie=[...sorgente.slice(im,k+1).matchAll(/\{v:'[a-zA-Z]+',l:'([^']+)'/g)].map(m=>m[1]);
 console.log('  voci:',foglie.length);
-ok(foglie.length<=20,'il menu sta entro venti voci',foglie.length+' voci');
+// Venticinque e non venti: le pagine della fatturazione sono andate
+// tutte sotto la loro voce, per scelta (vedi menu.mjs).
+ok(foglie.length<=25,'il menu sta entro venticinque voci',foglie.length+' voci');
 
 console.log('\n=== Ogni scheda ha una porta ===');
 // Il guasto piu' costoso di questi giorni: monthlyForm esisteva, era

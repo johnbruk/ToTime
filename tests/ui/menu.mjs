@@ -64,9 +64,19 @@ ok(spente.length===0,'le voci dirette restano evidenziate da dentro le loro sche
 // e' resta accesa.
 await pg.evaluate(()=>window.go('billingAnno'));await pg.waitForTimeout(160);
 const fat=await gruppo();
-ok(fat.sottovoci.join(',')==='Il mese,L’anno','Fatturazione ha due pagine: «Il mese» e «L’anno»',fat.sottovoci.join(', '));
+ok(fat.sottovoci.join(',')==='Il mese,L’anno,Fatture emesse,Incassi,Da fatturare,Per commessa,Report economico,Carica fattura emessa',
+   'sotto Fatturazione stanno tutte le pagine della fatturazione',fat.sottovoci.join(', '));
 const accesa=await pg.evaluate(()=>[...document.querySelectorAll('.sidebarNav .navSubItem.active')].map(b=>b.textContent.trim()));
 ok(accesa.join(',')==='L’anno','e dalla pagina dell’anno è accesa «L’anno»',accesa.join(', ')||'nessuna');
+// Fatture emesse e Incassi sono la stessa vista con un filtro diverso:
+// deve accendersi una sola delle due, quella giusta.
+for(const [modo,attesa] of [['issued','Fatture emesse'],['collected','Incassi']]){
+  await pg.evaluate(m=>window.openAnnualInvoices(m),modo);await pg.waitForTimeout(160);
+  const acc=await pg.evaluate(()=>[...document.querySelectorAll('.sidebarNav .navSubItem.active')].map(b=>b.textContent.trim()));
+  ok(acc.join(',')===attesa,`dagli ${attesa.toLowerCase()} è accesa «${attesa}», e solo quella`,acc.join(', ')||'nessuna');
+}
+await pg.evaluate(()=>window.go('fatturaCarica'));await pg.waitForTimeout(160);
+ok((await gruppo()).aperto==='Fatturazione','e caricando una fattura il gruppo resta aperto',(await gruppo()).aperto||'chiuso');
 
 ok(persi.length===0,'nessuna vista fa richiudere il menu',persi.slice(0,4).join(' | ')||Object.keys(ATTESI).length+' viste controllate');
 
@@ -95,9 +105,12 @@ const bloccoMenu=sorgente.slice(im,k+1);
 const etichette=[...bloccoMenu.matchAll(/\{v:'([a-zA-Z]+)',l:'([^']+)'/g)].map(m=>m[2]);
 const viste=[...bloccoMenu.matchAll(/\{v:'([a-zA-Z]+)'/g)].map(m=>m[1]);
 console.log('  voci di menu:',etichette.length,'→',etichette.join(', '));
-ok(etichette.length<=20,'il menu resta sotto le venti voci',etichette.length+' voci');
-for(const [vista,nome] of [['fatturazioneCommessa','Per commessa'],['reportWbs','Report analitico WBS'],
-                           ['reportEconomico','Report economico'],
+// Il tetto era venti. Le pagine della fatturazione sono andate tutte
+// sotto la loro voce perche' chi le cercava non le trovava: e' stata
+// una scelta, e il tetto la segue. Resta un tetto, perche' il menu non
+// diventi l'elenco di tutto quello che esiste.
+ok(etichette.length<=25,'il menu resta sotto le venticinque voci',etichette.length+' voci');
+for(const [vista,nome] of [['reportWbs','Report analitico WBS'],
                            ['engagements','Commesse'],['projects','Progetti'],['newChoice','la scheda di scelta']])
   ok(!viste.includes(vista),`«${nome}» non e\' piu\' una voce di menu`);
 // ...ma il menu deve puntare al modulo, non a un bivio prima del modulo
