@@ -911,8 +911,12 @@ console.log('\n=== UNA RIGA SENZA MESE FERMA IL CONFRONTO MENSILE ===');
     .replace('<ImponibileImporto>3109.60','<ImponibileImporto>3209.60')
     .replace('<ImportoTotaleDocumento>3109.60','<ImportoTotaleDocumento>3209.60');
   // l'app si aspetta 100 € di rimborsi a marzo: senza lo stop, marzo
-  // risulterebbe corto esattamente di quei 100 €
+  // risulterebbe corto esattamente di quei 100 €. E ne ha altri 100 a
+  // febbraio: cosi' la riga combacia con due mesi, non si puo'
+  // attribuire alla spesa, e resta davvero orfana.
   const pg=await apri(`S.travel_expenses=[{id:'t1',expense_date:'2026-03-20',client_id:'sol',
+    project_id:'p1',expense_category_id:'volo',work_city:'Citta',amount:100,reimbursement_type:'invoice'},
+    {id:'t0',expense_date:'2026-02-20',client_id:'sol',
     project_id:'p1',expense_category_id:'volo',work_city:'Citta',amount:100,reimbursement_type:'invoice'}];`);
   const r=await confronta(pg,conOrfana);
   ok(r.esiti.some(e=>/Riga senza mese riconoscibile/.test(e.titolo)),'dice qual è la riga orfana');
@@ -931,6 +935,15 @@ console.log('\n=== UNA RIGA SENZA MESE FERMA IL CONFRONTO MENSILE ===');
   ok(!r2.esiti.some(e=>/Importo diverso/.test(e.titolo)),'e torna: 2.530 + 100 è quello che l’app si aspetta',
      (r2.esiti.find(e=>/Importo diverso/.test(e.titolo))||{}).dettaglio||'nessuno');
   await pg2.close();
+  // Senza il mese scritto, ma con UNA spesa da 100 € nell'app: il mese
+  // e' quello della spesa, e lo si dice.
+  const pg3=await apri(`S.travel_expenses=[{id:'t1',expense_date:'2026-03-20',client_id:'sol',
+    project_id:'p1',expense_category_id:'volo',work_city:'Citta',amount:100,reimbursement_type:'invoice'}];`);
+  const r3=await confronta(pg3,conOrfana);
+  ok(r3.esiti.some(e=>/Rimborso spese attribuito a Marzo 2026/.test(e.titolo)),
+     'una sola spesa che combacia: la riga va nel suo mese, e lo dice',r3.esiti.map(e=>e.titolo).join(' | '));
+  ok(!r3.esiti.some(e=>/non si fa|Importo diverso/.test(e.titolo)),'e il confronto torna');
+  await pg3.close();
 }
 
 console.log('\n=== LA PARTITA IVA PORTA CON SÉ IL SUO PAESE ===');

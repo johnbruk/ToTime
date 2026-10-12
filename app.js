@@ -589,12 +589,40 @@ const numTag=(nodo,nome)=>{const v=testoTag(nodo,nome);return v?Number(v):0};
 // «Consulenza - Marzo 2026 | Giorni: 5,5». Non e' un campo dello
 // standard, e' una convenzione di chi emette: quindi si legge, ma non
 // si inventa. Se non si riconosce, la riga resta senza mese e lo dice.
+//
+// Una descrizione puo' nominare piu' date. «Rimborso KM · 30/06/2026 ·
+// Riferimento: Trasferta 23 Aprile 2026» e' un rimborso di GIUGNO che
+// cita una trasferta di aprile: prendere il primo nome di mese — e per
+// di piu' il primo nell'ordine del calendario, non del testo — la
+// metteva in aprile, gia' fatturato, e la registrazione si fermava.
+// Quindi, nell'ordine:
+//   1. «Giugno 2026», un mese col suo anno e senza un giorno davanti:
+//      e' la convenzione del mese di competenza;
+//   2. una data in cifre, «30/06/2026»: e' la data della spesa;
+//   3. «23 Aprile 2026», una data scritta in lettere;
+//   4. un mese senza anno accanto, con l'anno trovato altrove.
+// Fra piu' candidati dello stesso tipo vale il primo nel testo.
 function meseDaDescrizione(d){
   const t=String(d||'');
-  const m=monthNames.findIndex(n=>new RegExp('\\b'+n+'\\b','i').test(t));
+  const mm=i=>String(i+1).padStart(2,'0');
+  const nomi=[];
+  const re=new RegExp('\\b('+monthNames.join('|')+')\\b','gi');
+  let x;
+  while((x=re.exec(t))){
+    const i=monthNames.findIndex(n=>n.toLowerCase()===x[1].toLowerCase());
+    const prima=t.slice(Math.max(0,x.index-6),x.index);
+    const dopo=t.slice(x.index+x[1].length).match(/^\s*(20\d{2})\b/);
+    nomi.push({i,anno:dopo?dopo[1]:null,conGiorno:/\b\d{1,2}\s*[°º]?\s+$/.test(prima)});
+  }
+  const pieno=nomi.find(n=>n.anno&&!n.conGiorno);
+  if(pieno)return pieno.anno+'-'+mm(pieno.i);
+  const cifre=t.match(/\b(\d{1,2})[\/.-](\d{1,2})[\/.-](20\d{2})\b/);
+  if(cifre&&Number(cifre[2])>=1&&Number(cifre[2])<=12)return cifre[3]+'-'+String(Number(cifre[2])).padStart(2,'0');
+  const datato=nomi.find(n=>n.anno);
+  if(datato)return datato.anno+'-'+mm(datato.i);
   const anno=(t.match(/\b(20\d{2})\b/)||[])[1];
-  if(m<0||!anno)return null;
-  return anno+'-'+String(m+1).padStart(2,'0');
+  if(nomi.length&&anno)return anno+'-'+mm(nomi[0].i);
+  return null;
 }
 // E i giorni, quando ci sono: «| Giorni: 5,5».
 function giorniDaDescrizione(d){
@@ -1031,6 +1059,36 @@ function confrontaFattura(f){
   if(casse.length>1)
     nota('nota','Pi\u00f9 contributi previdenziali in fattura',
       `${casse.length} blocchi cassa: ${casse.map(c=>(c.tipo||'cassa')+' '+fmtNum(c.aliquota,2)+'% '+fmtEUR(c.importo)).join(' \u00b7 ')}. Nella quadratura entra la somma, ${fmtEUR(f.rivalsaImporto)}; il raffronto con la configurazione, che ha una sola aliquota, qui non si fa.`);
+
+  // 2-bis. I rimborsi spese hanno il mese della spesa. La descrizione
+  //        di un rimborso cita spesso la trasferta a cui si riferisce —
+  //        «Riferimento: Trasferta 23 Aprile 2026» — mentre l'app la
+  //        spesa la conta nel mese in cui e' registrata, ed e' li' che la
+  //        aspetta in fattura. Se la riga combacia con una spesa del
+  //        cliente — o con le spese di un mese, sommate — e il mese letto
+  //        dal testo non ne ha nessuna, vale il mese della spesa. E lo si
+  //        dice: e' una correzione, non deve passare in silenzio.
+  // Lo si sposta solo verso un mese che la fattura gia' copre col
+  //        lavoro: un rimborso si fattura insieme al lavoro del suo
+  //        mese. Col solo importo, una spesa vecchia di un altro mese
+  //        con la stessa cifra poteva trascinarsi la riga.
+  const pareRimborso=r=>/rimbors|\bspes[ae]\b|trasfert|\bkm\b|chilometr/i.test(r.descrizione||'');
+  const mesiLavoro=new Set(f.righe.filter(r=>r.mese&&!pareRimborso(r)).map(r=>r.mese));
+  if(cliente)f.righe.forEach(r=>{
+    if(!pareRimborso(r))return;
+    const sue=(data.travelExpenses||[]).filter(e=>e.client_id===cliente.id&&expIsInvoice(e));
+    const meseDi=e=>String(e.expense_date||'').slice(0,7);
+    const perMeseSpese={};
+    sue.forEach(e=>{perMeseSpese[meseDi(e)]=(perMeseSpese[meseDi(e)]||0)+Number(e.amount||0)});
+    const combacia=m=>sue.some(e=>meseDi(e)===m&&vicini(e.amount,r.importo))||vicini(perMeseSpese[m],r.importo);
+    if(r.mese&&combacia(r.mese))return;
+    const candidati=Object.keys(perMeseSpese).filter(m=>mesiLavoro.has(m)&&combacia(m));
+    if(candidati.length!==1)return;
+    const letto=r.mese;
+    r.mese=candidati[0];
+    nota('nota',`Rimborso spese attribuito a ${monthLabel(r.mese)}`,
+      `«${r.descrizione}»${letto?' nomina '+monthLabel(letto)+', ma':''} corrisponde alle spese di ${monthLabel(r.mese)} registrate nell’app (${fmtEUR(r.importo)}): il mese è quello della spesa.`);
+  });
 
   // 2-ter. I mesi che la fattura copre. Si calcolano qui, prima della
   //        configurazione, perche' rivalsa e bollo di UNA fattura
@@ -1961,7 +2019,78 @@ async function eliminaFattura(id){
   setMsg('Fattura '+nome+' eliminata: '+(piu?'i mesi tornano':'il mese torna')+' da fatturare.',6000);
 }
 function annualInvoices(modeArg){const year=currentYear();const mode=modeArg||(state.edit==='collected'?'collected':'issued');let rows=data.billingHeaders.filter(h=>Number(h.year)===Number(year)&&['invoice_issued','collected'].includes(h.status));if(mode==='collected')rows=rows.filter(h=>h.status==='collected');rows=rows.sort((a,b)=>(Number(b.month)-Number(a.month))||clientName(a.client_id).localeCompare(clientName(b.client_id)));const title=mode==='collected'?`Incassi ${year}`:`Fatture emesse ${year}`;const amountOf=h=>mode==='collected'?Number(h.collected_amount||h.invoice_total_amount||h.total_amount||0):Number(h.invoice_total_amount||h.total_amount||0);const total=rows.reduce((s,h)=>s+amountOf(h),0);return appShell(`<h1>${title}</h1><p class="sub">Tocca una voce per aprire il dettaglio della fattura.</p><div class="card"><b>Totale ${mode==='collected'?'incassato':'fatturato'} ${year}</b><div class="amount" style="margin-top:8px">${fmtEUR(total)}</div></div>${rows.length?intestazioneFatture():''}<div class="list">${rows.map(h=>rigaFattura(h,amountOf(h))).join('')||`<div class="empty">${mode==='collected'?'Nessun incasso registrato':'Nessuna fattura emessa'} nel ${year}.</div>`}</div>`)}
-function home(){const t=totals();const y=annualTotals(currentYear());return appShell(`<h1 class="srOnly">Dashboard</h1><button class="primary cta" onclick="newEntryChoice()">+ Nuovo consuntivo</button><div class="homeTop">${monthSelector()}</div><div class="card cardLink" onclick="go('timesheet')" role="button" title="Apri il timesheet di ${monthLabel(state.month)}"><b>Consuntivo mese <span class="cardLinkArrow">›</span></b><div class="kpiGrid three" style="margin-top:14px"><div><span>Consuntivate</span><strong>${fmtNum(t.days,2)} gg</strong><small>${fmtNum(t.hours,1)} h</small></div><div><span>Pianificate</span><strong>${fmtNum(t.plannedDays,2)} gg</strong><small>${fmtNum(t.plannedHours,1)} h</small></div><div><span>Totale</span><strong>${fmtNum(t.days+t.plannedDays,2)} gg</strong><small>${fmtNum(t.hours+t.plannedHours,1)} h</small></div></div><div class="metricLine" style="margin-top:12px">${fmtEUR(t.amount)} consuntivato${t.plannedAmount>0?` <span class="dot">·</span> ${fmtEUR(t.plannedAmount)} pianificato <span class="dot">·</span> <b>${fmtEUR(t.amount+t.plannedAmount)}</b> totale`:''}</div>${t.rimborsi>0?`<div class="metricLine rimborsiAparte" style="margin-top:8px"><span class="tag gray">A parte</span> ${fmtEUR(t.rimborsi)} di rimborsi spese, riaddebitati in fattura</div>`:''}</div><div class="dashboardCard heroCard cardLink" onclick="openAnnualMonths()" role="button" title="Dettaglio consuntivato mese per mese"><b>Consuntivato anno ${currentYear()} <span class="cardLinkArrow">›</span></b><div class="kpiGrid" style="${y.pianificato>0?'':'grid-template-columns:1fr;'}margin-top:14px"><div style="${y.pianificato>0?'':'border-right:0'}"><span>Anno in corso</span><strong>${fmtEUR(y.consuntivato)}</strong><small>consuntivato</small></div>${y.pianificato>0?`<div style="border-right:0"><span>Pianificato</span><strong>${fmtEUR(y.pianificato)}</strong><small>giorni futuri</small></div>`:''}</div><div class="chartWrap"><div class="chartTitle"><span>Andamento mese per mese</span><span>consuntivato · pianificato</span></div>${annualChartSvg()}</div>${y.rimborsiFattura>0?`<div class="metricLine rimborsiAparte" style="margin-top:10px"><span class="tag gray">A parte</span> ${fmtEUR(y.rimborsiFattura)} di rimborsi spese nell’anno — riaddebitati in fattura, fuori dal consuntivato</div>`:''}</div>${homeFatturatoCard()}${homeIncassiCard()}${dashFull()?homeBalanceCharts()+homeMultiChart():''}<button type="button" class="secondary dashToggle" onclick="toggleDashFull()">${dashFull()?'▴ Nascondi analisi e grafici':'▾ Mostra analisi e grafici'}</button>`)}
+// ─── Il riquadro del mese, in dashboard ─────────────────────
+//
+// Prima erano tre colonne di giorni con lo stesso peso —
+// consuntivato, pianificato e la loro somma — e gli euro in una frase
+// sotto: per sapere quanto valeva il consuntivato si incrociavano due
+// zone, e l'occhio
+// non sapeva dove fermarsi.
+// Adesso c'e' un numero solo in grande, il consuntivato; una barra
+// che divide il mese in consuntivato, pianificato e rimborsi spese, che
+// in fattura ci finiscono anche loro; il previsto del mese; e sotto, in
+// grigio, quanto se ne aspetta da ogni cliente.
+// Gli euro hanno sempre il puntino delle migliaia: «4888,75 €» accanto
+// a «13.048,75 €» — la regola italiana delle quattro cifre — sembrava
+// un errore di battitura.
+function eurMigliaia(n){
+  const v=Number(n||0);
+  const [i,d]=Math.abs(v).toFixed(2).split('.');
+  return (v<0?'-':'')+i.replace(/\B(?=(\d{3})+(?!\d))/g,'.')+','+d+'\u00a0€';
+}
+// Le stesse somme di totals(), divise per cliente: ogni riga vale per
+// il previsto del mese quanto vale nel totale, cosi' le righe sommano.
+function previstoPerCliente(){
+  const m={};
+  const add=(id,k,v)=>{const c=m[id||'']=m[id||'']||{client_id:id||null,fatto:0,pianificato:0,rimborsi:0};c[k]+=v};
+  rowsForMonth().forEach(e=>add(e.client_id,isPlanned(e)?'pianificato':'fatto',dailyAmount(e)));
+  monthlyRows().forEach(e=>add(e.client_id,'fatto',Number(e.amount||0)));
+  manualRows().forEach(e=>add(e.client_id,isPlanned(e)?'pianificato':'fatto',Number(e.amount||0)));
+  expenseRows().filter(expIsInvoice).forEach(e=>add(e.client_id,'rimborsi',Number(e.amount||0)));
+  return Object.values(m).map(c=>({...c,totale:c.fatto+c.pianificato+c.rimborsi}))
+    .filter(c=>Math.abs(c.totale)>=0.005)
+    .sort((a,b)=>b.totale-a.totale||clientName(a.client_id).localeCompare(clientName(b.client_id)));
+}
+function homeMeseCard(t){
+  const fatto=t.amount,pian=t.plannedAmount,rimb=t.rimborsi,tot=fatto+pian+rimb;
+  const voci=[
+    {k:'f',nome:'Consuntivato',gg:t.days,v:fatto},
+    {k:'p',nome:'Pianificato',gg:t.plannedDays,v:pian},
+    {k:'r',nome:'Rimborsi spese',v:rimb}].filter(x=>x.k==='f'||x.v>0);
+  // La barra si misura sulle parti che si disegnano: un compenso
+  // negativo — una rettifica — col totale netto come denominatore
+  // allargava gli altri pezzi oltre la barra.
+  const positivi=voci.reduce((a,x)=>a+Math.max(0,x.v),0);
+  const pct=v=>positivi>0?Math.max(0,v)/positivi*100:0;
+  const clienti=previstoPerCliente();
+  return `<div class="card cardLink meseCard" onclick="go('timesheet')" role="button" title="Apri il timesheet di ${monthLabel(state.month)}">
+<div class="meseTesta"><b>Consuntivo · ${monthLabel(state.month)}</b><span class="cardLinkArrow">›</span></div>
+<div class="meseGrande">${eurMigliaia(fatto)}</div>
+<div class="meseSotto">consuntivato: ${fmtNum(t.days,2)} giorni · ${fmtNum(t.hours,1)} h</div>
+${positivi>0?`<div class="meseBarra" aria-hidden="true">${voci.filter(x=>x.v>0).map(x=>`<i class="${x.k}" style="width:${pct(x.v).toFixed(2)}%"></i>`).join('')}</div>`:''}
+<div class="meseLegenda">${voci.map(x=>`<div class="voce ${x.k}"><s></s><span>${x.nome}${x.gg!==undefined?` <b>${fmtNum(x.gg,2)} gg</b>`:''} · ${eurMigliaia(x.v)}</span></div>`).join('')}</div>
+<div class="rigaPrevisto mesePrevisto"><span>Previsto del mese</span><b>${fmtNum(t.days+t.plannedDays,2)} gg · ${eurMigliaia(tot)}</b></div>
+${clienti.length?`<div class="meseClienti">${clienti.map(c=>`<div><span>${esc(c.client_id?clientName(c.client_id):'Senza cliente')}</span><span>${eurMigliaia(c.totale)}</span></div>`).join('')}</div>`:''}
+</div>`;
+}
+// I numeri dell'anno in dashboard: il consuntivato, il pianificato e il
+// totale previsto. Il previsto e' quello della pagina Fatturazione ›
+// L'anno — «Previsione ricavi» — e lo si prende da li', cosi' i due
+// numeri non possono divergere: consuntivato, pianificato e rimborsi
+// spese, che in fattura ci vanno, come nel riquadro del mese.
+// Senza pianificato e senza rimborsi il previsto e' il consuntivato, e
+// ripeterlo non direbbe niente.
+// Il previsto sta in una riga sua, sotto i due numeri, come «Previsto
+// del mese» nel riquadro sopra: come terza colonna, sul telefono le
+// cifre di fine anno non ci stavano e venivano troncate.
+function homeAnnoKpi(y){
+  const prev=forecastCalc(currentYear()).ricavi;
+  const rimb=Number(y.rimborsiFattura||0);
+  const pian=y.pianificato>0;
+  return `<div class="kpiGrid" style="${pian?'':'grid-template-columns:1fr;'}margin-top:14px"><div><span>Anno in corso</span><strong>${eurMigliaia(y.consuntivato)}</strong><small>consuntivato</small></div>${pian?`<div><span>Pianificato</span><strong>${eurMigliaia(y.pianificato)}</strong><small>giorni futuri</small></div>`:''}</div>
+${pian||rimb>0?`<div class="rigaPrevisto annoPrevisto"><span>Totale previsto ${currentYear()}${rimb>0?'<small>rimborsi spese compresi</small>':''}</span><b>${eurMigliaia(prev)}</b></div>`:''}`;
+}
+function home(){const t=totals();const y=annualTotals(currentYear());return appShell(`<h1 class="srOnly">Dashboard</h1><button class="primary cta" onclick="newEntryChoice()">+ Nuovo consuntivo</button><div class="homeTop">${monthSelector()}</div>${homeMeseCard(t)}<div class="dashboardCard heroCard cardLink" onclick="openAnnualMonths()" role="button" title="Dettaglio consuntivato mese per mese"><b>Consuntivato anno ${currentYear()} <span class="cardLinkArrow">›</span></b>${homeAnnoKpi(y)}<div class="chartWrap"><div class="chartTitle"><span>Andamento mese per mese</span><span>consuntivato · pianificato</span></div>${annualChartSvg()}</div>${y.rimborsiFattura>0?`<div class="metricLine rimborsiAparte" style="margin-top:10px"><span class="tag gray">A parte</span> ${fmtEUR(y.rimborsiFattura)} di rimborsi spese nell’anno — riaddebitati in fattura, fuori dal consuntivato</div>`:''}</div>${homeFatturatoCard()}${homeIncassiCard()}${dashFull()?homeBalanceCharts()+homeMultiChart():''}<button type="button" class="secondary dashToggle" onclick="toggleDashFull()">${dashFull()?'▴ Nascondi analisi e grafici':'▾ Mostra analisi e grafici'}</button>`)}
 function dashFull(){return settingValue('dash_full')==='1'}
 async function toggleDashFull(){const r=await saveSetting('dash_full',dashFull()?'0':'1');if(r.error)return setMsg(r.error.message,7000);await reload();render()}
 function newEntryChoice(){navigateTo('dailyForm')}

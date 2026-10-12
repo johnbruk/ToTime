@@ -34,29 +34,24 @@ const apri=async w=>{
 };
 
 console.log('\n=== A. In dashboard le giornate si leggono tutte e tre ===');
+// Il riquadro del mese non e' piu' a tre colonne: un numero in grande,
+// la legenda consuntivato · pianificato · rimborsi e il previsto. Le
+// giornate pero' ci sono ancora tutte e tre, e devono tornare.
 const pg=await apri(1280);
 const errs=[];pg.on('pageerror',e=>errs.push(e.message));
+const gior=t=>Number(String((t||'').match(/([\d.,]+) gg/)?.[1]||'NaN').replace(/\./g,'').replace(',','.'));
 const dash=await pg.evaluate(()=>{
-  const c=document.querySelector('#app .card.cardLink');
-  const k=[...c.querySelectorAll('.kpiGrid div')].map(d=>({
-    et:d.querySelector('span')?.textContent.trim(),
-    n:d.querySelector('strong')?.textContent.trim(),
-    sotto:d.querySelector('small')?.textContent.trim()}));
-  return {k,riga:c.querySelector('.metricLine')?.textContent.replace(/\s+/g,' ').trim()};
+  const c=document.querySelector('#app .meseCard');
+  return {voci:[...c.querySelectorAll('.meseLegenda .voce')].map(v=>v.textContent.replace(/\s+/g,' ').trim()),
+    previsto:c.querySelector('.mesePrevisto b')?.textContent.trim()};
 });
-ok(dash.k.length===3,'sono tre numeri, non due',dash.k.map(x=>x.et).join(' · '));
-ok(dash.k[0].et==='Consuntivate'&&dash.k[1].et==='Pianificate'&&dash.k[2].et==='Totale',
-   'consuntivate, pianificate e totale',dash.k.map(x=>x.et).join(' · '));
-const gg=dash.k.map(x=>Number(String(x.n).replace(',','.').replace(/[^\d.]/g,'')));
-ok(Math.abs(gg[0]+gg[1]-gg[2])<0.01,'il totale è davvero la somma dei due',
-   `${gg[0]} + ${gg[1]} = ${gg[2]}`);
+const cons=dash.voci.find(v=>/^Consuntivato/.test(v)),pian=dash.voci.find(v=>/^Pianificato/.test(v));
+ok(!!cons&&!!pian,'consuntivato e pianificato ci sono',dash.voci.join(' | '));
+const gg=[gior(cons),gior(pian),gior(dash.previsto)];
+ok(Math.abs(gg[0]+gg[1]-gg[2])<0.01,'il previsto è davvero la somma dei due',`${gg[0]} + ${gg[1]} = ${gg[2]}`);
 ok(gg[1]>0,'e nel mese di prova il pianificato c\'è',gg[1]+' gg');
-ok(dash.k.every(x=>/gg$/.test(x.n)),'i numeri dicono di che unità sono',dash.k.map(x=>x.n).join(' · '));
-ok(dash.k.every(x=>/h$/.test(x.sotto||'')),'con le ore sotto',dash.k.map(x=>x.sotto).join(' · '));
-ok(/consuntivato/.test(dash.riga||'')&&/pianificato/.test(dash.riga||'')&&/totale/.test(dash.riga||''),
-   'e gli importi divisi allo stesso modo',dash.riga);
 
-console.log('\n=== A2. Gli stessi tre numeri nel riepilogo del Timesheet ===');
+console.log('\n=== A2. Gli stessi giorni nel riepilogo del Timesheet ===');
 // La domanda e' la stessa in tutte e due le schermate, quindi la
 // risposta dev'essere la stessa: due riepiloghi che contano in modo
 // diverso sarebbero peggio di uno solo.
@@ -68,10 +63,11 @@ const ts=await pg.evaluate(()=>{
     n:d.querySelector('strong')?.textContent.trim()}));
 });
 ok(ts.length===3&&ts[0].et==='Consuntivate'&&ts[1].et==='Pianificate'&&ts[2].et==='Totale',
-   'anche qui consuntivate, pianificate e totale',ts.map(x=>x.et).join(' · '));
-ok(ts.map(x=>x.n).join('|')===dash.k.map(x=>x.n).join('|'),
-   'e i numeri combaciano con quelli della dashboard',
-   ts.map(x=>x.n).join(' · ')+'  contro  '+dash.k.map(x=>x.n).join(' · '));
+   'nel Timesheet consuntivate, pianificate e totale',ts.map(x=>x.et).join(' · '));
+const ggTs=ts.map(x=>gior(x.n));
+ok(ggTs.map(x=>x.toFixed(2)).join('|')===gg.map(x=>x.toFixed(2)).join('|'),
+   'e i giorni combaciano con quelli della dashboard',
+   ggTs.join(' · ')+'  contro  '+gg.join(' · '));
 
 console.log('\n=== B. La fattura comprende il pianificato ===');
 const totali=async()=>{await pg.evaluate(()=>window.go('billing'));await pg.waitForTimeout(400);

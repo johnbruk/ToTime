@@ -925,3 +925,36 @@ table.griglia.numeriRiga td.riga .n{font-variant-numeric:tabular-nums}
    smorzati, perche' siano leggibili senza farsi scambiare per ricavo. */
 .rimborsiAparte{color:var(--muted);font-weight:600}
 .rimborsiAparte .tag{margin-top:0}
+
+/* ─── Il riquadro del mese, in dashboard ───
+   Un numero in grande, una barra consuntivato · pianificato ·
+   rimborsi, il previsto e, in grigio, il previsto per cliente. I
+   colori del consuntivato e
+   del pianificato sono quelli del grafico dell'anno subito sotto. */
+:root{--cRimb:#C08A3E}
+.meseCard .meseTesta{display:flex;justify-content:space-between;align-items:baseline;gap:var(--sp-3)}
+.meseCard .meseTesta b{font-size:var(--t-lg);font-weight:var(--w-bold)}
+.meseCard .meseGrande{font-family:var(--font-heading);font-size:var(--t-2xl);font-weight:var(--w-bold);letter-spacing:-.02em;line-height:1.1;margin-top:var(--sp-3);font-variant-numeric:tabular-nums}
+.meseCard .meseSotto{color:var(--muted);font-size:var(--t-sm);margin-top:var(--sp-1)}
+.meseCard .meseBarra{display:flex;height:10px;margin-top:var(--sp-4);background:var(--surface2);overflow:hidden}
+.meseCard .meseBarra i{display:block;height:100%}
+.meseCard .meseBarra i.f{background:var(--cCons)}
+.meseCard .meseBarra i.p{background:repeating-linear-gradient(135deg,var(--cPlan) 0 6px,rgba(138,109,255,.45) 6px 12px)}
+.meseCard .meseBarra i.r{background:var(--cRimb)}
+.meseCard .meseLegenda{display:grid;grid-template-columns:repeat(3,auto);justify-content:start;gap:var(--sp-2) var(--sp-5);margin-top:var(--sp-3);font-size:var(--t-sm);color:var(--soft);font-variant-numeric:tabular-nums}
+.meseCard .meseLegenda .voce{display:flex;gap:var(--sp-2);align-items:baseline}
+.meseCard .meseLegenda s{display:inline-block;width:10px;height:10px;flex:0 0 10px;text-decoration:none;transform:translateY(1px)}
+.meseCard .meseLegenda .f s{background:var(--cCons)}
+.meseCard .meseLegenda .p s{background:var(--cPlan)}
+.meseCard .meseLegenda .r s{background:var(--cRimb)}
+.meseCard .meseLegenda b{color:var(--text);font-weight:var(--w-bold)}
+/* La riga del previsto, la stessa nel riquadro del mese e in quello
+   dell'anno: etichetta in grigio a sinistra, cifra piena a destra. */
+.rigaPrevisto{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:var(--sp-1) var(--sp-3);margin-top:var(--sp-3);padding-top:var(--sp-3);border-top:1px solid var(--line);font-size:var(--t-md);font-variant-numeric:tabular-nums}
+.rigaPrevisto span{color:var(--muted)}
+.rigaPrevisto span small{display:block;font-size:var(--t-xs);margin-top:2px}
+.rigaPrevisto b{font-weight:var(--w-bold);color:var(--text)}
+.meseCard .meseClienti{margin-top:var(--sp-2);display:grid;gap:var(--sp-1);font-size:var(--t-sm);color:var(--muted);font-variant-numeric:tabular-nums}
+.meseCard .meseClienti div{display:flex;justify-content:space-between;gap:var(--sp-3)}
+.meseCard .meseClienti span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:560px){.meseCard .meseLegenda{grid-template-columns:1fr}}
