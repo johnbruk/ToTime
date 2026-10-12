@@ -983,3 +983,36 @@ table.griglia.numeriRiga td.riga .n{font-variant-numeric:tabular-nums}
    finivano sotto il bordo, e ci si arrivava solo portando in fondo
    tutta la pagina. */
 .sidebar{overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
+/* Margine netto, mese per mese. Una riga per mese: la barra e' il
+   fatturato, la parte verde quanto resta. Il verde e il grigio sono
+   verificati per il daltonismo e per il contrasto, nei due temi; il
+   «da fatturare» e' lo stesso verde a righe, perche' e' una stima. */
+:root{--cNetto:#199e70;--cNettoRiga:rgba(25,158,112,.32);--cResto:rgba(147,162,184,.20)}
+:root[data-theme="light"]{--cNetto:#1baf7a;--cNettoRiga:rgba(27,175,122,.30);--cResto:rgba(107,112,120,.16)}
+.margineCard .margineTesta{display:flex;justify-content:space-between;align-items:baseline;gap:var(--sp-3)}
+.margineCard .margineTesta b{font-size:var(--t-lg);font-weight:var(--w-bold)}
+.margineCard>.desc{margin-top:2px}
+.margineLeg{display:flex;flex-wrap:wrap;gap:var(--sp-1) var(--sp-5);margin:var(--sp-3) 0 var(--sp-1);font-size:var(--t-xs);color:var(--muted)}
+.margineLeg s{display:inline-block;width:10px;height:10px;margin-right:6px;text-decoration:none;transform:translateY(1px)}
+.margineLeg s.netto{background:var(--cNetto)}
+.margineLeg s.resto{background:var(--cResto)}
+.margineLeg s.stima{background:repeating-linear-gradient(135deg,var(--muted) 0 3px,transparent 3px 6px)}
+.margineRiga{display:grid;grid-template-columns:9.5rem 1fr 8rem;gap:var(--sp-1) var(--sp-3);align-items:center;padding:10px 0;border-bottom:1px solid var(--line);cursor:pointer;font-variant-numeric:tabular-nums}
+.margineRiga.aperto{background:rgba(124,137,166,.06)}
+.margineNome{font-size:var(--t-sm);font-weight:var(--w-bold);color:var(--text);min-width:0}
+.margineNome span{display:block;font-weight:var(--w-med);color:var(--muted);font-size:var(--t-xs);margin-top:2px}
+.margineBarra{height:14px}
+.margineFatt{height:100%;background:var(--cResto);display:flex}
+.margineFatt i{display:block;height:100%;background:var(--cNetto)}
+.margineRiga.stima .margineFatt i{background:repeating-linear-gradient(135deg,var(--cNetto) 0 4px,var(--cNettoRiga) 4px 7px)}
+.margineNetto{text-align:right}
+.margineNetto b{display:block;font-size:var(--t-md);font-weight:var(--w-bold);color:var(--text)}
+.margineNetto span{font-size:var(--t-xs);color:var(--muted);font-weight:var(--w-bold)}
+.margineNetto span em{font-style:normal;color:var(--text)}
+.margineMeno,.margineNetto b.margineMeno{color:var(--red)}
+.margineConto{grid-column:1/-1;display:grid;grid-template-columns:repeat(4,1fr);gap:var(--sp-2);margin-top:var(--sp-1);font-size:var(--t-xs);color:var(--muted)}
+.margineConto div{background:var(--surface2);padding:var(--sp-2) 10px}
+.margineConto b{display:block;font-size:var(--t-sm);color:var(--text);font-weight:var(--w-bold);margin-top:2px}
+.margineRiga.margineAnno{border-bottom:0;border-top:2px solid var(--line);margin-top:var(--sp-1);padding-top:var(--sp-3);cursor:default}
+.margineAnno .margineNome{font-size:var(--t-md)}
+@media(max-width:560px){.margineRiga{grid-template-columns:1fr auto}.margineBarra{grid-column:1/-1;grid-row:2}.margineConto{grid-template-columns:1fr 1fr}}

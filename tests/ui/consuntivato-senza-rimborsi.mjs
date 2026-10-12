@@ -1,6 +1,6 @@
-// Il consuntivato e' il LAVORO. I rimborsi delle spese di trasferta
-// sono soldi anticipati e riaddebitati: una partita a parte, non
-// compenso. Sommarli gonfiava il consuntivato — in dashboard, nel
+// Il consuntivato e' il LAVORO. I rimborsi delle spese di trasferta si
+// riaddebitano in fattura: sono compensi, ma non sono lavoro.
+// Sommarli gonfiava il consuntivato — in dashboard, nel
 // timesheet, nel grafico dell'anno — di cifre che non sono ricavo del
 // proprio lavoro.
 //
@@ -133,16 +133,16 @@ console.log('\n=== LA SPESA A MIO CARICO NON ENTRA NÉ NELL’UNO NÉ NELL’ALT
   await pg.close();
 }
 
-console.log('\n=== UN RIMBORSO NON E’ GUADAGNO: L’UTILE NON SI MUOVE ===');
+console.log('\n=== UN RIMBORSO IN FATTURA È UN COMPENSO: RESTA, MENO LE IMPOSTE ===');
 {
-  // E' il punto vero. Un rimborso entra in fattura, quindi sta nei
-  // ricavi — ma l'uscita che lo compensa non stava da nessuna parte:
-  // fra i costi ci sono solo le spese a proprio carico. Cosi' ogni
-  // rimborso gonfiava l'utile netto previsto di tutto il suo importo,
-  // facendo sembrare guadagno dei soldi solo transitati.
+  // La regola e' dell'utente: «le spese a mio carico sono a mio carico,
+  // quelle per cui chiedo rimborso tramite fattura no». Un rimborso in
+  // fattura e' un compenso: ci si pagano le tasse e resta. Prima lo si
+  // toglieva come una partita di giro, e l'utile previsto risultava piu'
+  // basso del vero di tutti i rimborsi.
   //
   // Si misura confrontando due anni identici tranne che per un
-  // rimborso: l'utile deve essere lo stesso.
+  // rimborso: l'utile deve salire dei 250, meno le imposte in piu'.
   const pg=await apri();
   const senza=await pg.evaluate(()=>{
     window.__stores.travel_expenses=[];
@@ -159,17 +159,12 @@ console.log('\n=== UN RIMBORSO NON E’ GUADAGNO: L’UTILE NON SI MUOVE ===');
     ok(Math.abs(con.ricavi-senza.ricavi-250)<0.005,
        'coi 250 in fattura i ricavi salgono di 250, com’è giusto',
        `${senza.ricavi} → ${con.ricavi}`);
-    // Il giro di denaro in se' e' neutro: entra 250 e ne escono 250.
-    // Quello che resta sono SOLO le imposte, perche' con la scelta
-    // prudente — quella attiva per default — i rimborsi fanno
-    // imponibile. Prima, invece, l'utile SALIVA di tutti i 250, come
-    // se quei soldi fossero guadagno.
-    const persi=senza.utileNetto-con.utileNetto;
+    const guadagno=con.utileNetto-senza.utileNetto;
     const tasseInPiu=con.oneri-senza.oneri;
-    ok(Math.abs(persi-tasseInPiu)<0.005,
-       'l\u2019utile scende SOLO di quanto crescono le imposte: il giro di denaro non \u00e8 n\u00e9 guadagno n\u00e9 perdita',
-       `utile \u2212${persi.toFixed(2)} \u00b7 imposte +${tasseInPiu.toFixed(2)}`);
-    ok(persi<250&&persi>0,'e NON di 250: i soldi solo transitati non sono guadagno',persi.toFixed(2));
+    ok(tasseInPiu>0,'con la scelta prudente, quella di default, sui 250 si pagano le tasse',`imposte +${tasseInPiu.toFixed(2)}`);
+    ok(Math.abs(guadagno-(250-tasseInPiu))<0.005,
+       'e l\u2019utile sale di 250 meno quelle imposte: il rimborso resta a te',
+       `utile +${guadagno.toFixed(2)} \u00b7 250 \u2212 ${tasseInPiu.toFixed(2)}`);
     ok(Math.abs(con.rimborsi-250)<0.005,'e i 250 sono contati come rimborso',String(con.rimborsi));
     ok(Math.abs(con.consuntivato-senza.consuntivato)<0.005,
        'e nemmeno il consuntivato si muove: il lavoro è lo stesso',
@@ -206,6 +201,11 @@ console.log('\n=== CON LA REGOLA 2025 NON COSTA NEMMENO LE IMPOSTE ===');
      'e la previsione li toglie dalla base imponibile',String(r.f.fuoriReddito));
   ok(Math.abs(r.f.baseImponibile-(r.f.ricavi-250))<0.005,
      'la base imponibile e’ i ricavi meno i 250',`${r.f.ricavi} − 250 = ${r.f.baseImponibile}`);
+  // fuori reddito sono soldi anticipati e ripresi: una partita di giro,
+  // e l'utile non li conta come guadagno
+  ok(Math.abs(r.f.utileNetto-(r.f.ricavi-r.f.costi-250-r.f.oneri))<0.005,
+     'e l’utile non li conta come guadagno: entrano 250 ed escono 250',
+     `${r.f.ricavi} − ${r.f.costi} − 250 − ${r.f.oneri.toFixed(2)} = ${r.f.utileNetto.toFixed(2)}`);
   await pg.close();
 }
 
