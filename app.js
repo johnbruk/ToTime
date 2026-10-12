@@ -589,12 +589,40 @@ const numTag=(nodo,nome)=>{const v=testoTag(nodo,nome);return v?Number(v):0};
 // «Consulenza - Marzo 2026 | Giorni: 5,5». Non e' un campo dello
 // standard, e' una convenzione di chi emette: quindi si legge, ma non
 // si inventa. Se non si riconosce, la riga resta senza mese e lo dice.
+//
+// Una descrizione puo' nominare piu' date. «Rimborso KM · 30/06/2026 ·
+// Riferimento: Trasferta 23 Aprile 2026» e' un rimborso di GIUGNO che
+// cita una trasferta di aprile: prendere il primo nome di mese — e per
+// di piu' il primo nell'ordine del calendario, non del testo — la
+// metteva in aprile, gia' fatturato, e la registrazione si fermava.
+// Quindi, nell'ordine:
+//   1. «Giugno 2026», un mese col suo anno e senza un giorno davanti:
+//      e' la convenzione del mese di competenza;
+//   2. una data in cifre, «30/06/2026»: e' la data della spesa;
+//   3. «23 Aprile 2026», una data scritta in lettere;
+//   4. un mese senza anno accanto, con l'anno trovato altrove.
+// Fra piu' candidati dello stesso tipo vale il primo nel testo.
 function meseDaDescrizione(d){
   const t=String(d||'');
-  const m=monthNames.findIndex(n=>new RegExp('\\b'+n+'\\b','i').test(t));
+  const mm=i=>String(i+1).padStart(2,'0');
+  const nomi=[];
+  const re=new RegExp('\\b('+monthNames.join('|')+')\\b','gi');
+  let x;
+  while((x=re.exec(t))){
+    const i=monthNames.findIndex(n=>n.toLowerCase()===x[1].toLowerCase());
+    const prima=t.slice(Math.max(0,x.index-4),x.index);
+    const dopo=t.slice(x.index+x[1].length).match(/^\s*(20\d{2})\b/);
+    nomi.push({i,anno:dopo?dopo[1]:null,conGiorno:/\b\d{1,2}\s+$/.test(prima)});
+  }
+  const pieno=nomi.find(n=>n.anno&&!n.conGiorno);
+  if(pieno)return pieno.anno+'-'+mm(pieno.i);
+  const cifre=t.match(/\b(\d{1,2})[\/.-](\d{1,2})[\/.-](20\d{2})\b/);
+  if(cifre&&Number(cifre[2])>=1&&Number(cifre[2])<=12)return cifre[3]+'-'+String(Number(cifre[2])).padStart(2,'0');
+  const datato=nomi.find(n=>n.anno);
+  if(datato)return datato.anno+'-'+mm(datato.i);
   const anno=(t.match(/\b(20\d{2})\b/)||[])[1];
-  if(m<0||!anno)return null;
-  return anno+'-'+String(m+1).padStart(2,'0');
+  if(nomi.length&&anno)return anno+'-'+mm(nomi[0].i);
+  return null;
 }
 // E i giorni, quando ci sono: «| Giorni: 5,5».
 function giorniDaDescrizione(d){
@@ -1031,6 +1059,30 @@ function confrontaFattura(f){
   if(casse.length>1)
     nota('nota','Pi\u00f9 contributi previdenziali in fattura',
       `${casse.length} blocchi cassa: ${casse.map(c=>(c.tipo||'cassa')+' '+fmtNum(c.aliquota,2)+'% '+fmtEUR(c.importo)).join(' \u00b7 ')}. Nella quadratura entra la somma, ${fmtEUR(f.rivalsaImporto)}; il raffronto con la configurazione, che ha una sola aliquota, qui non si fa.`);
+
+  // 2-bis. I rimborsi spese hanno il mese della spesa. La descrizione
+  //        di un rimborso cita spesso la trasferta a cui si riferisce —
+  //        «Riferimento: Trasferta 23 Aprile 2026» — mentre l'app la
+  //        spesa la conta nel mese in cui e' registrata, ed e' li' che la
+  //        aspetta in fattura. Se la riga combacia con una spesa del
+  //        cliente — o con le spese di un mese, sommate — e il mese letto
+  //        dal testo non ne ha nessuna, vale il mese della spesa. E lo si
+  //        dice: e' una correzione, non deve passare in silenzio.
+  if(cliente)f.righe.forEach(r=>{
+    if(!/rimbors|\bspes[ae]\b|trasfert|\bkm\b|chilometr/i.test(r.descrizione||''))return;
+    const sue=(data.travelExpenses||[]).filter(e=>e.client_id===cliente.id&&expIsInvoice(e));
+    const meseDi=e=>String(e.expense_date||'').slice(0,7);
+    const perMeseSpese={};
+    sue.forEach(e=>{perMeseSpese[meseDi(e)]=(perMeseSpese[meseDi(e)]||0)+Number(e.amount||0)});
+    const combacia=m=>sue.some(e=>meseDi(e)===m&&vicini(e.amount,r.importo))||vicini(perMeseSpese[m],r.importo);
+    if(r.mese&&combacia(r.mese))return;
+    const candidati=Object.keys(perMeseSpese).filter(combacia);
+    if(candidati.length!==1)return;
+    const letto=r.mese;
+    r.mese=candidati[0];
+    nota('nota',`Rimborso spese attribuito a ${monthLabel(r.mese)}`,
+      `«${r.descrizione}»${letto?' nomina '+monthLabel(letto)+', ma':''} corrisponde alle spese di ${monthLabel(r.mese)} registrate nell’app (${fmtEUR(r.importo)}): il mese è quello della spesa.`);
+  });
 
   // 2-ter. I mesi che la fattura copre. Si calcolano qui, prima della
   //        configurazione, perche' rivalsa e bollo di UNA fattura
