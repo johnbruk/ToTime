@@ -122,6 +122,9 @@ console.log('\n=== IL BILANCIO ===');
   ok(/Compensi 3\.?100,00\s?€ · di cui esclusi dalla fatturazione 2\.?300,00\s?€/.test(t),
      'nel mese per mese settembre dice quanto è escluso',(t.match(/Compensi 3[^·]*·[^·]*·/)||[''])[0]);
   ok(/Rimborso km/.test(t),'e i 100 di km stanno fra i costi per voce');
+  const set=await pg.evaluate(()=>{const r=[...document.querySelectorAll('#app .row')].find(r=>r.getAttribute('onclick')==='openMonthExpenses(2026,9)');
+    return r?r.querySelector('.value').textContent.trim():null});
+  ok(quasi(eur(set),680),'e il margine di settembre è 680: 3.100 − 2.300 esclusi − 120 di spese',set);
   await pg.close();
 }
 
