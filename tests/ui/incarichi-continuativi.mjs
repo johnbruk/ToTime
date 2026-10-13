@@ -64,10 +64,11 @@ console.log('\n=== OGNI RIGA DICE SU QUALE ATTIVITÀ SONO LE ORE ===');
     const d=el?el.querySelectorAll('.desc')[0]:null;
     return [id,{tag:d?.querySelector('.actTag')?.textContent.trim()||'',testo:(d?.textContent||'').replace(/\s+/g,' ').trim()}];})));
   ok(r.t1.tag==='Onboarding','le ore sulla WBS senza attività del catalogo mostrano il nome della WBS, come un’attività: «Onboarding»',JSON.stringify(r.t1));
-  ok(r.t1.testo==='Onboarding · Remoto','seguito dalla sede',r.t1.testo);
+  ok(r.t1.testo==='Onboarding','e basta: la sede non sta nell’elenco, si legge aprendo il consuntivo',r.t1.testo);
   ok(!/20 ·|K2-RICH/.test(r.t1.testo),'senza il codice della WBS, che i consuntivi degli altri clienti non hanno',r.t1.testo);
+  ok(r.t2.testo==='Analisi','anche con l’attività del catalogo la riga dice l’attività e basta, senza la sede',r.t2.testo);
   ok(r.t2.tag==='Analisi','con un’attività del catalogo resta l’attività',JSON.stringify(r.t2));
-  ok(r.t3.testo==='Remoto','e senza né attività né WBS c’è la sede, senza il puntino davanti',r.t3.testo);
+  ok(r.t3.testo==='','e senza né attività né WBS la riga resta pulita, senza puntini',JSON.stringify(r.t3.testo));
   ok(pg.errs.length===0,'nessun errore JS',pg.errs.slice(0,2).join(' | ')||'nessuno');
   await pg.close();
 }
@@ -84,7 +85,33 @@ console.log('\n=== OGNI RIGA DICE SU QUALE ATTIVITÀ SONO LE ORE ===');
   const h=await pg.evaluate(()=>Object.fromEntries(['t1','t2'].map(id=>{
     const el=[...document.querySelectorAll('#app .row')].find(x=>(x.getAttribute('onclick')||'').includes("'"+id+"'"));
     return [id,Math.round(el.querySelectorAll('.desc')[0].getBoundingClientRect().height)]})));
-  ok(h.t1===h.t2,'sul telefono la riga con la WBS è alta come quella con un’attività: la sede resta sulla stessa riga',`${h.t1} contro ${h.t2} px`);
+  ok(h.t1===h.t2,'sul telefono la riga con la WBS è alta come quella con un’attività: niente va a capo',`${h.t1} contro ${h.t2} px`);
+  await pg.close();
+}
+
+{
+  // la testata del cliente sul telefono, con le spese del mese: il
+  // conteggio era piu' largo dello schermo e il nome finiva in colonna,
+  // una lettera per riga
+  const pg=await b.newPage({viewport:{width:390,height:900},hasTouch:true});
+  await pg.goto(`http://127.0.0.1:${port}/tests/ui/mock.html`,{waitUntil:'networkidle'});await pg.waitForTimeout(800);
+  await pg.evaluate(SEMI_TAG.replace("{id:'w20',code:'20',","{id:'w20',code:'K2-RICH-2026-001-20',")+`
+    S.expense_categories=[{id:'tr',name:'Treno',active:true,reimbursable:true}];
+    S.travel_expenses=[1,2,3,4,5].map(n=>({id:'x'+n,expense_date:'2026-10-0'+n,client_id:'k2',expense_category_id:'tr',
+      amount:n===5?397.96:300,reimbursement_type:'invoice',reimbursable:true}));`);
+  await pg.evaluate(()=>window.reload());await pg.waitForTimeout(600);
+  await pg.evaluate(()=>{window.openInvoiceDetail('k2',2026,10)});await pg.waitForTimeout(300);
+  await pg.evaluate(()=>window.go('timesheet'));await pg.waitForTimeout(600);
+  const m=await pg.evaluate(()=>{
+    const h=[...document.querySelectorAll('#app .cliHead')].find(x=>/K2 Partnering/.test(x.textContent));
+    const nome=h.querySelector('.cliToggle>b'),conto=h.querySelector('.cliConto');
+    const lh=parseFloat(getComputedStyle(nome).lineHeight)||20;
+    return {larghezza:Math.round(nome.getBoundingClientRect().width),righe:Math.round(nome.getBoundingClientRect().height/lh),
+      conto:conto.textContent.replace(/\s+/g,' ').trim(),contoDentro:conto.getBoundingClientRect().right<=h.getBoundingClientRect().right+1,
+      scroll:document.documentElement.scrollWidth-document.documentElement.clientWidth}});
+  ok(m.righe===1&&m.larghezza>=100,'col conteggio delle spese il nome del cliente resta su una riga, leggibile',`${m.larghezza} px, ${m.righe} righe`);
+  ok(/5 spese/.test(m.conto)&&m.contoDentro,'e il conteggio intero sta dentro la testata, sotto il nome se serve',m.conto);
+  ok(m.scroll<=1,'senza scroll di lato',m.scroll+'px');
   await pg.close();
 }
 
