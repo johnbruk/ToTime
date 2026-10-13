@@ -271,6 +271,17 @@ button,input,select,textarea{font-family:var(--font-body)} button{cursor:pointer
 .cliToggle:hover .cliChev{color:var(--text)}
 .cliToggle:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
 .cliChev{flex:0 0 auto;color:var(--muted);font-size:12px;line-height:1;width:12px}
+/* Su telefono, con le spese del mese, il conteggio («12 voci · 96,0 h ·
+   12,00 gg/u · 5 spese 1.597,96 €») era piu' largo dello schermo e non
+   poteva andare a capo: il nome del cliente si stringeva fino a una
+   lettera per riga. Adesso il nome non scende sotto una larghezza che
+   si legge, e se lo spazio non basta il conteggio va sotto, e a capo. */
+/* Solo le testate dei clienti: le schede delle trasferte riusano
+   .cliToggle, e li' il titolo deve restringersi accanto alla freccia,
+   non scendere sotto lasciandola sola. */
+.cliGruppo:not(.trip) .cliToggle{flex-wrap:wrap;row-gap:2px}
+.cliHead .cliToggle>b{min-width:min(10em,100%)}
+.cliHead .cliToggle>.cliConto{white-space:normal;flex:0 1 auto;min-width:0}
 .cliGruppo.chiuso .cliHead{border-bottom:1px solid var(--line)}
 .cliAzioni{display:flex;gap:8px;flex:0 0 auto;margin-left:auto}
 .cliAzioni .miniBtn{min-height:44px}

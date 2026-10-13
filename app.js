@@ -161,6 +161,12 @@ function tagAttivita(r){
 // intero — «K2-RICH-2026-001-20 · Onboarding» — era lungo, mandava la
 // sede a capo, e i consuntivi degli altri clienti non lo hanno.
 function nomeWbs(w){return w?(w.name||w.code||''):''}
+// Nell'elenco dei consuntivi la riga dice il progetto e l'attivita', e
+// basta. La sede e la citta' restano salvate e si leggono aprendo il
+// consuntivo: nell'elenco c'erano solo sulle righe che le avevano — gli
+// incarichi continuativi mettono «Remoto» di serie, i consuntivi
+// scritti a mano spesso no — e righe dello stesso mese si leggevano
+// diverse. Scelta dell'utente, 13 ottobre.
 function nomeAttivita(r){
   if(r&&r.activity_id&&activityName(r.activity_id))return activityName(r.activity_id);
   const w=r&&r.wbs_id?wbsById(r.wbs_id):null;
@@ -3888,9 +3894,9 @@ async function deleteSelected(){
 // riempirebbe la colonna del titolo con la stessa parola dieci volte di
 // fila e spingerebbe in coda il progetto, che e' la cosa che cambia.
 function titoloRiga(r){return projectName(r.project_id)||'Senza progetto'}
-function timesheetRow(r){if(r.kind==='daily')return `<div ${rowAttrs('daily',r.id)}><div class="date">${selBox('daily',r.id)}${dateIT(r.entry_date)}</div><div><div class="title">${esc(titoloRiga(r))}${isTM(r)?' <span class="tag green">T&amp;M</span>':''}${isPlanned(r)?' <span class="tag blue">Pianificato</span>':''}</div><div class="desc">${[tagAttivita(r),r.work_site||r.work_city?esc([r.work_site,r.work_city].filter(Boolean).join(' - ')):''].filter(Boolean).join(' · ')}</div><div class="desc">${esc(r.description||'')}</div>${r.notes?`<div class="desc">Note: ${esc(r.notes)}</div>`:''}</div><div class="value">${fmtNum(r.hours,1)} h</div></div>`;
+function timesheetRow(r){if(r.kind==='daily')return `<div ${rowAttrs('daily',r.id)}><div class="date">${selBox('daily',r.id)}${dateIT(r.entry_date)}</div><div><div class="title">${esc(titoloRiga(r))}${isTM(r)?' <span class="tag green">T&amp;M</span>':''}${isPlanned(r)?' <span class="tag blue">Pianificato</span>':''}</div><div class="desc">${tagAttivita(r)}</div><div class="desc">${esc(r.description||'')}</div>${r.notes?`<div class="desc">Note: ${esc(r.notes)}</div>`:''}</div><div class="value">${fmtNum(r.hours,1)} h</div></div>`;
 if(r.kind==='monthly')return `<div ${rowAttrs('monthly',r.id)}><div class="date">${selBox('monthly',r.id)}${String(r.month).padStart(2,'0')}/${r.year}</div><div><div class="title">${esc(titoloRiga(r))}</div><div class="desc">Una tantum mensile</div><div class="desc">${esc(r.description||'')}</div></div><div class="value">Mensile</div></div>`;
-if(r.kind==='manual')return `<div ${rowAttrs('manual',r.id)}><div class="date">${selBox('manual',r.id)}${dateIT(r.entry_date)}</div><div><div class="title">${esc(titoloRiga(r))}</div><div class="desc">Forfettario ${[tagAttivita(r),r.work_site||r.work_city?esc([r.work_site,r.work_city].filter(Boolean).join(' - ')):''].filter(Boolean).join(' · ')}</div><div class="desc">${esc(r.description||'')}</div></div><div class="value">Manuale</div></div>`;
+if(r.kind==='manual')return `<div ${rowAttrs('manual',r.id)}><div class="date">${selBox('manual',r.id)}${dateIT(r.entry_date)}</div><div><div class="title">${esc(titoloRiga(r))}</div><div class="desc">Forfettario ${tagAttivita(r)}</div><div class="desc">${esc(r.description||'')}</div></div><div class="value">Manuale</div></div>`;
 return `<div ${rowAttrs('expense',r.id)}><div class="date">${selBox('expense',r.id)}${dateIT(r.expense_date)}</div><div><div class="title">${esc(titoloRiga(r))}</div><div class="desc">Spesa · ${esc(expenseCategoryName(r.expense_category_id))} ${r.work_site||r.work_city?'· '+esc([r.work_site,r.work_city].filter(Boolean).join(' - ')):''}</div><div class="desc">${esc(r.description||'')}</div></div><div class="value">Spesa</div></div>`}
 
 function annualSummaryCard(){const y=currentYear();const at=annualTotals(y);return `<div class="card cardLink" onclick="openAnnualMonths()" role="button" title="Dettaglio consuntivato mese per mese"><b>Annuale ${y} <span class="cardLinkArrow">›</span></b><div class="kpiGrid three" style="margin-top:14px"><div><span>Consuntivato</span><strong>${fmtEUR(at.consuntivato)}</strong></div><div><span>Fatturato</span><strong>${fmtEUR(at.fatturato)}</strong></div><div><span>Incassato</span><strong>${fmtEUR(at.incassato)}</strong></div></div><div class="metricLine" style="margin-top:12px">Da incassare <span class="dot">·</span> ${fmtEUR(at.daIncassare)}</div></div>`}
