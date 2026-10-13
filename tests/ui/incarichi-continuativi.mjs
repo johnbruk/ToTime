@@ -63,11 +63,28 @@ console.log('\n=== OGNI RIGA DICE SU QUALE ATTIVITÀ SONO LE ORE ===');
       [...document.querySelectorAll('#app .row')].find(x=>(x.getAttribute('onclick')||'').includes("'"+id+"'"));
     const d=el?el.querySelectorAll('.desc')[0]:null;
     return [id,{tag:d?.querySelector('.actTag')?.textContent.trim()||'',testo:(d?.textContent||'').replace(/\s+/g,' ').trim()}];})));
-  ok(r.t1.tag==='20 · Onboarding','le ore sulla WBS senza attività del catalogo mostrano la WBS: «20 · Onboarding»',JSON.stringify(r.t1));
-  ok(r.t1.testo==='20 · Onboarding · Remoto','seguita dalla sede',r.t1.testo);
+  ok(r.t1.tag==='Onboarding','le ore sulla WBS senza attività del catalogo mostrano il nome della WBS, come un’attività: «Onboarding»',JSON.stringify(r.t1));
+  ok(r.t1.testo==='Onboarding · Remoto','seguito dalla sede',r.t1.testo);
+  ok(!/20 ·|K2-RICH/.test(r.t1.testo),'senza il codice della WBS, che i consuntivi degli altri clienti non hanno',r.t1.testo);
   ok(r.t2.tag==='Analisi','con un’attività del catalogo resta l’attività',JSON.stringify(r.t2));
   ok(r.t3.testo==='Remoto','e senza né attività né WBS c’è la sede, senza il puntino davanti',r.t3.testo);
   ok(pg.errs.length===0,'nessun errore JS',pg.errs.slice(0,2).join(' | ')||'nessuno');
+  await pg.close();
+}
+
+{
+  // sul telefono: la riga con la WBS è alta come quella con l'attività
+  // del catalogo — la sede non va a capo
+  const pg=await b.newPage({viewport:{width:390,height:900},hasTouch:true});
+  await pg.goto(`http://127.0.0.1:${port}/tests/ui/mock.html`,{waitUntil:'networkidle'});await pg.waitForTimeout(800);
+  await pg.evaluate(SEMI_TAG.replace("{id:'w20',code:'20',","{id:'w20',code:'K2-RICH-2026-001-20',"));
+  await pg.evaluate(()=>window.reload());await pg.waitForTimeout(600);
+  await pg.evaluate(()=>{window.openInvoiceDetail('k2',2026,10)});await pg.waitForTimeout(300);
+  await pg.evaluate(()=>window.go('timesheet'));await pg.waitForTimeout(600);
+  const h=await pg.evaluate(()=>Object.fromEntries(['t1','t2'].map(id=>{
+    const el=[...document.querySelectorAll('#app .row')].find(x=>(x.getAttribute('onclick')||'').includes("'"+id+"'"));
+    return [id,Math.round(el.querySelectorAll('.desc')[0].getBoundingClientRect().height)]})));
+  ok(h.t1===h.t2,'sul telefono la riga con la WBS è alta come quella con un’attività: la sede resta sulla stessa riga',`${h.t1} contro ${h.t2} px`);
   await pg.close();
 }
 
@@ -142,7 +159,7 @@ console.log('\n=== INCARICHI VECCHI SU DUE WBS RESTANO DUE ===');
   await pg.evaluate(()=>window.go('tmManage'));await pg.waitForTimeout(500);
   const r=await pg.evaluate(()=>[...document.querySelectorAll('#app .list .row')].map(x=>x.innerText.replace(/\s+/g,' ')));
   ok(r.length===2,'due incarichi, uno per WBS',String(r.length));
-  ok(r.some(x=>/20 · Onboarding/.test(x)&&/2 giorni/.test(x))&&r.some(x=>/30 · Sviluppo/.test(x)&&/2 giorni/.test(x)),
+  ok(r.some(x=>/Onboarding/.test(x)&&/2 giorni/.test(x))&&r.some(x=>/Sviluppo/.test(x)&&/2 giorni/.test(x)),
      'ognuno con la sua WBS e i suoi due giorni',r.join(' | '));
   await pg.close();
 }

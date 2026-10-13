@@ -155,12 +155,16 @@ function activityTag(id){const n=activityName(id);return n?`<span class="tag act
 function tagAttivita(r){
   if(r&&r.activity_id&&activityName(r.activity_id))return activityTag(r.activity_id);
   const w=r&&r.wbs_id?wbsById(r.wbs_id):null;
-  return w?`<span class="tag actTag ${activityTagClass(w.id)}">${esc(wbsLabel(w))}</span>`:'';
+  return w?`<span class="tag actTag ${activityTagClass(w.id)}">${esc(nomeWbs(w))}</span>`:'';
 }
+// Il nome della WBS, come quello di un'attivita': «Onboarding». Il codice
+// intero — «K2-RICH-2026-001-20 · Onboarding» — era lungo, mandava la
+// sede a capo, e i consuntivi degli altri clienti non lo hanno.
+function nomeWbs(w){return w?(w.name||w.code||''):''}
 function nomeAttivita(r){
   if(r&&r.activity_id&&activityName(r.activity_id))return activityName(r.activity_id);
   const w=r&&r.wbs_id?wbsById(r.wbs_id):null;
-  return w?wbsLabel(w):'';
+  return nomeWbs(w);
 }
 function expenseCategoryName(id){return expenseCategoryById(id)?.name||'Spesa'}
 function entryRate(e){return Number(e.daily_rate_snapshot ?? clientById(e.client_id)?.daily_rate ?? 0)}
