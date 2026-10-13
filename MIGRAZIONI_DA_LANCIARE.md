@@ -113,6 +113,26 @@ La verifica deve dire: `tabella invoice_documents esiste` ·
 
 ---
 
+## 6. `migrations/2026-10-13_incarichi-continuativi.sql`
+
+Aggiunge a `timesheet_entries` la colonna `tm_batch_id`: il codice che
+tiene insieme i consuntivi generati da un incarico continuativo.
+
+Serve per: vedere gli incarichi in «Incarichi continuativi», con
+l'etichetta T&M sulle righe, ed eliminare un intero periodo in un colpo.
+
+Senza di lei: l'app non genera piu' incarichi. Si ferma e dice di
+lanciare questa migrazione. Prima, invece, salvava i consuntivi senza il
+codice, e l'incarico non risultava da nessuna parte.
+
+I consuntivi generati prima della migrazione restano consuntivi validi,
+ma non sono un incarico. Per averli come incarico: selezionali nel
+timesheet, eliminali, e rigenera l'incarico dopo la migrazione.
+
+La verifica deve dire: `colonna tm_batch_id esiste`.
+
+---
+
 ## Dopo
 
 Due cose da fare a mano, una volta sola:

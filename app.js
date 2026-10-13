@@ -147,6 +147,21 @@ function actSlots(){
 }
 function activityTagClass(id){const s=actSlots()[id];return 'act'+(s===undefined?actHash(id)%ACT_COLORI:s)}
 function activityTag(id){const n=activityName(id);return n?`<span class="tag actTag ${activityTagClass(id)}">${esc(n)}</span>`:''}
+// L'attivita' di una riga: quella del catalogo, se c'e'; altrimenti la
+// WBS su cui sono state registrate le ore. Da quando l'attivita' e'
+// facoltativa, una WBS senza attivita' collegata salva le ore senza
+// activity_id, e l'elenco mostrava «· Remoto» e basta, come se
+// l'attivita' non ci fosse — mentre il modulo la mostrava.
+function tagAttivita(r){
+  if(r&&r.activity_id&&activityName(r.activity_id))return activityTag(r.activity_id);
+  const w=r&&r.wbs_id?wbsById(r.wbs_id):null;
+  return w?`<span class="tag actTag ${activityTagClass(w.id)}">${esc(wbsLabel(w))}</span>`:'';
+}
+function nomeAttivita(r){
+  if(r&&r.activity_id&&activityName(r.activity_id))return activityName(r.activity_id);
+  const w=r&&r.wbs_id?wbsById(r.wbs_id):null;
+  return w?wbsLabel(w):'';
+}
 function expenseCategoryName(id){return expenseCategoryById(id)?.name||'Spesa'}
 function entryRate(e){return Number(e.daily_rate_snapshot ?? clientById(e.client_id)?.daily_rate ?? 0)}
 function entryStd(e){return Number(e.standard_hours_snapshot ?? clientById(e.client_id)?.standard_hours ?? 8) || 8}
@@ -301,7 +316,8 @@ const MIGRAZIONE_DI={
   is_mileage:'2026-10-06_veicoli-e-chilometrica.sql',
   payment_method:'2026-10-06_tracciabilita.sql',
   receipt_kept:'2026-10-06_tracciabilita.sql',
-  receipt_path:'2026-10-06_ricevute-storage.sql'
+  receipt_path:'2026-10-06_ricevute-storage.sql',
+  tm_batch_id:'2026-10-13_incarichi-continuativi.sql'
 };
 const NOME_COLONNA={
   trip_id:'la trasferta',vehicle_id:'il veicolo',from_place:'la partenza',
@@ -311,7 +327,8 @@ const NOME_COLONNA={
   stamp_duty_mode:'chi paga la marca da bollo',
   receipt_path:'la ricevuta allegata',wbs_id:'la commessa',
   is_mileage:'il rimborso chilometrico',
-  activity_id:'il tipo di attività',project_id:'il progetto',client_id:'il cliente'
+  activity_id:'il tipo di attività',project_id:'il progetto',client_id:'il cliente',
+  tm_batch_id:'il codice dell\u2019incarico continuativo'
 };
 // Il messaggio da dire quando una scrittura ha dovuto lasciare fuori
 // dei campi: cosa non e' stato salvato, e quale migrazione lo sistema.
@@ -2513,7 +2530,11 @@ function calendario(){
 }
 function italianHolidays(y){return new Set([...Object.keys(PATRON_HOLIDAYS).map(md=>y+'-'+md),y+'-01-01',y+'-01-06',y+'-04-25',y+'-05-01',y+'-06-02',y+'-08-15',y+'-11-01',y+'-12-08',y+'-12-25',y+'-12-26',easterMonday(y)]);}
 function tmWorkingDays(start,end,excludeHolidays){const out=[];if(!start||!end)return out;let d=new Date(start+'T00:00:00Z');const e=new Date(end+'T00:00:00Z');if(isNaN(d.getTime())||isNaN(e.getTime())||d>e)return out;const hol={};for(let y=d.getUTCFullYear();y<=e.getUTCFullYear();y++)hol[y]=italianHolidays(y);let guard=0;while(d<=e&&guard++<1200){const wd=d.getUTCDay();const iso=d.toISOString().slice(0,10);if(wd!==0&&wd!==6&&!(excludeHolidays&&hol[d.getUTCFullYear()].has(iso))&&!isFerie(iso))out.push(iso);d=new Date(d.getTime()+86400000);}return out;}
-async function insertManyResilient(table,rows){if(!rows.length)return {error:null};let payloads=rows.map(r=>({...r}));let res=await sb.from(table).insert(payloads);let guard=0;while(isMissingColumnError(res.error)&&guard++<40){const col=missingColumnName(res.error);if(!col)break;let removed=false;payloads=payloads.map(p=>{if(Object.prototype.hasOwnProperty.call(p,col)){const q={...p};delete q[col];removed=true;return q;}return p;});if(!removed)break;res=await sb.from(table).insert(payloads);}return res;}
+// Le colonne «obbligatorie» non si tolgono per far passare la scrittura:
+// senza di loro le righe salvate non servono a niente, e meglio non
+// salvarle e dirlo. Una insert multipla e' tutta o niente, quindi se si
+// ferma qui non e' stata scritta nessuna riga.
+async function insertManyResilient(table,rows,obbligatorie=[]){if(!rows.length)return {error:null};let payloads=rows.map(r=>({...r}));let res=await sb.from(table).insert(payloads);let guard=0;while(isMissingColumnError(res.error)&&guard++<40){const col=missingColumnName(res.error);if(!col||obbligatorie.includes(col))break;let removed=false;payloads=payloads.map(p=>{if(Object.prototype.hasOwnProperty.call(p,col)){const q={...p};delete q[col];removed=true;return q;}return p;});if(!removed)break;res=await sb.from(table).insert(payloads);}return res;}
 const TM_CADENCE=[['daily','Giornaliero · ogni giorno lavorativo'],['weekly_fixed','Settimanale · giorno fisso'],['weekly_any','Settimanale · primo giorno utile']];
 const WEEKDAYS=[['1','Lunedì'],['2','Martedì'],['3','Mercoledì'],['4','Giovedì'],['5','Venerdì']];
 function tmDates(start,end,excl,cadence,weekday){
@@ -2536,9 +2557,13 @@ async function saveTM(ev){ev.preventDefault();const f=ev.target;const c=clientBy
   {const v=n=>(f[n]&&f[n].value)||'';
    const manca=cosaMancaNellaCatena(v('client_id'),v('hier_project_id'),v('engagement_id'),v('wbs_id'));
    if(manca)return setMsgLeggero(manca,6000);}
-  const rows=r.days.map(iso=>({entry_date:iso,client_id:f.client_id.value,project_id:(lin?lin.project.id:(f.project_id?f.project_id.value:''))||null,wbs_id:(f.wbs_id&&f.wbs_id.value)||null,activity_id:(lin&&lin.wbs.activity_id?lin.wbs.activity_id:(f.activity_id?f.activity_id.value:''))||null,work_location:site||null,work_site:site||null,work_city:null,description:desc,notes:notes,hours:r.hours,status:(iso>tISO?'planned':'actual'),tm_batch_id:batch,daily_rate_snapshot:Number(c?.daily_rate||0),standard_hours_snapshot:Number(c?.standard_hours||8)}));setMsg('Generazione di '+rows.length+' consuntivi in corso...',6000);render();const res=await insertManyResilient('timesheet_entries',rows);if(res.error)return setMsg(res.error.message,8000);await reload();state.month=r.days[0].slice(0,7);state.view='timesheet';setMsg(rows.length+' consuntivi Time & Material generati.',4500);render();}
-function tmBatches(){const map={};(data.entries||[]).filter(isTM).forEach(e=>{const k=e.tm_batch_id||['nb',e.client_id,e.project_id||'',e.activity_id||'',e.hours,e.description||''].join('|');if(!map[k])map[k]={key:k,client_id:e.client_id,project_id:e.project_id,activity_id:e.activity_id,hours:Number(e.hours||0),desc:e.description,ids:[],dates:[],hoursSum:0};const b=map[k];b.ids.push(e.id);b.dates.push(String(e.entry_date));b.hoursSum+=Number(e.hours||0);});return Object.values(map).map(b=>{b.dates.sort();b.start=b.dates[0];b.end=b.dates[b.dates.length-1];b.days=b.ids.length;b.planned=b.dates.filter(d=>d>todayISO()).length;return b;}).sort((a,b)=>String(b.start).localeCompare(a.start));}
-function tmManage(){const batches=tmBatches();return appShell(`<h1>Incarichi continuativi</h1><p class="sub">Un incarico genera in un colpo solo i consuntivi dei giorni lavorativi di un periodo. Da qui li crei, e puoi eliminare un intero periodo senza toccare i singoli giorni.</p>${batches.length?`<div class="list">${batches.map((b,i)=>`<div class="row"><div></div><div><div class="title">${esc(clientName(b.client_id))}${b.project_id?' / '+esc(projectName(b.project_id)):''}${b.planned?' <span class="tag blue">'+b.planned+' pianif.</span>':''}</div><div class="desc">${esc(activityName(b.activity_id)||'')}${b.desc?' · '+esc(b.desc):''}</div><div class="desc">Dal ${fmtDMY(b.start)} al ${fmtDMY(b.end)} · ${b.days} giorni · ${fmtNum(b.hoursSum,1)} h totali · ${fmtNum(b.hours,2)} h/giorno</div><button class="secondary danger" style="margin-top:10px" onclick="deleteTMBatch(${i})">Elimina intero periodo</button></div><div class="value"></div></div>`).join('')}</div>`:emptyState('Nessun incarico continuativo generato.','+ Crea un incarico continuativo',"go('tmForm')")}<div class="actions"><button class="primary" onclick="go('tmForm')">+ Nuovo incarico continuativo</button><button type="button" class="secondary" onclick="go('timesheet')">Torna al timesheet</button></div>`);}
+  const rows=r.days.map(iso=>({entry_date:iso,client_id:f.client_id.value,project_id:(lin?lin.project.id:(f.project_id?f.project_id.value:''))||null,wbs_id:(f.wbs_id&&f.wbs_id.value)||null,activity_id:(lin&&lin.wbs.activity_id?lin.wbs.activity_id:(f.activity_id?f.activity_id.value:''))||null,work_location:site||null,work_site:site||null,work_city:null,description:desc,notes:notes,hours:r.hours,status:(iso>tISO?'planned':'actual'),tm_batch_id:batch,daily_rate_snapshot:Number(c?.daily_rate||0),standard_hours_snapshot:Number(c?.standard_hours||8)}));setMsg('Generazione di '+rows.length+' consuntivi in corso...',6000);render();// Senza il codice dell'incarico i consuntivi si salvavano lo stesso — la
+// colonna veniva tolta in silenzio — ma non erano piu' un incarico: la
+// pagina degli incarichi diceva «nessuno», l'etichetta T&M non c'era, e
+// il periodo non si poteva piu' eliminare in un colpo.
+const res=await insertManyResilient('timesheet_entries',rows,['tm_batch_id']);if(res.error){if(missingColumnName(res.error)==='tm_batch_id')return setMsg('Non \u00e8 stato salvato niente: il database non ha ancora dove scrivere il codice dell\u2019incarico continuativo. Lancia la migrazione '+MIGRAZIONE_DI.tm_batch_id+' in Supabase e riprova.',15000);return setMsg(res.error.message,8000);}await reload();state.month=r.days[0].slice(0,7);state.view='timesheet';setMsg(rows.length+' consuntivi Time & Material generati.',4500);render();}
+function tmBatches(){const map={};(data.entries||[]).filter(isTM).forEach(e=>{const k=e.tm_batch_id||['nb',e.client_id,e.project_id||'',e.activity_id||'',e.hours,e.description||''].join('|');if(!map[k])map[k]={key:k,client_id:e.client_id,project_id:e.project_id,activity_id:e.activity_id,wbs_id:e.wbs_id||null,hours:Number(e.hours||0),desc:e.description,ids:[],dates:[],hoursSum:0};const b=map[k];b.ids.push(e.id);b.dates.push(String(e.entry_date));b.hoursSum+=Number(e.hours||0);});return Object.values(map).map(b=>{b.dates.sort();b.start=b.dates[0];b.end=b.dates[b.dates.length-1];b.days=b.ids.length;b.planned=b.dates.filter(d=>d>todayISO()).length;return b;}).sort((a,b)=>String(b.start).localeCompare(a.start));}
+function tmManage(){const batches=tmBatches();return appShell(`<h1>Incarichi continuativi</h1><p class="sub">Un incarico genera in un colpo solo i consuntivi dei giorni lavorativi di un periodo. Da qui li crei, e puoi eliminare un intero periodo senza toccare i singoli giorni.</p>${batches.length?`<div class="list">${batches.map((b,i)=>`<div class="row"><div></div><div><div class="title">${esc(clientName(b.client_id))}${b.project_id?' / '+esc(projectName(b.project_id)):''}${b.planned?' <span class="tag blue">'+b.planned+' pianif.</span>':''}</div><div class="desc">${esc([nomeAttivita(b),b.desc].filter(Boolean).join(' · '))}</div><div class="desc">Dal ${fmtDMY(b.start)} al ${fmtDMY(b.end)} · ${b.days} giorni · ${fmtNum(b.hoursSum,1)} h totali · ${fmtNum(b.hours,2)} h/giorno</div><button class="secondary danger" style="margin-top:10px" onclick="deleteTMBatch(${i})">Elimina intero periodo</button></div><div class="value"></div></div>`).join('')}</div>`:emptyState('Nessun incarico continuativo generato.','+ Crea un incarico continuativo',"go('tmForm')")}<div class="actions"><button class="primary" onclick="go('tmForm')">+ Nuovo incarico continuativo</button><button type="button" class="secondary" onclick="go('timesheet')">Torna al timesheet</button></div>`);}
 async function deleteTMBatch(i){const b=tmBatches()[i];if(!b)return;if(!confirm('Eliminare l\'intero periodo Time & Material?\n'+b.days+' consuntivi dal '+fmtDMY(b.start)+' al '+fmtDMY(b.end)+'.'))return;const {error}=await sb.from('timesheet_entries').delete().in('id',b.ids);if(error)return setMsg(motivoLeggibile(error),7000);await reload();setMsg(b.days+' consuntivi Time & Material eliminati.',4000);state.view='tmManage';render();}
 /* ---------- Salvare e passare al giorno dopo ----------
    Compilare una settimana significa ripetere lo stesso consuntivo su
@@ -3859,9 +3884,9 @@ async function deleteSelected(){
 // riempirebbe la colonna del titolo con la stessa parola dieci volte di
 // fila e spingerebbe in coda il progetto, che e' la cosa che cambia.
 function titoloRiga(r){return projectName(r.project_id)||'Senza progetto'}
-function timesheetRow(r){if(r.kind==='daily')return `<div ${rowAttrs('daily',r.id)}><div class="date">${selBox('daily',r.id)}${dateIT(r.entry_date)}</div><div><div class="title">${esc(titoloRiga(r))}${isTM(r)?' <span class="tag green">T&amp;M</span>':''}${isPlanned(r)?' <span class="tag blue">Pianificato</span>':''}</div><div class="desc">${activityTag(r.activity_id)} ${r.work_site||r.work_city?'· '+esc([r.work_site,r.work_city].filter(Boolean).join(' - ')):''}</div><div class="desc">${esc(r.description||'')}</div>${r.notes?`<div class="desc">Note: ${esc(r.notes)}</div>`:''}</div><div class="value">${fmtNum(r.hours,1)} h</div></div>`;
+function timesheetRow(r){if(r.kind==='daily')return `<div ${rowAttrs('daily',r.id)}><div class="date">${selBox('daily',r.id)}${dateIT(r.entry_date)}</div><div><div class="title">${esc(titoloRiga(r))}${isTM(r)?' <span class="tag green">T&amp;M</span>':''}${isPlanned(r)?' <span class="tag blue">Pianificato</span>':''}</div><div class="desc">${[tagAttivita(r),r.work_site||r.work_city?esc([r.work_site,r.work_city].filter(Boolean).join(' - ')):''].filter(Boolean).join(' · ')}</div><div class="desc">${esc(r.description||'')}</div>${r.notes?`<div class="desc">Note: ${esc(r.notes)}</div>`:''}</div><div class="value">${fmtNum(r.hours,1)} h</div></div>`;
 if(r.kind==='monthly')return `<div ${rowAttrs('monthly',r.id)}><div class="date">${selBox('monthly',r.id)}${String(r.month).padStart(2,'0')}/${r.year}</div><div><div class="title">${esc(titoloRiga(r))}</div><div class="desc">Una tantum mensile</div><div class="desc">${esc(r.description||'')}</div></div><div class="value">Mensile</div></div>`;
-if(r.kind==='manual')return `<div ${rowAttrs('manual',r.id)}><div class="date">${selBox('manual',r.id)}${dateIT(r.entry_date)}</div><div><div class="title">${esc(titoloRiga(r))}</div><div class="desc">Forfettario ${activityTag(r.activity_id)} ${r.work_site||r.work_city?'· '+esc([r.work_site,r.work_city].filter(Boolean).join(' - ')):''}</div><div class="desc">${esc(r.description||'')}</div></div><div class="value">Manuale</div></div>`;
+if(r.kind==='manual')return `<div ${rowAttrs('manual',r.id)}><div class="date">${selBox('manual',r.id)}${dateIT(r.entry_date)}</div><div><div class="title">${esc(titoloRiga(r))}</div><div class="desc">Forfettario ${[tagAttivita(r),r.work_site||r.work_city?esc([r.work_site,r.work_city].filter(Boolean).join(' - ')):''].filter(Boolean).join(' · ')}</div><div class="desc">${esc(r.description||'')}</div></div><div class="value">Manuale</div></div>`;
 return `<div ${rowAttrs('expense',r.id)}><div class="date">${selBox('expense',r.id)}${dateIT(r.expense_date)}</div><div><div class="title">${esc(titoloRiga(r))}</div><div class="desc">Spesa · ${esc(expenseCategoryName(r.expense_category_id))} ${r.work_site||r.work_city?'· '+esc([r.work_site,r.work_city].filter(Boolean).join(' - ')):''}</div><div class="desc">${esc(r.description||'')}</div></div><div class="value">Spesa</div></div>`}
 
 function annualSummaryCard(){const y=currentYear();const at=annualTotals(y);return `<div class="card cardLink" onclick="openAnnualMonths()" role="button" title="Dettaglio consuntivato mese per mese"><b>Annuale ${y} <span class="cardLinkArrow">›</span></b><div class="kpiGrid three" style="margin-top:14px"><div><span>Consuntivato</span><strong>${fmtEUR(at.consuntivato)}</strong></div><div><span>Fatturato</span><strong>${fmtEUR(at.fatturato)}</strong></div><div><span>Incassato</span><strong>${fmtEUR(at.incassato)}</strong></div></div><div class="metricLine" style="margin-top:12px">Da incassare <span class="dot">·</span> ${fmtEUR(at.daIncassare)}</div></div>`}
