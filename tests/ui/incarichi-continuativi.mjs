@@ -123,6 +123,30 @@ console.log('\n=== GLI ALTRI SALVATAGGI RESTANO RESILIENTI ===');
   await pg.close();
 }
 
+console.log('\n=== INCARICHI VECCHI SU DUE WBS RESTANO DUE ===');
+{
+  // incarichi di prima del codice: si riconoscono dalla descrizione
+  // «Time & Material» e si raggruppano per cliente, progetto, attività,
+  // ore e descrizione. Senza la WBS nella chiave, due incarichi uguali su
+  // WBS diverse diventavano uno: con l'etichetta della prima, e
+  // «Elimina intero periodo» li cancellava tutti e due.
+  const pg=await apri(`
+    const S=window.__stores;
+    S.clients=[{id:'k2',name:'K2 Partnering',daily_rate:500,standard_hours:8,compensation_type:'daily_rate_8h',active:true}];
+    S.projects=[{id:'nc',client_id:'k2',name:'NewCom',active:true}];
+    S.wbs_items=[{id:'w20',code:'20',name:'Onboarding',activity_id:null,status:'active'},
+                 {id:'w30',code:'30',name:'Sviluppo',activity_id:null,status:'active'}];
+    const e=(id,d,w)=>({id,entry_date:d,client_id:'k2',project_id:'nc',wbs_id:w,activity_id:null,hours:8,
+      description:'Time & Material',daily_rate_snapshot:500,standard_hours_snapshot:8});
+    S.timesheet_entries=[e('a1','2026-09-01','w20'),e('a2','2026-09-02','w20'),e('b1','2026-09-03','w30'),e('b2','2026-09-04','w30')];`);
+  await pg.evaluate(()=>window.go('tmManage'));await pg.waitForTimeout(500);
+  const r=await pg.evaluate(()=>[...document.querySelectorAll('#app .list .row')].map(x=>x.innerText.replace(/\s+/g,' ')));
+  ok(r.length===2,'due incarichi, uno per WBS',String(r.length));
+  ok(r.some(x=>/20 · Onboarding/.test(x)&&/2 giorni/.test(x))&&r.some(x=>/30 · Sviluppo/.test(x)&&/2 giorni/.test(x)),
+     'ognuno con la sua WBS e i suoi due giorni',r.join(' | '));
+  await pg.close();
+}
+
 await b.close(); srv.close();
 console.log(`\n=== incarichi continuativi: OK ${pass} · KO ${fail} ===`);
 process.exit(fail?1:0);

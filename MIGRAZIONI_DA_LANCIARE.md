@@ -7,6 +7,11 @@ un blocco di verifica che stampa cosa è stato fatto.
 Finché una migrazione non è stata lanciata, la parte dell'app che la
 usa **ricade sul comportamento di prima**. Non si rompe niente.
 
+**Con un'eccezione, la 6** (incarichi continuativi): senza di lei l'app
+**non genera incarichi**, e lo dice. Salvarli senza il loro codice,
+come succedeva prima, li rendeva consuntivi qualunque: l'incarico non
+risultava da nessuna parte. Va lanciata prima di generarne.
+
 Su quanto l'app lo dica, va distinto, perché la prima stesura di questo
 documento prometteva più di quanto il codice facesse:
 
