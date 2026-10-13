@@ -276,7 +276,10 @@ button,input,select,textarea{font-family:var(--font-body)} button{cursor:pointer
    poteva andare a capo: il nome del cliente si stringeva fino a una
    lettera per riga. Adesso il nome non scende sotto una larghezza che
    si legge, e se lo spazio non basta il conteggio va sotto, e a capo. */
-.cliToggle{flex-wrap:wrap;row-gap:2px}
+/* Solo le testate dei clienti: le schede delle trasferte riusano
+   .cliToggle, e li' il titolo deve restringersi accanto alla freccia,
+   non scendere sotto lasciandola sola. */
+.cliGruppo:not(.trip) .cliToggle{flex-wrap:wrap;row-gap:2px}
 .cliHead .cliToggle>b{min-width:min(10em,100%)}
 .cliHead .cliToggle>.cliConto{white-space:normal;flex:0 1 auto;min-width:0}
 .cliGruppo.chiuso .cliHead{border-bottom:1px solid var(--line)}

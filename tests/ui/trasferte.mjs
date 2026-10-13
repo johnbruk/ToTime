@@ -226,6 +226,28 @@ console.log('\n=== NIENTE TRASFERTE, NIENTE DANNI ===');
   await pg.close();
 }
 
+console.log('\n=== SUL TELEFONO IL TITOLO DELLA TRASFERTA RESTA ACCANTO ALLA FRECCIA ===');
+{
+  // le schede delle trasferte riusano la testata dei clienti: la
+  // correzione che fa andare a capo il conteggio dei clienti non deve
+  // portare un titolo lungo sotto la freccia, lasciandola sola
+  const pg=await b.newPage({viewport:{width:390,height:1800},hasTouch:true});
+  await pg.goto(`http://127.0.0.1:${port}/tests/ui/mock.html`,{waitUntil:'networkidle'});
+  await pg.waitForTimeout(800);
+  await pg.evaluate(SEMI+`S.trips=[{id:'tl',client_id:'k2',destination_city:'San Giovanni la Punta, stabilimento Omnichannel nord',destination_country:'IT',start_date:'2026-10-25',end_date:'2026-10-29'}];
+    S.travel_expenses.forEach(e=>{if(e.work_city==='Catania')e.trip_id='tl'});`);
+  await pg.evaluate(()=>window.reload());await pg.waitForTimeout(700);
+  await pg.evaluate(()=>window.go('expenses'));await pg.waitForTimeout(450);
+  await vaiAOttobre(pg);
+  const m=await pg.evaluate(()=>{const t=document.querySelector('#app .cliGruppo.trip .cliToggle');
+    if(!t)return null;const c=t.querySelector('.cliChev').getBoundingClientRect(),sp=t.querySelector('.cliChev+span').getBoundingClientRect();
+    return {accanto:sp.left>c.right-1&&sp.top<c.bottom,chev:Math.round(c.top),titolo:Math.round(sp.top),
+      scroll:document.documentElement.scrollWidth-document.documentElement.clientWidth}});
+  ok(m&&m.accanto,'il titolo lungo della trasferta resta accanto alla freccia, non sotto',JSON.stringify(m));
+  ok(m&&m.scroll<=1,'senza scroll di lato',m&&m.scroll+'px');
+  await pg.close();
+}
+
 await b.close(); srv.close();
 console.log(`\n=== trasferte: OK ${pass} · KO ${fail} ===`);
 process.exit(fail?1:0);
