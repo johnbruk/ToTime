@@ -7,6 +7,11 @@ un blocco di verifica che stampa cosa è stato fatto.
 Finché una migrazione non è stata lanciata, la parte dell'app che la
 usa **ricade sul comportamento di prima**. Non si rompe niente.
 
+**Con un'eccezione, la 6** (incarichi continuativi): senza di lei l'app
+**non genera incarichi**, e lo dice. Salvarli senza il loro codice,
+come succedeva prima, li rendeva consuntivi qualunque: l'incarico non
+risultava da nessuna parte. Va lanciata prima di generarne.
+
 Su quanto l'app lo dica, va distinto, perché la prima stesura di questo
 documento prometteva più di quanto il codice facesse:
 
@@ -110,6 +115,26 @@ riscrivere le schede.
 
 La verifica deve dire: `tabella invoice_documents esiste` ·
 `RLS attiva` · `policy 4` · `fatture conservate 0` (all'inizio).
+
+---
+
+## 6. `migrations/2026-10-13_incarichi-continuativi.sql`
+
+Aggiunge a `timesheet_entries` la colonna `tm_batch_id`: il codice che
+tiene insieme i consuntivi generati da un incarico continuativo.
+
+Serve per: vedere gli incarichi in «Incarichi continuativi», con
+l'etichetta T&M sulle righe, ed eliminare un intero periodo in un colpo.
+
+Senza di lei: l'app non genera piu' incarichi. Si ferma e dice di
+lanciare questa migrazione. Prima, invece, salvava i consuntivi senza il
+codice, e l'incarico non risultava da nessuna parte.
+
+I consuntivi generati prima della migrazione restano consuntivi validi,
+ma non sono un incarico. Per averli come incarico: selezionali nel
+timesheet, eliminali, e rigenera l'incarico dopo la migrazione.
+
+La verifica deve dire: `colonna tm_batch_id esiste`.
 
 ---
 
