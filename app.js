@@ -3494,9 +3494,6 @@ function elencoCliente(g,cercando){
   // e il numero non tornava con niente.
   const conto=g.voci.length===1?'1 voce':g.voci.length+' voci';
   const ore=g.ore>0?` <span class="dot">·</span> ${fmtNum(g.ore,1)} h <span class="dot">·</span> ${fmtNum(g.ore/std,2)} gg/u`:'';
-  const contoSpese=g.spese.length
-    ? ` <span class="dot">·</span> ${g.spese.length} ${g.spese.length===1?'spesa':'spese'} ${fmtEUR(g.speseTot)}`
-    : '';
   const nome=esc(clientName(g.client_id));
   // Cercando, i gruppi si aprono tutti: chi cerca vuole vedere quello
   // che ha trovato, non sapere che da qualche parte, dentro un gruppo
@@ -3514,10 +3511,22 @@ function elencoCliente(g,cercando){
       <button type="button" class="cliToggle" aria-expanded="${chiuso?'false':'true'}"
         title="${chiuso?'Apri':'Chiudi'} ${nome}" onclick="apriChiudiCliente('${g.client_id}')">
         <span class="cliChev" aria-hidden="true">${chiuso?'▸':'▾'}</span>
-        <b>${nome}</b><span class="cliConto">${conto}${ore}${contoSpese}</span></button>${azioni}</div>
-    ${chiuso?'':`${g.voci.length?`<div class="list">${g.voci.map(r=>timesheetRow(r)).join('')}</div>`:''}
-      ${g.spese.length?`<div class="cliSpese">Spese di trasferta <span class="cliSpeseTot">${fmtEUR(g.speseTot)}</span></div>
-        <div class="list">${g.spese.map(r=>timesheetRow(r)).join('')}</div>`:''}`}</div>`;
+        <b>${nome}</b><span class="cliConto">${conto}${ore}</span></button>${azioni}</div>
+    ${chiuso||!(g.voci.length||g.spese.length)?'':`<div class="list">${g.voci.map(r=>timesheetRow(r)).join('')}${rigaSpeseCliente(g)}</div>`}</div>`;
+}
+// Le spese di trasferta, nel timesheet, sono UNA riga: quante sono, di
+// che voci, e il totale. Toccandola si apre la pagina Spese del mese,
+// che le ha una per una e per trasferta. Prima stavano qui una per una,
+// sotto una scritta senza stile — «Spese di trasferta 1597,96 €» —
+// fuori dalla scheda: si leggeva come un pezzo di pagina rotto, e
+// l'elenco delle ore si allungava di righe che non sono ore.
+function rigaSpeseCliente(g){
+  if(!g.spese.length)return '';
+  const n=g.spese.length;
+  const voci=[...new Set(g.spese.map(e=>expenseCategoryName(e.expense_category_id)).filter(Boolean))];
+  const quali=voci.slice(0,3).join(', ')+(voci.length>3?'…':'');
+  const tocca=state.selMode?'':` role="button" onclick="go('expenses')" title="Apri le spese del mese"`;
+  return `<div class="row rigaSpese"${tocca}><div class="date"></div><div><div class="title">Spese di trasferta</div><div class="desc">${n} ${n===1?'spesa':'spese'}${quali?' · '+esc(quali):''}</div></div><div class="value">${eurMigliaia(g.speseTot)}${state.selMode?'':' <span class="chev">›</span>'}</div></div>`;
 }
 function elencoMensile(filtrate,tutte){
   const cercando=!!normCerca(state.cerca);

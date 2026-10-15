@@ -110,7 +110,7 @@ console.log('\n=== OGNI RIGA DICE SU QUALE ATTIVITÀ SONO LE ORE ===');
       conto:conto.textContent.replace(/\s+/g,' ').trim(),contoDentro:conto.getBoundingClientRect().right<=h.getBoundingClientRect().right+1,
       scroll:document.documentElement.scrollWidth-document.documentElement.clientWidth}});
   ok(m.righe===1&&m.larghezza>=100,'col conteggio delle spese il nome del cliente resta su una riga, leggibile',`${m.larghezza} px, ${m.righe} righe`);
-  ok(/5 spese/.test(m.conto)&&m.contoDentro,'e il conteggio intero sta dentro la testata, sotto il nome se serve',m.conto);
+  ok(/voci/.test(m.conto)&&!/spese/.test(m.conto)&&m.contoDentro,'e il conteggio, che parla delle ore, sta dentro la testata',m.conto);
   ok(m.scroll<=1,'senza scroll di lato',m.scroll+'px');
   await pg.close();
 }
