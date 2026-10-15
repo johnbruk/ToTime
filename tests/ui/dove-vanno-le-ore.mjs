@@ -565,32 +565,74 @@ console.log('\n=== DALLA GRIGLIA LA COMMESSA SI CREA ALLO STESSO MODO ===');
   await pg.close();
 }
 
-console.log('\n=== LE SPESE STANNO IN UNA LISTA A PARTE ===');
+console.log('\n=== LE SPESE SONO UNA RIGA SOLA, IN FONDO AL CLIENTE ===');
 {
   // Erano mescolate alle ore, ordinate per data: «7 voci · 8,0 h»,
-  // sette righe per un giorno solo di lavoro. Un rimborso non è
-  // lavoro prodotto: è denaro anticipato.
+  // sette righe per un giorno solo di lavoro. Poi una lista a parte,
+  // sotto una scritta senza stile fuori dalla scheda, che l'utente ha
+  // detto di non volere. Adesso nel timesheet le spese sono UNA riga in
+  // fondo al cliente — quante, di che voci, il totale — e il dettaglio
+  // sta nella pagina Spese, dove la riga porta.
   const pg=await apri(`
-    S.expense_categories=[{id:'taxi',name:'Taxi',active:true,reimbursable:true,calculation_type:'manual_amount'}];
+    S.expense_categories=[{id:'taxi',name:'Taxi',active:true,reimbursable:true,calculation_type:'manual_amount'},
+                          {id:'hotel',name:'Hotel',active:true,reimbursable:true,calculation_type:'manual_amount'}];
     S.timesheet_entries=[{id:'g1',entry_date:'2026-10-07',client_id:'sol',project_id:'equ',
       activity_id:'a1',wbs_id:'w10',hours:8}];
     S.travel_expenses=[
       {id:'s1',expense_date:'2026-10-07',client_id:'sol',project_id:'equ',expense_category_id:'taxi',
        work_city:'Milano',amount:30,reimbursement_type:'invoice'},
-      {id:'s2',expense_date:'2026-10-07',client_id:'sol',project_id:'equ',expense_category_id:'taxi',
+      {id:'s2',expense_date:'2026-10-07',client_id:'sol',project_id:'equ',expense_category_id:'hotel',
        work_city:'Milano',amount:20,reimbursement_type:'invoice'}];
   `);
   await pg.evaluate(()=>window.go('timesheet'));
   await pg.waitForTimeout(700);
-  const liste=await pg.evaluate(()=>
-    [...document.querySelectorAll('#app .cliGruppo .list')].map(l=>l.children.length));
-  ok(liste.length===2,'dentro il cliente ci sono DUE elenchi, non uno',liste.join(' + '));
-  ok(liste[0]===1&&liste[1]===2,'uno con la giornata, l’altro con le due spese',liste.join(' + '));
-  const t=await testo(pg);
-  ok(/Spese di trasferta/.test(t),'e il secondo si chiama col suo nome');
-  ok(/1 voce/.test(t),'il conteggio in testa parla del lavoro: 1 voce, non 3',
-     (t.match(/\d+ vo[cn][ei][^·]{0,30}/)||[''])[0]);
-  ok(/50,00 €/.test(t),'e le spese hanno il loro totale',(t.match(/Spese di trasferta[^·]{0,30}/)||[''])[0]);
+  const g=await pg.evaluate(()=>{const gr=document.querySelector('#app .cliGruppo');
+    const liste=[...gr.querySelectorAll('.list')];
+    const r=gr.querySelector('.rigaSpese');
+    return {liste:liste.length,righe:liste[0]?.children.length,
+      sciolta:!!gr.querySelector('.cliSpese'),
+      titolo:r?.querySelector('.title')?.textContent.trim(),desc:r?.querySelector('.desc')?.textContent.trim(),
+      valore:r?.querySelector('.value')?.textContent.replace(/\s+/g,' ').trim(),
+      dentro:!!r&&r.parentElement===liste[0],ultima:!!r&&liste[0].lastElementChild===r,
+      conto:gr.querySelector('.cliConto')?.textContent.replace(/\s+/g,' ').trim()}});
+  ok(g.liste===1&&g.righe===2,'dentro il cliente c’è UNA scheda: la giornata e una riga per le spese',`${g.liste} schede, ${g.righe} righe`);
+  ok(!g.sciolta,'e nessuna scritta sciolta fuori dalla scheda');
+  ok(g.dentro&&g.ultima,'la riga delle spese è nella stessa scheda, in fondo');
+  ok(g.titolo==='Spese di trasferta'&&g.desc==='2 spese · Taxi, Hotel','dice quante sono e di che voci',`${g.titolo} · ${g.desc}`);
+  ok(/^50,00\s?€/.test(g.valore||''),'e il loro totale',g.valore);
+  ok(/1 voce/.test(g.conto)&&!/spes/.test(g.conto),'la testata parla del lavoro: 1 voce, senza le spese',g.conto);
+  await pg.evaluate(()=>document.querySelector('#app .rigaSpese').click());
+  await pg.waitForTimeout(500);
+  ok(await pg.evaluate(()=>document.documentElement.getAttribute('data-view'))==='expenses','toccandola si apre la pagina Spese');
+  await pg.close();
+}
+
+console.log('\n=== «SELEZIONA TUTTO» PRENDE SOLO QUELLO CHE SI VEDE ===');
+{
+  // Le spese, nel timesheet, sono una riga riassuntiva senza casella;
+  // un cliente col gruppo chiuso non mostra le sue righe. «Seleziona
+  // tutto» le prendeva lo stesso, e «Elimina» le cancellava senza che
+  // si fossero viste.
+  const pg=await apri(`
+    S.clients.push({id:'zz',name:'Zeta chiuso',daily_rate:400,standard_hours:8,compensation_type:'daily_rate_8h',active:true});
+    S.expense_categories=[{id:'taxi',name:'Taxi',active:true,reimbursable:true,calculation_type:'manual_amount'}];
+    S.timesheet_entries=[{id:'g1',entry_date:'2026-10-07',client_id:'sol',project_id:'equ',activity_id:'a1',wbs_id:'w10',hours:8},
+      {id:'z1',entry_date:'2026-10-08',client_id:'zz',project_id:null,activity_id:'a1',hours:8}];
+    S.travel_expenses=[
+      {id:'s1',expense_date:'2026-10-07',client_id:'sol',project_id:'equ',expense_category_id:'taxi',work_city:'Milano',amount:30,reimbursement_type:'invoice'},
+      {id:'s2',expense_date:'2026-10-07',client_id:'sol',project_id:'equ',expense_category_id:'taxi',work_city:'Milano',amount:20,reimbursement_type:'invoice'}];
+    S.app_settings=(S.app_settings||[]).concat([{id:'tc',setting_key:'ts_chiusi',setting_value:'["zz"]'}]);
+  `);
+  await pg.evaluate(()=>window.go('timesheet'));await pg.waitForTimeout(700);
+  await pg.evaluate(()=>window.startSel('timesheet'));await pg.waitForTimeout(300);
+  await pg.evaluate(()=>window.toggleSelAll('timesheet'));await pg.waitForTimeout(300);
+  const conto=await pg.evaluate(()=>document.querySelector('#app .selCount')?.textContent.trim());
+  ok(conto==='1 voce selezionata','«Seleziona tutto» prende la sola giornata visibile: non le spese, non il cliente chiuso',conto);
+  await pg.evaluate(()=>window.deleteSelected());await pg.waitForTimeout(800);
+  const resta=await pg.evaluate(()=>({g:window.__stores.timesheet_entries.map(e=>e.id),s:window.__stores.travel_expenses.map(e=>e.id)}));
+  ok(!resta.g.includes('g1'),'la giornata selezionata si elimina',JSON.stringify(resta.g));
+  ok(resta.g.includes('z1'),'quella del cliente chiuso, che non si vedeva, resta',JSON.stringify(resta.g));
+  ok(resta.s.length===2,'e le due spese restano tutte e due',JSON.stringify(resta.s));
   await pg.close();
 }
 

@@ -3494,9 +3494,6 @@ function elencoCliente(g,cercando){
   // e il numero non tornava con niente.
   const conto=g.voci.length===1?'1 voce':g.voci.length+' voci';
   const ore=g.ore>0?` <span class="dot">·</span> ${fmtNum(g.ore,1)} h <span class="dot">·</span> ${fmtNum(g.ore/std,2)} gg/u`:'';
-  const contoSpese=g.spese.length
-    ? ` <span class="dot">·</span> ${g.spese.length} ${g.spese.length===1?'spesa':'spese'} ${fmtEUR(g.speseTot)}`
-    : '';
   const nome=esc(clientName(g.client_id));
   // Cercando, i gruppi si aprono tutti: chi cerca vuole vedere quello
   // che ha trovato, non sapere che da qualche parte, dentro un gruppo
@@ -3514,10 +3511,22 @@ function elencoCliente(g,cercando){
       <button type="button" class="cliToggle" aria-expanded="${chiuso?'false':'true'}"
         title="${chiuso?'Apri':'Chiudi'} ${nome}" onclick="apriChiudiCliente('${g.client_id}')">
         <span class="cliChev" aria-hidden="true">${chiuso?'▸':'▾'}</span>
-        <b>${nome}</b><span class="cliConto">${conto}${ore}${contoSpese}</span></button>${azioni}</div>
-    ${chiuso?'':`${g.voci.length?`<div class="list">${g.voci.map(r=>timesheetRow(r)).join('')}</div>`:''}
-      ${g.spese.length?`<div class="cliSpese">Spese di trasferta <span class="cliSpeseTot">${fmtEUR(g.speseTot)}</span></div>
-        <div class="list">${g.spese.map(r=>timesheetRow(r)).join('')}</div>`:''}`}</div>`;
+        <b>${nome}</b><span class="cliConto">${conto}${ore}</span></button>${azioni}</div>
+    ${chiuso||!(g.voci.length||g.spese.length)?'':`<div class="list">${g.voci.map(r=>timesheetRow(r)).join('')}${rigaSpeseCliente(g)}</div>`}</div>`;
+}
+// Le spese di trasferta, nel timesheet, sono UNA riga: quante sono, di
+// che voci, e il totale. Toccandola si apre la pagina Spese del mese,
+// che le ha una per una e per trasferta. Prima stavano qui una per una,
+// sotto una scritta senza stile — «Spese di trasferta 1597,96 €» —
+// fuori dalla scheda: si leggeva come un pezzo di pagina rotto, e
+// l'elenco delle ore si allungava di righe che non sono ore.
+function rigaSpeseCliente(g){
+  if(!g.spese.length)return '';
+  const n=g.spese.length;
+  const voci=[...new Set(g.spese.map(e=>expenseCategoryName(e.expense_category_id)).filter(Boolean))];
+  const quali=voci.slice(0,3).join(', ')+(voci.length>3?'…':'');
+  const tocca=state.selMode?'':` role="button" onclick="go('expenses')" title="Apri le spese del mese"`;
+  return `<div class="row rigaSpese"${tocca}><div class="date"></div><div><div class="title">Spese di trasferta</div><div class="desc">${n} ${n===1?'spesa':'spese'}${quali?' · '+esc(quali):''}</div></div><div class="value">${eurMigliaia(g.speseTot)}${state.selMode?'':' <span class="chev">›</span>'}</div></div>`;
 }
 function elencoMensile(filtrate,tutte){
   const cercando=!!normCerca(state.cerca);
@@ -3527,7 +3536,7 @@ function elencoMensile(filtrate,tutte){
     : '<div class="empty">Nessun consuntivo in questo mese.<button type="button" class="secondary emptyCta" onclick="newEntryChoice()">+ Aggiungi il primo consuntivo</button></div>';
   return `<div class="list">${vuoto}</div>`;
 }
-function timesheet(){const rows=timesheetRows();const t=totals();const groups=groupSummary();const filtrate=filtraRighe(rows);return appShell(`<h1>Timesheet</h1>${monthSelector()}<div class="card"><b>Riepilogo ${monthLabel(state.month)}</b><div class="kpiGrid three" style="margin-top:14px"><div><span>Consuntivate</span><strong>${fmtNum(t.days,2)} gg</strong><small>${fmtNum(t.hours,1)} h</small></div><div><span>Pianificate</span><strong>${fmtNum(t.plannedDays,2)} gg</strong><small>${fmtNum(t.plannedHours,1)} h</small></div><div><span>Totale</span><strong>${fmtNum(t.days+t.plannedDays,2)} gg</strong><small>${fmtNum(t.hours+t.plannedHours,1)} h</small></div></div><div class="metricLine" style="margin-top:12px">${fmtEUR(t.amount)} consuntivato${t.plannedAmount>0?` <span class="dot">·</span> ${fmtEUR(t.plannedAmount)} pianificato <span class="dot">·</span> <b>${fmtEUR(t.amount+t.plannedAmount)}</b> totale`:''}</div>${t.rimborsi>0?`<div class="metricLine rimborsiAparte" style="margin-top:8px"><span class="tag gray">A parte</span> ${fmtEUR(t.rimborsi)} di rimborsi spese, riaddebitati in fattura</div>`:''}<div class="chartWrap"><div class="chartTitle"><span>Andamento mese</span><span>1 → fine mese</span></div>${monthChartSvg()}</div></div><div class="miniActions"><button type="button" class="miniBtn" onclick="go('griglia')" title="Compila tutto il mese in una griglia">Mensile</button><button type="button" class="miniBtn" onclick="go('pivot')" title="Analizza i consuntivi per cliente, progetto, attività">Analisi</button><button type="button" class="miniBtn" onclick="downloadMonthExcel()" title="Scarica l'Excel di tutti i clienti, per archivio">⤓ Excel (tutti)</button></div>${groups.length?`<div class="card"><b>Per cliente</b><div class="list" style="box-shadow:none;margin:10px 0 0">${groups.map(r=>`<div class="row"><div></div><div><div class="title">${esc(clientName(r.client_id))}</div><div class="desc">${esc(projectName(r.project_id)||'Senza progetto')} · ${esc(r.label)}</div></div><div class="value">${fmtEUR(r.amount)}</div></div>`).join('')}</div></div>`:''}<button class="primary" onclick="newEntryChoice()">+ Nuovo consuntivo</button>${rows.length?cercaBox(filtrate.length,rows.length):''}${selBar('timesheet',filtrate.length)}${elencoMensile(filtrate,rows)}`)}
+function timesheet(){const rows=timesheetRows();const t=totals();const groups=groupSummary();const filtrate=filtraRighe(rows);return appShell(`<h1>Timesheet</h1>${monthSelector()}<div class="card"><b>Riepilogo ${monthLabel(state.month)}</b><div class="kpiGrid three" style="margin-top:14px"><div><span>Consuntivate</span><strong>${fmtNum(t.days,2)} gg</strong><small>${fmtNum(t.hours,1)} h</small></div><div><span>Pianificate</span><strong>${fmtNum(t.plannedDays,2)} gg</strong><small>${fmtNum(t.plannedHours,1)} h</small></div><div><span>Totale</span><strong>${fmtNum(t.days+t.plannedDays,2)} gg</strong><small>${fmtNum(t.hours+t.plannedHours,1)} h</small></div></div><div class="metricLine" style="margin-top:12px">${fmtEUR(t.amount)} consuntivato${t.plannedAmount>0?` <span class="dot">·</span> ${fmtEUR(t.plannedAmount)} pianificato <span class="dot">·</span> <b>${fmtEUR(t.amount+t.plannedAmount)}</b> totale`:''}</div>${t.rimborsi>0?`<div class="metricLine rimborsiAparte" style="margin-top:8px"><span class="tag gray">A parte</span> ${fmtEUR(t.rimborsi)} di rimborsi spese, riaddebitati in fattura</div>`:''}<div class="chartWrap"><div class="chartTitle"><span>Andamento mese</span><span>1 → fine mese</span></div>${monthChartSvg()}</div></div><div class="miniActions"><button type="button" class="miniBtn" onclick="go('griglia')" title="Compila tutto il mese in una griglia">Mensile</button><button type="button" class="miniBtn" onclick="go('pivot')" title="Analizza i consuntivi per cliente, progetto, attività">Analisi</button><button type="button" class="miniBtn" onclick="downloadMonthExcel()" title="Scarica l'Excel di tutti i clienti, per archivio">⤓ Excel (tutti)</button></div>${groups.length?`<div class="card"><b>Per cliente</b><div class="list" style="box-shadow:none;margin:10px 0 0">${groups.map(r=>`<div class="row"><div></div><div><div class="title">${esc(clientName(r.client_id))}</div><div class="desc">${esc(projectName(r.project_id)||'Senza progetto')} · ${esc(r.label)}</div></div><div class="value">${fmtEUR(r.amount)}</div></div>`).join('')}</div></div>`:''}<button class="primary" onclick="newEntryChoice()">+ Nuovo consuntivo</button>${rows.length?cercaBox(filtrate.length,rows.length):''}${selBar('timesheet',selScopeRows('timesheet').length)}${elencoMensile(filtrate,rows)}`)}
 /* ===== Analisi consuntivi (pivot) ===== */
 const PIVOT_DIMS=[['client','Cliente'],['project','Cliente / Progetto'],['activity','Attività'],['desc','Descrizione'],['type','Tipo voce'],['site','Sede'],['month','Mese']];
 const PIVOT_PRESETS=[['client','project','Cliente › Progetto'],['project','activity','Progetto › Attività'],['activity','desc','Attività › Descrizione'],['client','activity','Cliente › Attività'],['month','client','Mese › Cliente']];
@@ -3862,7 +3871,17 @@ function clearSel(){state.selMode=false;state.sel=[]}
 function startSel(){state.selMode=true;state.sel=[];render()}
 function cancelSel(){clearSel();render()}
 function toggleSel(kind,id){const k=selKey(kind,id);const i=state.sel.indexOf(k);if(i>=0)state.sel.splice(i,1);else state.sel.push(k);render()}
-function selScopeRows(scope){return scope==='giorno'?dayRows(state.edit||todayISO()):timesheetRows()}
+// Si seleziona solo quello che si vede. «Seleziona tutto» nel
+// timesheet prendeva tutte le righe del mese: anche le spese — che
+// nell'elenco sono una riga riassuntiva e non hanno la loro casella —,
+// anche le righe nascoste dalla ricerca e quelle dei clienti col gruppo
+// chiuso. E «Elimina» le cancellava senza che si fossero viste. Le
+// spese si selezionano e si eliminano dalla pagina Spese, o dal giorno.
+function selScopeRows(scope){
+  if(scope==='giorno')return dayRows(state.edit||todayISO());
+  const cercando=!!normCerca(state.cerca);
+  return filtraRighe(timesheetRows()).filter(r=>r.kind!=='expense'&&(cercando||!clienteChiuso(r.client_id||'')));
+}
 function toggleSelAll(scope){const rows=selScopeRows(scope);const keys=rows.map(r=>selKey(r.kind,r.id));state.sel=keys.every(k=>state.sel.indexOf(k)>=0)?[]:keys;render()}
 function rowAttrs(kind,id){return state.selMode?`class="row selectable${isSel(kind,id)?' selOn':''}" onclick="toggleSel('${kind}','${id}')"`:`class="row" onclick="editEntry('${id}','${kind}')"`}
 function selBox(kind,id){return state.selMode?`<span class="selBox${isSel(kind,id)?' on':''}" aria-hidden="true">${isSel(kind,id)?'\u2713':''}</span>`:''}
