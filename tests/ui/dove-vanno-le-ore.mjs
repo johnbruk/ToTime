@@ -607,6 +607,35 @@ console.log('\n=== LE SPESE SONO UNA RIGA SOLA, IN FONDO AL CLIENTE ===');
   await pg.close();
 }
 
+console.log('\n=== «SELEZIONA TUTTO» PRENDE SOLO QUELLO CHE SI VEDE ===');
+{
+  // Le spese, nel timesheet, sono una riga riassuntiva senza casella;
+  // un cliente col gruppo chiuso non mostra le sue righe. «Seleziona
+  // tutto» le prendeva lo stesso, e «Elimina» le cancellava senza che
+  // si fossero viste.
+  const pg=await apri(`
+    S.clients.push({id:'zz',name:'Zeta chiuso',daily_rate:400,standard_hours:8,compensation_type:'daily_rate_8h',active:true});
+    S.expense_categories=[{id:'taxi',name:'Taxi',active:true,reimbursable:true,calculation_type:'manual_amount'}];
+    S.timesheet_entries=[{id:'g1',entry_date:'2026-10-07',client_id:'sol',project_id:'equ',activity_id:'a1',wbs_id:'w10',hours:8},
+      {id:'z1',entry_date:'2026-10-08',client_id:'zz',project_id:null,activity_id:'a1',hours:8}];
+    S.travel_expenses=[
+      {id:'s1',expense_date:'2026-10-07',client_id:'sol',project_id:'equ',expense_category_id:'taxi',work_city:'Milano',amount:30,reimbursement_type:'invoice'},
+      {id:'s2',expense_date:'2026-10-07',client_id:'sol',project_id:'equ',expense_category_id:'taxi',work_city:'Milano',amount:20,reimbursement_type:'invoice'}];
+    S.app_settings=(S.app_settings||[]).concat([{id:'tc',setting_key:'ts_chiusi',setting_value:'["zz"]'}]);
+  `);
+  await pg.evaluate(()=>window.go('timesheet'));await pg.waitForTimeout(700);
+  await pg.evaluate(()=>window.startSel('timesheet'));await pg.waitForTimeout(300);
+  await pg.evaluate(()=>window.toggleSelAll('timesheet'));await pg.waitForTimeout(300);
+  const conto=await pg.evaluate(()=>document.querySelector('#app .selCount')?.textContent.trim());
+  ok(conto==='1 voce selezionata','«Seleziona tutto» prende la sola giornata visibile: non le spese, non il cliente chiuso',conto);
+  await pg.evaluate(()=>window.deleteSelected());await pg.waitForTimeout(800);
+  const resta=await pg.evaluate(()=>({g:window.__stores.timesheet_entries.map(e=>e.id),s:window.__stores.travel_expenses.map(e=>e.id)}));
+  ok(!resta.g.includes('g1'),'la giornata selezionata si elimina',JSON.stringify(resta.g));
+  ok(resta.g.includes('z1'),'quella del cliente chiuso, che non si vedeva, resta',JSON.stringify(resta.g));
+  ok(resta.s.length===2,'e le due spese restano tutte e due',JSON.stringify(resta.s));
+  await pg.close();
+}
+
 console.log('\n=== I CLIENTI SI APRONO SULLA LISTA, NON SUL MODULO ===');
 {
   // La pagina si apriva col modulo in cima, e la lista — che è quello
