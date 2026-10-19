@@ -1049,3 +1049,9 @@ table.griglia.numeriRiga td.riga .n{font-variant-numeric:tabular-nums}
   .perCliente .pcRiga>span:not(.pcNome),.perCliente .pcRiga>b{text-align:left}
   .perCliente .pcRiga>[data-l]::before{content:attr(data-l);display:block;font-size:var(--t-xs);color:var(--muted);font-weight:var(--w-med)}
 }
+/* Sui telefoni piu' stretti (320px) tre cifre da migliaia non ci
+   stavano: uscivano dalla loro colonna, una sopra l'altra. */
+@media(max-width:380px){
+  .perCliente .pcRiga{column-gap:var(--sp-2)}
+  .perCliente .pcRiga>[data-l]{font-size:var(--t-sm)}
+}

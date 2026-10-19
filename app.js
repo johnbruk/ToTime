@@ -2233,14 +2233,17 @@ function previstoPerCliente(){
 // importo e senza dire se era consuntivato o pianificato. Adesso una
 // riga per cliente, con consuntivato, pianificato e totale: le stesse
 // somme di previstoPerCliente(), quindi tornano con la dashboard.
-// I rimborsi spese stanno nel consuntivato (sono gia' spesi, e in
-// fattura ci vanno), e sotto il nome si dice quanto ne fa parte.
+// I rimborsi spese non sono consuntivato — il consuntivato e' il
+// lavoro, e il riepilogo qui sopra li mette «a parte» —: la colonna
+// deve sommare a quello che dice il riepilogo. In fattura pero' ci
+// vanno, quindi stanno nel totale, come nel «Previsto del mese» della
+// dashboard, e sotto il nome si dice quanti sono.
 function perClienteCard(){
   const clienti=previstoPerCliente();
   if(!clienti.length)return '';
   return `<div class="card perCliente"><b>Per cliente</b><div class="pcTab">
 <div class="pcRiga pcTesta"><span class="pcNome">Cliente</span><span>Consuntivato</span><span>Pianificato</span><span>Totale</span></div>
-${clienti.map(c=>{const cons=c.fatto+c.rimborsi;return `<div class="pcRiga"><span class="pcNome"><span class="title">${esc(c.client_id?clientName(c.client_id):'Senza cliente')}</span>${c.rimborsi>=0.005?`<small>di cui ${eurMigliaia(c.rimborsi)} rimborsi spese</small>`:''}</span><span data-l="Consuntivato">${eurMigliaia(cons)}</span><span data-l="Pianificato">${eurMigliaia(c.pianificato)}</span><b data-l="Totale">${eurMigliaia(c.totale)}</b></div>`}).join('')}
+${clienti.map(c=>`<div class="pcRiga"><span class="pcNome"><span class="title">${esc(c.client_id?clientName(c.client_id):'Senza cliente')}</span>${c.rimborsi>=0.005?`<small>+ ${eurMigliaia(c.rimborsi)} rimborsi spese, nel totale</small>`:''}</span><span data-l="Consuntivato">${eurMigliaia(c.fatto)}</span><span data-l="Pianificato">${eurMigliaia(c.pianificato)}</span><b data-l="Totale">${eurMigliaia(c.totale)}</b></div>`).join('')}
 </div></div>`;
 }
 function homeMeseCard(t){
