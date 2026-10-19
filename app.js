@@ -2218,15 +2218,44 @@ function eurMigliaia(n){
 // Le stesse somme di totals(), divise per cliente: ogni riga vale per
 // il previsto del mese quanto vale nel totale, cosi' le righe sommano.
 function previstoPerCliente(){
+  return sommePerCliente().filter(c=>Math.abs(c.totale)>=0.005);
+}
+// Tutti i clienti che hanno qualcosa nel mese, anche quelli che fanno
+// zero perche' una rettifica compensa il lavoro: la dashboard mostra
+// solo i totali e quelli li salta, il Timesheet mostra le parti. Il
+// lordo — la somma delle cifre senza segno — dice se nel mese si e'
+// mosso qualcosa, anche quando si compensa.
+function sommePerCliente(){
   const m={};
-  const add=(id,k,v)=>{const c=m[id||'']=m[id||'']||{client_id:id||null,fatto:0,pianificato:0,rimborsi:0};c[k]+=v};
+  const add=(id,k,v)=>{const c=m[id||'']=m[id||'']||{client_id:id||null,fatto:0,pianificato:0,rimborsi:0,lordo:0};c[k]+=v;c.lordo+=Math.abs(v)};
   rowsForMonth().forEach(e=>add(e.client_id,isPlanned(e)?'pianificato':'fatto',dailyAmount(e)));
   monthlyRows().forEach(e=>add(e.client_id,'fatto',Number(e.amount||0)));
   manualRows().forEach(e=>add(e.client_id,isPlanned(e)?'pianificato':'fatto',Number(e.amount||0)));
   expenseRows().filter(expIsInvoice).forEach(e=>add(e.client_id,'rimborsi',Number(e.amount||0)));
   return Object.values(m).map(c=>({...c,totale:c.fatto+c.pianificato+c.rimborsi}))
-    .filter(c=>Math.abs(c.totale)>=0.005)
     .sort((a,b)=>b.totale-a.totale||clientName(a.client_id).localeCompare(clientName(b.client_id)));
+}
+// «Per cliente» nel Timesheet. Era una riga per tipo di voce — il T&M
+// di un cliente e le sue spese di trasferta su due righe, col solo
+// importo e senza dire se era consuntivato o pianificato. Adesso una
+// riga per cliente, con consuntivato, pianificato e totale: le stesse
+// somme di previstoPerCliente(), quindi tornano con la dashboard.
+// I rimborsi spese non sono consuntivato — il consuntivato e' il
+// lavoro, e il riepilogo qui sopra li mette «a parte» —: la colonna
+// deve sommare a quello che dice il riepilogo. In fattura pero' ci
+// vanno, quindi stanno nel totale, come nel «Previsto del mese» della
+// dashboard, e sotto il nome si dice quanti sono — col segno, se sono
+// una rettifica. Un cliente resta anche se le sue cifre fanno zero:
+// 1.000 di lavoro e una rettifica di -1.000 sono lavoro del mese, e le
+// sue righe si vedono qui sotto. Restano fuori solo i clienti senza
+// niente che valga — un'assenza, una riga a tariffa zero.
+function perClienteCard(){
+  const clienti=sommePerCliente().filter(c=>c.lordo>=0.005);
+  if(!clienti.length)return '';
+  return `<div class="card perCliente"><b>Per cliente</b><div class="pcTab">
+<div class="pcRiga pcTesta"><span class="pcNome">Cliente</span><span>Consuntivato</span><span>Pianificato</span><span>Totale</span></div>
+${clienti.map(c=>`<div class="pcRiga"><span class="pcNome"><span class="title">${esc(c.client_id?clientName(c.client_id):'Senza cliente')}</span>${Math.abs(c.rimborsi)>=0.005?`<small>${c.rimborsi<0?'\u2212':'+'} ${eurMigliaia(Math.abs(c.rimborsi))} rimborsi spese, nel totale</small>`:''}</span><span data-l="Consuntivato">${eurMigliaia(c.fatto)}</span><span data-l="Pianificato">${eurMigliaia(c.pianificato)}</span><b data-l="Totale">${eurMigliaia(c.totale)}</b></div>`).join('')}
+</div></div>`;
 }
 function homeMeseCard(t){
   const fatto=t.amount,pian=t.plannedAmount,rimb=t.rimborsi,tot=fatto+pian+rimb;
@@ -3536,7 +3565,7 @@ function elencoMensile(filtrate,tutte){
     : '<div class="empty">Nessun consuntivo in questo mese.<button type="button" class="secondary emptyCta" onclick="newEntryChoice()">+ Aggiungi il primo consuntivo</button></div>';
   return `<div class="list">${vuoto}</div>`;
 }
-function timesheet(){const rows=timesheetRows();const t=totals();const groups=groupSummary();const filtrate=filtraRighe(rows);return appShell(`<h1>Timesheet</h1>${monthSelector()}<div class="card"><b>Riepilogo ${monthLabel(state.month)}</b><div class="kpiGrid three" style="margin-top:14px"><div><span>Consuntivate</span><strong>${fmtNum(t.days,2)} gg</strong><small>${fmtNum(t.hours,1)} h</small></div><div><span>Pianificate</span><strong>${fmtNum(t.plannedDays,2)} gg</strong><small>${fmtNum(t.plannedHours,1)} h</small></div><div><span>Totale</span><strong>${fmtNum(t.days+t.plannedDays,2)} gg</strong><small>${fmtNum(t.hours+t.plannedHours,1)} h</small></div></div><div class="metricLine" style="margin-top:12px">${fmtEUR(t.amount)} consuntivato${t.plannedAmount>0?` <span class="dot">·</span> ${fmtEUR(t.plannedAmount)} pianificato <span class="dot">·</span> <b>${fmtEUR(t.amount+t.plannedAmount)}</b> totale`:''}</div>${t.rimborsi>0?`<div class="metricLine rimborsiAparte" style="margin-top:8px"><span class="tag gray">A parte</span> ${fmtEUR(t.rimborsi)} di rimborsi spese, riaddebitati in fattura</div>`:''}<div class="chartWrap"><div class="chartTitle"><span>Andamento mese</span><span>1 → fine mese</span></div>${monthChartSvg()}</div></div><div class="miniActions"><button type="button" class="miniBtn" onclick="go('griglia')" title="Compila tutto il mese in una griglia">Mensile</button><button type="button" class="miniBtn" onclick="go('pivot')" title="Analizza i consuntivi per cliente, progetto, attività">Analisi</button><button type="button" class="miniBtn" onclick="downloadMonthExcel()" title="Scarica l'Excel di tutti i clienti, per archivio">⤓ Excel (tutti)</button></div>${groups.length?`<div class="card"><b>Per cliente</b><div class="list" style="box-shadow:none;margin:10px 0 0">${groups.map(r=>`<div class="row"><div></div><div><div class="title">${esc(clientName(r.client_id))}</div><div class="desc">${esc(projectName(r.project_id)||'Senza progetto')} · ${esc(r.label)}</div></div><div class="value">${fmtEUR(r.amount)}</div></div>`).join('')}</div></div>`:''}<button class="primary" onclick="newEntryChoice()">+ Nuovo consuntivo</button>${rows.length?cercaBox(filtrate.length,rows.length):''}${selBar('timesheet',selScopeRows('timesheet').length)}${elencoMensile(filtrate,rows)}`)}
+function timesheet(){const rows=timesheetRows();const t=totals();const filtrate=filtraRighe(rows);return appShell(`<h1>Timesheet</h1>${monthSelector()}<div class="card"><b>Riepilogo ${monthLabel(state.month)}</b><div class="kpiGrid three" style="margin-top:14px"><div><span>Consuntivate</span><strong>${fmtNum(t.days,2)} gg</strong><small>${fmtNum(t.hours,1)} h</small></div><div><span>Pianificate</span><strong>${fmtNum(t.plannedDays,2)} gg</strong><small>${fmtNum(t.plannedHours,1)} h</small></div><div><span>Totale</span><strong>${fmtNum(t.days+t.plannedDays,2)} gg</strong><small>${fmtNum(t.hours+t.plannedHours,1)} h</small></div></div><div class="metricLine" style="margin-top:12px">${fmtEUR(t.amount)} consuntivato${t.plannedAmount>0?` <span class="dot">·</span> ${fmtEUR(t.plannedAmount)} pianificato <span class="dot">·</span> <b>${fmtEUR(t.amount+t.plannedAmount)}</b> totale`:''}</div>${t.rimborsi>0?`<div class="metricLine rimborsiAparte" style="margin-top:8px"><span class="tag gray">A parte</span> ${fmtEUR(t.rimborsi)} di rimborsi spese, riaddebitati in fattura</div>`:''}<div class="chartWrap"><div class="chartTitle"><span>Andamento mese</span><span>1 → fine mese</span></div>${monthChartSvg()}</div></div><div class="miniActions"><button type="button" class="miniBtn" onclick="go('griglia')" title="Compila tutto il mese in una griglia">Mensile</button><button type="button" class="miniBtn" onclick="go('pivot')" title="Analizza i consuntivi per cliente, progetto, attività">Analisi</button><button type="button" class="miniBtn" onclick="downloadMonthExcel()" title="Scarica l'Excel di tutti i clienti, per archivio">⤓ Excel (tutti)</button></div>${perClienteCard()}<button class="primary" onclick="newEntryChoice()">+ Nuovo consuntivo</button>${rows.length?cercaBox(filtrate.length,rows.length):''}${selBar('timesheet',selScopeRows('timesheet').length)}${elencoMensile(filtrate,rows)}`)}
 /* ===== Analisi consuntivi (pivot) ===== */
 const PIVOT_DIMS=[['client','Cliente'],['project','Cliente / Progetto'],['activity','Attività'],['desc','Descrizione'],['type','Tipo voce'],['site','Sede'],['month','Mese']];
 const PIVOT_PRESETS=[['client','project','Cliente › Progetto'],['project','activity','Progetto › Attività'],['activity','desc','Attività › Descrizione'],['client','activity','Cliente › Attività'],['month','client','Mese › Cliente']];

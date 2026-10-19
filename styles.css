@@ -1033,3 +1033,25 @@ table.griglia.numeriRiga td.riga .n{font-variant-numeric:tabular-nums}
 .rigaSpese{background:rgba(124,137,166,.06)}
 .rigaSpese .title{color:var(--soft)}
 .rigaSpese .value{white-space:nowrap}
+
+/* «Per cliente» nel Timesheet: consuntivato, pianificato, totale */
+.perCliente .pcTab{margin-top:var(--sp-3);display:grid;font-variant-numeric:tabular-nums}
+.perCliente .pcRiga{display:grid;grid-template-columns:minmax(0,1fr) repeat(3,minmax(96px,auto));gap:var(--sp-3);align-items:baseline;padding:var(--sp-3) 0;border-top:1px solid var(--line)}
+.perCliente .pcRiga>span:not(.pcNome),.perCliente .pcRiga>b{text-align:right;white-space:nowrap}
+.perCliente .pcTesta{border-top:0;padding-top:0;font-size:var(--t-xs);color:var(--muted);font-weight:var(--w-med);letter-spacing:.04em}
+.perCliente .pcNome{min-width:0;display:flex;flex-direction:column}
+.perCliente .pcNome .title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.perCliente .pcNome small{font-size:var(--t-xs);color:var(--muted)}
+@media(max-width:559px){
+  .perCliente .pcTesta{display:none}
+  .perCliente .pcRiga{grid-template-columns:repeat(3,minmax(0,1fr));row-gap:var(--sp-1)}
+  .perCliente .pcNome{grid-column:1/-1}
+  .perCliente .pcRiga>span:not(.pcNome),.perCliente .pcRiga>b{text-align:left}
+  .perCliente .pcRiga>[data-l]::before{content:attr(data-l);display:block;font-size:var(--t-xs);color:var(--muted);font-weight:var(--w-med)}
+}
+/* Sui telefoni piu' stretti (320px) tre cifre da migliaia non ci
+   stavano: uscivano dalla loro colonna, una sopra l'altra. */
+@media(max-width:380px){
+  .perCliente .pcRiga{column-gap:var(--sp-2)}
+  .perCliente .pcRiga>[data-l]{font-size:var(--t-sm)}
+}
