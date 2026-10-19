@@ -2218,14 +2218,21 @@ function eurMigliaia(n){
 // Le stesse somme di totals(), divise per cliente: ogni riga vale per
 // il previsto del mese quanto vale nel totale, cosi' le righe sommano.
 function previstoPerCliente(){
+  return sommePerCliente().filter(c=>Math.abs(c.totale)>=0.005);
+}
+// Tutti i clienti che hanno qualcosa nel mese, anche quelli che fanno
+// zero perche' una rettifica compensa il lavoro: la dashboard mostra
+// solo i totali e quelli li salta, il Timesheet mostra le parti. Il
+// lordo — la somma delle cifre senza segno — dice se nel mese si e'
+// mosso qualcosa, anche quando si compensa.
+function sommePerCliente(){
   const m={};
-  const add=(id,k,v)=>{const c=m[id||'']=m[id||'']||{client_id:id||null,fatto:0,pianificato:0,rimborsi:0};c[k]+=v};
+  const add=(id,k,v)=>{const c=m[id||'']=m[id||'']||{client_id:id||null,fatto:0,pianificato:0,rimborsi:0,lordo:0};c[k]+=v;c.lordo+=Math.abs(v)};
   rowsForMonth().forEach(e=>add(e.client_id,isPlanned(e)?'pianificato':'fatto',dailyAmount(e)));
   monthlyRows().forEach(e=>add(e.client_id,'fatto',Number(e.amount||0)));
   manualRows().forEach(e=>add(e.client_id,isPlanned(e)?'pianificato':'fatto',Number(e.amount||0)));
   expenseRows().filter(expIsInvoice).forEach(e=>add(e.client_id,'rimborsi',Number(e.amount||0)));
   return Object.values(m).map(c=>({...c,totale:c.fatto+c.pianificato+c.rimborsi}))
-    .filter(c=>Math.abs(c.totale)>=0.005)
     .sort((a,b)=>b.totale-a.totale||clientName(a.client_id).localeCompare(clientName(b.client_id)));
 }
 // «Per cliente» nel Timesheet. Era una riga per tipo di voce — il T&M
@@ -2237,13 +2244,17 @@ function previstoPerCliente(){
 // lavoro, e il riepilogo qui sopra li mette «a parte» —: la colonna
 // deve sommare a quello che dice il riepilogo. In fattura pero' ci
 // vanno, quindi stanno nel totale, come nel «Previsto del mese» della
-// dashboard, e sotto il nome si dice quanti sono.
+// dashboard, e sotto il nome si dice quanti sono — col segno, se sono
+// una rettifica. Un cliente resta anche se le sue cifre fanno zero:
+// 1.000 di lavoro e una rettifica di -1.000 sono lavoro del mese, e le
+// sue righe si vedono qui sotto. Restano fuori solo i clienti senza
+// niente che valga — un'assenza, una riga a tariffa zero.
 function perClienteCard(){
-  const clienti=previstoPerCliente();
+  const clienti=sommePerCliente().filter(c=>c.lordo>=0.005);
   if(!clienti.length)return '';
   return `<div class="card perCliente"><b>Per cliente</b><div class="pcTab">
 <div class="pcRiga pcTesta"><span class="pcNome">Cliente</span><span>Consuntivato</span><span>Pianificato</span><span>Totale</span></div>
-${clienti.map(c=>`<div class="pcRiga"><span class="pcNome"><span class="title">${esc(c.client_id?clientName(c.client_id):'Senza cliente')}</span>${c.rimborsi>=0.005?`<small>+ ${eurMigliaia(c.rimborsi)} rimborsi spese, nel totale</small>`:''}</span><span data-l="Consuntivato">${eurMigliaia(c.fatto)}</span><span data-l="Pianificato">${eurMigliaia(c.pianificato)}</span><b data-l="Totale">${eurMigliaia(c.totale)}</b></div>`).join('')}
+${clienti.map(c=>`<div class="pcRiga"><span class="pcNome"><span class="title">${esc(c.client_id?clientName(c.client_id):'Senza cliente')}</span>${Math.abs(c.rimborsi)>=0.005?`<small>${c.rimborsi<0?'\u2212':'+'} ${eurMigliaia(Math.abs(c.rimborsi))} rimborsi spese, nel totale</small>`:''}</span><span data-l="Consuntivato">${eurMigliaia(c.fatto)}</span><span data-l="Pianificato">${eurMigliaia(c.pianificato)}</span><b data-l="Totale">${eurMigliaia(c.totale)}</b></div>`).join('')}
 </div></div>`;
 }
 function homeMeseCard(t){
