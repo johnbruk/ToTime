@@ -199,8 +199,9 @@ console.log('\n=== CON LA REGOLA 2025 NON COSTA NEMMENO LE IMPOSTE ===');
      'i 250 reggono i requisiti: analitici, con ricevuta, tracciabili, incassati',String(r.sc.analitici));
   ok(Math.abs(r.f.fuoriReddito-250)<0.005,
      'e la previsione li toglie dalla base imponibile',String(r.f.fuoriReddito));
-  ok(Math.abs(r.f.baseImponibile-(r.f.ricavi-250))<0.005,
-     'la base imponibile e’ i ricavi meno i 250',`${r.f.ricavi} − 250 = ${r.f.baseImponibile}`);
+  // Piu' la rivalsa INPS, che e' compenso e sta in fattura.
+  ok(Math.abs(r.f.baseImponibile-(r.f.ricavi+r.f.rivalsa-250))<0.005,
+     'la base imponibile e’ i ricavi, più la rivalsa, meno i 250',`${r.f.ricavi} + ${r.f.rivalsa} − 250 = ${r.f.baseImponibile}`);
   // fuori reddito sono soldi anticipati e ripresi: una partita di giro,
   // e l'utile non li conta come guadagno
   ok(Math.abs(r.f.utileNetto-(r.f.ricavi-r.f.costi-250-r.f.oneri))<0.005,

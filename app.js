@@ -1702,13 +1702,48 @@ function scomposizioneRimborsi(year=currentYear()){
   });
   return {analitici,chilometrici,senzaRequisiti,totale:analitici+chilometrici+senzaRequisiti};
 }
+// IL FORFETTARIO E' PER CASSA
+//
+// Un incasso appartiene all'anno in cui arriva sul conto, non a quello
+// del lavoro: il dicembre fatturato e pagato a gennaio e' ricavo
+// dell'anno nuovo. Le schede stanno sul mese del lavoro, quindi per le
+// tasse conta la data d'incasso; dove manca, l'anno della scheda.
+function annoIncasso(h){const d=String(h&&h.collection_date||'');return /^\d{4}-/.test(d)?Number(d.slice(0,4)):Number(h&&h.year)}
+// Quanto e' entrato nell'anno, e quanto di quello e' bollo riaddebitato:
+// il bollo e' un'anticipazione (art. 15 DPR 633/72), non ricavo. Prima
+// la stima del cruscotto lo contava e le Tasse future no.
+function incassiDiCassa(year=currentYear()){
+  let incassato=0,bollo=0;
+  (data.billingHeaders||[]).filter(h=>h.status==='collected'&&annoIncasso(h)===Number(year)).forEach(h=>{
+    const inv=Number(h.invoice_total_amount||h.total_amount||0);
+    incassato+=Number(h.collected_amount||inv||0);bollo+=Number(h.stamp_duty_amount||0)});
+  return {incassato,bollo,imponibile:Math.max(0,incassato-bollo)};
+}
+function eVersamentoInps(p){return String(p.payment_type||'').toLowerCase().includes('inps')}
+function eVersamentoImposta(p){return ['imposta_sostitutiva','acconto_imposta'].includes(String(p.payment_type||''))}
+function annoVersamento(p){const d=String(p.payment_date||'');return /^\d{4}-/.test(d)?Number(d.slice(0,4)):Number(p.fiscal_year)}
+// I contributi si deducono nell'anno in cui si VERSANO, qualunque anno
+// riguardino: il saldo 2026 pagato a giugno 2027 riduce l'imponibile
+// 2027, non quello 2026. Prima contava l'anno di riferimento, e segnando
+// pagato il saldo INPS si abbassava l'imposta dell'anno sbagliato.
+function contributiVersatiNellAnno(year){
+  return (data.taxPayments||[]).filter(p=>p.status==='paid'&&eVersamentoInps(p)&&annoVersamento(p)===Number(year))
+    .reduce((s,p)=>s+Number(p.amount||0),0);
+}
+// Gli acconti di un anno: versati per quell'anno, e dentro quell'anno.
+// Il saldo dello stesso anno si paga l'anno dopo, e non e' un acconto.
+function accontiVersati(year,kind){
+  const tipo=kind==='inps'?eVersamentoInps:eVersamentoImposta;
+  return (data.taxPayments||[]).filter(p=>p.status==='paid'&&tipo(p)&&Number(p.fiscal_year)===Number(year)&&annoVersamento(p)===Number(year))
+    .reduce((s,p)=>s+Number(p.amount||0),0);
+}
 function annualTaxCalc(year=currentYear()){
-  const ts=currentTaxSetting(year);const totalsY=annualTotals(year);
+  const ts=currentTaxSetting(year);const totalsY=annualTotals(year);const cassa=incassiDiCassa(year);
   const fuori=rimborsiFuoriReddito()?rimborsiAnaliticiIncassati(year):0;
-  const revenue=Math.max(0,totalsY.incassato-fuori);const coeff=Number(ts.profitability_coefficient||0)/100;const taxRate=Number(ts.substitute_tax_rate||0)/100;
-  const paidContrib=data.taxPayments.filter(p=>Number(p.fiscal_year)===Number(year)&&String(p.payment_type||'').toLowerCase().includes('inps')&&p.status==='paid').reduce((s,p)=>s+Number(p.amount||0),0);
+  const revenue=Math.max(0,cassa.imponibile-fuori);const coeff=Number(ts.profitability_coefficient||0)/100;const taxRate=Number(ts.substitute_tax_rate||0)/100;
+  const paidContrib=contributiVersatiNellAnno(year);
   const forfaitIncome=revenue*coeff;const taxable=Math.max(0,forfaitIncome-paidContrib);const substituteTax=taxable*taxRate;const net=revenue-paidContrib-substituteTax;
-  return {settings:ts,revenue,forfaitIncome,paidContrib,taxable,substituteTax,net,rimborsiFuori:fuori,...totalsY};
+  return {settings:ts,revenue,forfaitIncome,paidContrib,taxable,substituteTax,net,rimborsiFuori:fuori,bolloEscluso:cassa.bollo,...totalsY};
 }
 // La marca da bollo: una cosa e' che sia DOVUTA — sopra i 77,47 € di
 // importi esenti la fattura la deve dichiarare — un'altra e' CHI LA
@@ -4087,8 +4122,10 @@ function parseExcludedMonths(v){
 function projectionCalc(year=currentYear()){
   // La soglia degli 85.000 si misura sui RICAVI, non sul lavoro: i
   // rimborsi che restano imponibili ci contano. Vedi annualMonthData.
-  const months=annualMonthData(year).map(x=>Number(x.imponibile||0));
+  // E la rivalsa INPS, che e' compenso, ci conta anche lei.
   const ts=currentTaxSetting(year);
+  const rivRate=(ts.inps_recharge_enabled??true)?Number(ts.inps_recharge_rate??4)/100:0;
+  const months=annualMonthData(year).map(x=>Number(x.imponibile||0)+Number(x.fatturabile||0)*rivRate);
   const now=new Date();
   const selectedIsCurrent=year===now.getFullYear();
   const currentIdx=selectedIsCurrent?now.getMonth():11;
@@ -4130,9 +4167,9 @@ function projectionCalc(year=currentYear()){
   const risk=ratio>=high?'Critico':ratio>=med?'Alto':ratio>=low?'Medio':'Basso';
   return {year,actualToDate,avgLast3,avgYear,currentProjected,weightedMonthly,base,prudent,optimistic,limit,ratio,risk,currentMonthLabel:monthNames[currentIdx],startDate:activityStart,excludedMonths:excluded.map(i=>i+1),prudentFactor,optimisticFactor};
 }
-function projectionCard(){const p=projectionCalc(currentYear());return `<div class="card projectionCard"><b>Proiezione anno ${p.year}</b><div class="desc">Basata sull’imponibile mensile reale — lavoro più i rimborsi che restano tassabili: media ponderata 50% ultimi 3 mesi chiusi · 30% media anno · 20% mese corrente (dato reale, senza estrapolazioni). Imponibile reale ad oggi: ${fmtEUR(p.actualToDate)}. Data avvio attività: ${dateIT(p.startDate)}.${p.excludedMonths.length?' Mesi esclusi: '+p.excludedMonths.join(', ')+'.':''}</div><div class="kpiGrid three" style="margin-top:14px"><div><span>Prudente</span><strong>${fmtEUR(p.prudent)}</strong><small>fattore ${fmtNum(p.prudentFactor*100,0)}%</small></div><div><span>Base</span><strong>${fmtEUR(p.base)}</strong><small>media ponderata</small></div><div><span>Ottimistico</span><strong>${fmtEUR(p.optimistic)}</strong><small>fattore ${fmtNum(p.optimisticFactor*100,0)}%</small></div></div><div class="riskBox"><div><span>Rischio limite forfettario</span><strong class="risk risk-${p.risk.toLowerCase()}">${p.risk}</strong></div><div class="desc">Utilizzo previsto ${fmtNum(p.ratio*100,1)}% su limite ${fmtEUR(p.limit)}, calcolato sui consuntivi reali inseriti.</div></div></div>`}
+function projectionCard(){const p=projectionCalc(currentYear());return `<div class="card projectionCard"><b>Proiezione anno ${p.year}</b><div class="desc">Basata sull’imponibile mensile reale — lavoro, rimborsi che restano tassabili e rivalsa INPS: media ponderata 50% ultimi 3 mesi chiusi · 30% media anno · 20% mese corrente (dato reale, senza estrapolazioni). Imponibile reale ad oggi: ${fmtEUR(p.actualToDate)}. Data avvio attività: ${dateIT(p.startDate)}.${p.excludedMonths.length?' Mesi esclusi: '+p.excludedMonths.join(', ')+'.':''}</div><div class="kpiGrid three" style="margin-top:14px"><div><span>Prudente</span><strong>${fmtEUR(p.prudent)}</strong><small>fattore ${fmtNum(p.prudentFactor*100,0)}%</small></div><div><span>Base</span><strong>${fmtEUR(p.base)}</strong><small>media ponderata</small></div><div><span>Ottimistico</span><strong>${fmtEUR(p.optimistic)}</strong><small>fattore ${fmtNum(p.optimisticFactor*100,0)}%</small></div></div><div class="riskBox"><div><span>Rischio limite forfettario</span><strong class="risk risk-${p.risk.toLowerCase()}">${p.risk}</strong></div><div class="desc">Utilizzo previsto ${fmtNum(p.ratio*100,1)}% su limite ${fmtEUR(p.limit)}, calcolato sui consuntivi reali inseriti.</div></div></div>`}
 
-function tax(){const year=currentYear();const c=annualTaxCalc(year);const ts=c.settings;return appShell(`<div class="screenTitle">Fiscalità</div><p class="sub">Stima regime forfettario per l'anno ${year}. Valori configurabili, da verificare con il consulente fiscale.</p>${projectionCard()}${previsioneTasseCard()}<div class="card"><b>Stima tasse forfettario</b><div class="list" style="box-shadow:none;margin-bottom:0"><div class="row"><div></div><div><div class="title">ATECO ${esc(ts.ateco_code||'')}</div><div class="desc">${esc(ts.ateco_description||'')}</div></div><div></div></div><div class="row"><div></div><div><div class="title">Incassato anno</div><div class="desc">base di calcolo provvisoria</div></div><div class="value">${fmtEUR(c.revenue)}</div></div><div class="row"><div></div><div><div class="title">Reddito forfettario lordo</div><div class="desc">coefficiente ${fmtNum(ts.profitability_coefficient,2)}%</div></div><div class="value">${fmtEUR(c.forfaitIncome)}</div></div><div class="row" onclick="go('taxPayments')"><div></div><div><div class="title">Contributi INPS pagati</div><div class="desc">tocca per gestire i pagamenti fiscali registrati</div></div><div class="value">${fmtEUR(c.paidContrib)}</div></div><div class="row"><div></div><div><div class="title">Imponibile fiscale stimato</div><div class="desc">reddito forfettario - contributi</div></div><div class="value">${fmtEUR(c.taxable)}</div></div><div class="row"><div></div><div><div class="title">Imposta sostitutiva stimata</div><div class="desc">aliquota ${fmtNum(ts.substitute_tax_rate,2)}%</div></div><div class="value">${fmtEUR(c.substituteTax)}</div></div><div class="row"><div></div><div><div class="title">Netto stimato dopo imposta</div><div class="desc">incassato - contributi - imposta</div></div><div class="value">${fmtEUR(c.net)}</div></div></div></div><button class="secondary" style="margin-bottom:12px" onclick="go('tasseFuture')">◷ Tasse future · scadenze previste ›</button><div class="grid"><button class="secondary" onclick="go('taxPayments')">Pagamenti fiscali (INPS) ›</button><button class="secondary" onclick="go('taxSettings')">Configurazione fiscale ›</button></div>`)}
+function tax(){const year=currentYear();const c=annualTaxCalc(year);const ts=c.settings;return appShell(`<div class="screenTitle">Fiscalità</div><p class="sub">Stima regime forfettario per l'anno ${year}. Valori configurabili, da verificare con il consulente fiscale.</p>${projectionCard()}${previsioneTasseCard()}<div class="card"><b>Stima tasse forfettario</b><div class="list" style="box-shadow:none;margin-bottom:0"><div class="row"><div></div><div><div class="title">ATECO ${esc(ts.ateco_code||'')}</div><div class="desc">${esc(ts.ateco_description||'')}</div></div><div></div></div><div class="row"><div></div><div><div class="title">Incassato anno</div><div class="desc">entrato sul conto nel ${year}, per data d'incasso${c.bolloEscluso>0?' · senza '+fmtEUR(c.bolloEscluso)+' di bollo':''}${c.rimborsiFuori>0?' · senza '+fmtEUR(c.rimborsiFuori)+' di rimborsi fuori reddito':''}</div></div><div class="value">${fmtEUR(c.revenue)}</div></div><div class="row"><div></div><div><div class="title">Reddito forfettario lordo</div><div class="desc">coefficiente ${fmtNum(ts.profitability_coefficient,2)}%</div></div><div class="value">${fmtEUR(c.forfaitIncome)}</div></div><div class="row" onclick="go('taxPayments')"><div></div><div><div class="title">Contributi INPS versati nel ${year}</div><div class="desc">si deducono nell'anno in cui li versi · tocca per gestirli</div></div><div class="value">${fmtEUR(c.paidContrib)}</div></div><div class="row"><div></div><div><div class="title">Imponibile fiscale stimato</div><div class="desc">reddito forfettario - contributi</div></div><div class="value">${fmtEUR(c.taxable)}</div></div><div class="row"><div></div><div><div class="title">Imposta sostitutiva stimata</div><div class="desc">aliquota ${fmtNum(ts.substitute_tax_rate,2)}%</div></div><div class="value">${fmtEUR(c.substituteTax)}</div></div><div class="row"><div></div><div><div class="title">Netto stimato dopo imposta</div><div class="desc">incassato - contributi - imposta</div></div><div class="value">${fmtEUR(c.net)}</div></div></div></div><button class="secondary" style="margin-bottom:12px" onclick="go('tasseFuture')">◷ Tasse future · scadenze previste ›</button><div class="grid"><button class="secondary" onclick="go('taxPayments')">Pagamenti fiscali (INPS) ›</button><button class="secondary" onclick="go('taxSettings')">Configurazione fiscale ›</button></div>`)}
 function taxSettings(){const year=currentYear();const c=annualTaxCalc(year);const ts=c.settings;return appShell(`<div class="screenTitle">Configurazione fiscale</div><p class="sub">ATECO, regime, aliquote e parametri della stima. Il cruscotto imposte è nella voce Tassazione.</p><form class="form" onsubmit="saveTaxSettings(event)"><h2>ATECO, regime e tasse</h2><p class="sub">Determinano il calcolo delle tasse sul tuo codice ATECO.</p><div class="field"><label>Anno fiscale</label><input name="fiscal_year" type="number" value="${year}"></div><div class="field"><label>Regime fiscale</label><select name="regime"><option value="forfettario" ${ts.regime==='forfettario'?'selected':''}>Forfettario</option><option value="ordinario" ${ts.regime==='ordinario'?'selected':''}>Ordinario</option><option value="semplificato" ${ts.regime==='semplificato'?'selected':''}>Semplificato</option></select></div><div class="field"><label>Codice ATECO</label><input name="ateco_code" value="${esc(ts.ateco_code||'')}"></div><div class="field"><label>Descrizione ATECO</label><input name="ateco_description" value="${esc(ts.ateco_description||'')}"></div><div class="field"><label>Coefficiente redditività %</label><input name="profitability_coefficient" type="number" step="0.01" value="${Number(ts.profitability_coefficient||67)}"></div><div class="field"><label>Aliquota imposta sostitutiva %</label><input name="substitute_tax_rate" type="number" step="0.01" value="${Number(ts.substitute_tax_rate||5)}"></div><div class="field"><label>Limite ricavi annuo forfettario</label><input name="annual_revenue_limit" type="number" step="0.01" value="${Number(ts.annual_revenue_limit||85000)}"></div><div class="field"><label>Data avvio attività</label><input name="activity_start_date" type="date" value="${esc(ts.activity_start_date||DEFAULT_DEFAULT_ACTIVITY_START_DATE)}"></div><h2>Rimborsi spese e reddito</h2><p class="sub">Dal 1° gennaio 2025 i rimborsi <b>analitici</b> di vitto, alloggio, viaggio e trasporto, pagati con strumenti <b>tracciabili</b> e addebitati voce per voce in fattura, non concorrono al reddito né alla soglia degli 85.000 € (D.Lgs. 192/2024 sull'art. 54 TUIR, tracciabilità dalla L. 207/2024). <b>Sull'applicazione al regime forfettario la dottrina è però divisa</b>: la norma non richiama espressamente la legge 190/2014 e manca un chiarimento. Perciò la scelta è tua, da fare con il commercialista: l'app non la prende per te.</p><div class="card"><div class="themeChoice"><button type="button" class="${rimborsiFuoriReddito()?'':'active'}" onclick="cambiaRimborsiFuoriReddito('no')"><b>Li conto come compensi</b><span>Prudente, ed è quello che l'app ha sempre fatto: i rimborsi entrano nei ricavi e nella stima delle imposte. Nessun numero si muove.</span></button><button type="button" class="${rimborsiFuoriReddito()?'active':''}" onclick="cambiaRimborsiFuoriReddito('si')"><b>Fuori dal reddito, regola 2025</b><span>I rimborsi analitici tracciabili, con ricevuta e già incassati, escono dalla base imponibile della stima. Il rimborso chilometrico resta compenso in ogni caso, perché è forfettario.</span></button></div>${(()=>{const sc=scomposizioneRimborsi(year);if(!sc.totale)return '';return `<div class="metricLine" style="margin-top:14px">Rimborsi in fattura ${year}: <b>${fmtEUR(sc.totale)}</b></div><div class="desc" style="margin-top:6px">di cui <b>${fmtEUR(sc.analitici)}</b> analitici che reggono il requisito${sc.chilometrici?` · <b>${fmtEUR(sc.chilometrici)}</b> chilometrici, compenso comunque`:''}${sc.senzaRequisiti?` · <b>${fmtEUR(sc.senzaRequisiti)}</b> senza i requisiti (contanti, ricevuta mancante o mese non ancora incassato)`:''}.</div>`})()}</div><h2>Rivalsa INPS e marca da bollo</h2><p class="sub">Voci aggiuntive da esporre in fattura oltre al compenso.</p><div class="field"><label>Gestione previdenziale</label><input name="inps_management" value="${esc(ts.inps_management||'gestione_separata')}"></div><div class="field"><label>Aliquota INPS Gestione Separata %</label><input name="inps_gs_rate" type="number" step="0.01" value="${Number(ts.inps_gs_rate??26.07)}"></div><div class="field"><label>Rivalsa INPS</label><select name="inps_recharge_enabled"><option value="true" ${ts.inps_recharge_enabled?'selected':''}>Sì</option><option value="false" ${!ts.inps_recharge_enabled?'selected':''}>No</option></select></div><div class="field"><label>Percentuale rivalsa INPS</label><input name="inps_recharge_rate" type="number" step="0.01" value="${Number(ts.inps_recharge_rate||4)}"></div><div class="field"><label>Marca da bollo</label><select name="stamp_duty_mode">${['','charged','mine','none'].map(k=>`<option value="${k}" ${bolloModo(ts)===(k||null)?'selected':''}>${k?BOLLO_MODI[k]:'— da scegliere —'}</option>`).join('')}</select>
       <div class="small">Sopra ${fmtEUR(BOLLO_SOGLIA)} di importi esenti il bollo è <b>dovuto</b>: qui scegli <b>chi lo paga</b>. Addebitandolo al cliente si aggiunge alla fattura ed entra nel totale. Pagandolo tu non lo aggiungi fra le voci e non lo addebiti: il totale non lo comprende, e i ${fmtEUR(Number(ts.stamp_duty_amount??2)||2)} restano un tuo costo da versare all'Agenzia delle Entrate alle scadenze trimestrali — le trovi in Tasse future. La fattura elettronica lo dichiara comunque, come bollo virtuale: Fiscozen lo segna da sé nei dati del file, senza addebitarlo, e caricando l’XML l’app controlla che ci sia.</div></div><div class="field"><label>Importo marca da bollo</label><input name="stamp_duty_amount" type="number" step="0.01" value="${Number(ts.stamp_duty_amount||2)}"></div><details class="moreFields"><summary>Proiezione annua (avanzato)</summary><p class="sub">Parametri opzionali per affinare la stima "Prudente / Base / Ottimistico".</p><div class="field"><label>Includi mese corrente nella proiezione</label><select name="projection_include_current_month"><option value="true" ${ts.projection_include_current_month!==false?'selected':''}>Sì</option><option value="false" ${ts.projection_include_current_month===false?'selected':''}>No</option></select></div><div class="field"><label>Mesi esclusi dalla proiezione</label><input name="projection_excluded_months" placeholder="es. 1,8" value="${esc(parseExcludedMonths(ts.projection_excluded_months).join(','))}"></div><div class="field"><label>Fattore scenario prudente</label><input name="projection_prudent_factor" type="number" step="0.01" value="${Number(ts.projection_prudent_factor??0.85)}"></div><div class="field"><label>Fattore scenario ottimistico</label><input name="projection_optimistic_factor" type="number" step="0.01" value="${Number(ts.projection_optimistic_factor??1.10)}"></div><div class="field"><label>Soglia rischio basso %</label><input name="risk_low_threshold" type="number" step="0.01" value="${Number(ts.risk_low_threshold??70)}"></div><div class="field"><label>Soglia rischio medio %</label><input name="risk_medium_threshold" type="number" step="0.01" value="${Number(ts.risk_medium_threshold??90)}"></div><div class="field"><label>Soglia rischio alto %</label><input name="risk_high_threshold" type="number" step="0.01" value="${Number(ts.risk_high_threshold??100)}"></div></details><div class="field"><label>Note</label><textarea name="notes">${esc(ts.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva configurazione fiscale</button><button type="button" class="secondary" onclick="go('settings')">Indietro</button></div></form>`)}
 async function saveTaxSettings(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const year=Number(f.fiscal_year||currentYear());const payload={fiscal_year:year,regime:f.regime,ateco_code:norm(f.ateco_code)||null,ateco_description:norm(f.ateco_description)||null,profitability_coefficient:Number(f.profitability_coefficient||0),substitute_tax_rate:Number(f.substitute_tax_rate||0),inps_management:norm(f.inps_management)||null,inps_gs_rate:Number(f.inps_gs_rate||26.07),inps_recharge_enabled:f.inps_recharge_enabled==='true',inps_recharge_rate:Number(f.inps_recharge_rate||0),stamp_duty_mode:norm(f.stamp_duty_mode)||null,stamp_duty_enabled:f.stamp_duty_mode==='charged',stamp_duty_amount:Number(f.stamp_duty_amount||0),annual_revenue_limit:Number(f.annual_revenue_limit||0),activity_start_date:f.activity_start_date||null,projection_method:'weighted_average',projection_include_current_month:f.projection_include_current_month==='true',projection_excluded_months:parseExcludedMonths(f.projection_excluded_months),projection_prudent_factor:Number(f.projection_prudent_factor||0.85),projection_optimistic_factor:Number(f.projection_optimistic_factor||1.10),risk_low_threshold:Number(f.risk_low_threshold||70),risk_medium_threshold:Number(f.risk_medium_threshold||90),risk_high_threshold:Number(f.risk_high_threshold||100),notes:f.notes||null};const existing=data.taxSettings.find(t=>Number(t.fiscal_year)===year);let res;if(existing)res=await updateResilient('tax_settings',payload,existing.id);else res=await insertResilient('tax_settings',payload);if(res.error)return setMsg(motivoLeggibile(res.error),7000);await reload();state.view='tax';setMsg('Configurazione fiscale aggiornata.',4000)}
@@ -4159,7 +4196,7 @@ function inpsGsCalc(year=currentYear()){
 function inpsGsCard(){const c=inpsGsCalc(currentYear());return `<div class="card"><b>Contributi INPS Gestione Separata</b><div class="desc">Aliquota ${fmtNum(c.gsRate*100,2)}% sul reddito imponibile forfettario. Metodo storico: l'acconto è pari all'80% del contributo dovuto sull'anno precedente, in due rate uguali (30/06 e 30/11). Valori indicativi, da verificare con INPS o il commercialista.</div><div class="list" style="box-shadow:none;margin-top:12px;margin-bottom:0"><div class="row"><div></div><div><div class="title">Saldo ${c.prevYear} da versare</div><div class="desc">dovuto ${fmtEUR(c.totalDuePrev)} · già versato ${fmtEUR(c.paidPrev)} · scadenza 30/06/${c.year}</div></div><div class="value">${fmtEUR(c.saldoPrevDue)}</div></div><div class="row"><div></div><div><div class="title">Acconto ${c.year} residuo</div><div class="desc">dovuto ${fmtEUR(c.accontoCurrentDue)} · già versato ${fmtEUR(c.paidCurrent)} · 1ª rata 50% ${fmtEUR(c.rata1)} (30/06) · 2ª rata 50% ${fmtEUR(c.rata2)} (30/11)</div></div><div class="value">${fmtEUR(c.accontoCurrentRemaining)}</div></div><div class="row"><div></div><div><div class="title">Totale da versare nel ${c.year}</div><div class="desc">saldo ${c.prevYear} + acconto ${c.year} residuo</div></div><div class="value">${fmtEUR(c.totalCurrentYearOut)}</div></div><div class="row"><div></div><div><div class="title">Anticipo stimato ${c.nextYear}</div><div class="desc">stima su proiezione ${c.year} (scenario base): sarà l'acconto da versare nel ${c.nextYear}, da ricalcolare a consuntivo chiuso</div></div><div class="value">${fmtEUR(c.nextYearAccontoEstimate)}</div></div></div></div>`}
 function taxPaymentTypeLabel(t){return ({inps:'Contributi INPS',imposta_sostitutiva:'Imposta sostitutiva',acconto_imposta:'Acconto imposta',bollo:'Imposta di bollo',altro:'Altro'})[t]||t||'Pagamento'}
 function taxPaymentTypeOptions(selected=''){return ['inps','imposta_sostitutiva','acconto_imposta','bollo','altro'].map(v=>`<option value="${v}" ${v===selected?'selected':''}>${esc(taxPaymentTypeLabel(v))}</option>`).join('')}
-function taxPayments(){const year=currentYear();const pre=state.prefill||{};const rows=data.taxPayments.filter(p=>Number(p.fiscal_year)===year).sort((a,b)=>String(b.payment_date||'').localeCompare(String(a.payment_date||'')));const totalPaid=rows.filter(p=>p.status==='paid').reduce((s,p)=>s+Number(p.amount||0),0);return appShell(`<h1>Pagamenti fiscali</h1><p class="sub">Contributi INPS e altri versamenti fiscali per l'anno ${year}. I pagamenti INPS "Pagato" vengono dedotti in Fiscalità dall'imponibile stimato.</p>${inpsGsCard()}<div class="card"><b>Totale pagato ${year}</b><div class="amount" style="margin-top:8px">${fmtEUR(totalPaid)}</div></div><form class="form" onsubmit="addTaxPayment(event)"${pre.payment_type?' id="moduloPagamento"':''}><div class="field"><label>Anno fiscale</label><input name="fiscal_year" type="number" value="${Number(pre.fiscal_year||year)}"></div><div class="field"><label>Tipo pagamento</label><select name="payment_type">${taxPaymentTypeOptions(pre.payment_type||'inps')}</select></div><div class="field"><label>Data pagamento</label><input name="payment_date" type="date" value="${new Date().toISOString().slice(0,10)}"></div><div class="field"><label>Importo</label><input name="amount" type="number" step="0.01" value="${Number(pre.amount||0)}"></div><div class="field"><label>Stato</label><select name="status"><option value="paid" ${pre.status!=='planned'?'selected':''}>Pagato</option><option value="planned" ${pre.status==='planned'?'selected':''}>Pianificato</option></select></div><div class="field"><label>Note</label><textarea name="notes">${esc(pre.notes||'')}</textarea></div><button class="primary">${pre.payment_type?'Registra il versamento':'Aggiungi pagamento'}</button></form><div class="list">${rows.map(p=>`<div class="row" onclick="editTaxPayment('${p.id}')"><div></div><div><div class="title">${esc(taxPaymentTypeLabel(p.payment_type))}</div><div class="desc">${dateIT(p.payment_date)} · ${p.status==='paid'?'Pagato':'Pianificato'}</div></div><div class="value">${fmtEUR(p.amount||0)}</div></div>`).join('')||emptyForm('Nessun pagamento registrato per questo anno.')}</div><button type="button" class="secondary" onclick="go('tax')">Indietro</button>`)}
+function taxPayments(){const year=currentYear();const pre=state.prefill||{};const rows=data.taxPayments.filter(p=>Number(p.fiscal_year)===year).sort((a,b)=>String(b.payment_date||'').localeCompare(String(a.payment_date||'')));const totalPaid=rows.filter(p=>p.status==='paid').reduce((s,p)=>s+Number(p.amount||0),0);return appShell(`<h1>Pagamenti fiscali</h1><p class="sub">Contributi INPS e altri versamenti fiscali per l'anno ${year}. I pagamenti INPS "Pagato" si deducono in Fiscalità dall'imponibile dell'anno in cui li hai versati (conta la data di pagamento).</p>${inpsGsCard()}<div class="card"><b>Totale pagato ${year}</b><div class="amount" style="margin-top:8px">${fmtEUR(totalPaid)}</div></div><form class="form" onsubmit="addTaxPayment(event)"${pre.payment_type?' id="moduloPagamento"':''}><div class="field"><label>Anno fiscale</label><input name="fiscal_year" type="number" value="${Number(pre.fiscal_year||year)}"></div><div class="field"><label>Tipo pagamento</label><select name="payment_type">${taxPaymentTypeOptions(pre.payment_type||'inps')}</select></div><div class="field"><label>Data pagamento</label><input name="payment_date" type="date" value="${new Date().toISOString().slice(0,10)}"></div><div class="field"><label>Importo</label><input name="amount" type="number" step="0.01" value="${Number(pre.amount||0)}"></div><div class="field"><label>Stato</label><select name="status"><option value="paid" ${pre.status!=='planned'?'selected':''}>Pagato</option><option value="planned" ${pre.status==='planned'?'selected':''}>Pianificato</option></select></div><div class="field"><label>Note</label><textarea name="notes">${esc(pre.notes||'')}</textarea></div><button class="primary">${pre.payment_type?'Registra il versamento':'Aggiungi pagamento'}</button></form><div class="list">${rows.map(p=>`<div class="row" onclick="editTaxPayment('${p.id}')"><div></div><div><div class="title">${esc(taxPaymentTypeLabel(p.payment_type))}</div><div class="desc">${dateIT(p.payment_date)} · ${p.status==='paid'?'Pagato':'Pianificato'}</div></div><div class="value">${fmtEUR(p.amount||0)}</div></div>`).join('')||emptyForm('Nessun pagamento registrato per questo anno.')}</div><button type="button" class="secondary" onclick="go('tax')">Indietro</button>`)}
 function editTaxPayment(id){navigateTo('taxPaymentEdit',{edit:id})}
 function taxPaymentEdit(){const p=data.taxPayments.find(x=>x.id===state.edit);if(!p)return taxPayments();return appShell(`<h1>Modifica pagamento</h1><form class="form" onsubmit="saveTaxPayment(event)"><div class="field"><label>Anno fiscale</label><input name="fiscal_year" type="number" value="${Number(p.fiscal_year||currentYear())}"></div><div class="field"><label>Tipo pagamento</label><select name="payment_type">${taxPaymentTypeOptions(p.payment_type||'inps')}</select></div><div class="field"><label>Data pagamento</label><input name="payment_date" type="date" value="${esc(p.payment_date||'')}"></div><div class="field"><label>Importo</label><input name="amount" type="number" step="0.01" value="${Number(p.amount||0)}"></div><div class="field"><label>Stato</label><select name="status"><option value="paid" ${p.status==='paid'?'selected':''}>Pagato</option><option value="planned" ${p.status==='planned'?'selected':''}>Pianificato</option></select></div><div class="field"><label>Note</label><textarea name="notes">${esc(p.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteTaxPayment('${p.id}')">Elimina</button><button type="button" class="secondary" onclick="go('taxPayments')">Annulla</button></div></form>`)}
 async function addTaxPayment(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const payload={fiscal_year:Number(f.fiscal_year||currentYear()),payment_type:f.payment_type,payment_date:f.payment_date||null,amount:Number(f.amount||0),status:f.status,notes:f.notes||null};const {error}=await insertResilient('tax_payments',payload);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='taxPayments';render()}
@@ -4232,42 +4269,119 @@ function balanceCompositionBar(costi,inps,imposta,utile){const parts=[['Spese a 
 function costsByCategoryData(year){const m={};expenseRowsForYear(year).filter(expIsOwn).forEach(e=>{const n=expenseCategoryName(e.expense_category_id);m[n]=(m[n]||0)+Number(e.amount||0)});return Object.entries(m).map(([name,amount])=>({name,amount})).sort((a,b)=>b.amount-a.amount)}
 function costsByCategoryBars(year){const rows=costsByCategoryData(year).slice(0,8);if(!rows.length)return '';const max=Math.max(1,...rows.map(r=>r.amount));return `<div class="hbars">${rows.map(r=>`<div class="hbar"><div>${esc(r.name)}</div><div class="htrack"><div class="hfill" style="width:${Math.max(2,r.amount/max*100)}%"></div></div><div>${fmtEUR(r.amount)}</div></div>`).join('')}</div>`}
 const ACCONTO_MIN_IMPOSTA=51.65,ACCONTO_UNICA_SOGLIA=257.52;
-function bolloIncassato(year=currentYear()){return data.billingHeaders.filter(h=>Number(h.year)===Number(year)&&h.status==='collected').reduce((s,h)=>s+Number(h.stamp_duty_amount||0),0)}
 function taxBaseFor(year,mode){const at=annualTotals(year);const ts=currentTaxSetting(year);
   // Il bollo riaddebitato è anticipazione ex art.15 DPR 633/72: non è ricavo imponibile.
-  const bolloInc=bolloIncassato(year);
-  const incassatoImponibile=Math.max(0,at.incassato-bolloInc);
+  const cassa=incassiDiCassa(year);const bolloInc=cassa.bollo;
+  // La stessa scelta sui rimborsi del cruscotto: prima qui non si
+  // applicava, e le due schermate davano imposte diverse.
+  const fuori=rimborsiFuoriReddito()?rimborsiAnaliticiIncassati(year):0;
+  const incassatoImponibile=Math.max(0,cassa.imponibile-fuori);
   if(mode==='cassa')return {base:incassatoImponibile,parts:[['Incassato imponibile',incassatoImponibile]],bolloEscluso:bolloInc};
   // La parte non ancora fatturata porterà la rivalsa INPS, che è ricavo imponibile.
   const rivRate=(ts.inps_recharge_enabled??true)?Number(ts.inps_recharge_rate??4)/100:0;
   const futuro=(at.daFatturare+(at.pianificato||0))*(1+rivRate);
-  const parts=[['Incassato imponibile',incassatoImponibile],['Da incassare',at.daIncassare],['Da fatturare + pianificato',futuro]];
+  // Da incassare: le fatture dell'anno emesse e non ancora pagate,
+  // senza il bollo, che non e' ricavo.
+  const daIncassare=(data.billingHeaders||[]).filter(h=>Number(h.year)===Number(year)&&h.status==='invoice_issued')
+    .reduce((s,h)=>s+Math.max(0,Number(h.invoice_total_amount||h.total_amount||0)-Number(h.stamp_duty_amount||0)),0);
+  const parts=[['Incassato imponibile',incassatoImponibile],['Da incassare',daIncassare],['Da fatturare + pianificato',futuro]];
   return {base:parts.reduce((s,p)=>s+p[1],0),parts,bolloEscluso:bolloInc,rivRate};
 }
 function taxDueFor(year,mode){const ts=currentTaxSetting(year);const {base,parts}=taxBaseFor(year,mode);
   const coeff=Number(ts.profitability_coefficient||0)/100,gsRate=Number(ts.inps_gs_rate??26.07)/100,taxRate=Number(ts.substitute_tax_rate||0)/100;
   const forfait=base*coeff;const inps=forfait*gsRate;
-  const paidContrib=data.taxPayments.filter(p=>Number(p.fiscal_year)===Number(year)&&String(p.payment_type||'').toLowerCase().includes('inps')&&p.status==='paid').reduce((s,p)=>s+Number(p.amount||0),0);
+  // L'imposta si calcola al netto dei contributi versati NELL'ANNO. Nel
+  // prospetto B, che immagina l'anno chiuso, ci sono anche quelli che
+  // l'anno deve ancora versare (saldo dell'anno prima e acconti).
+  const paidContrib=contributiVersatiNellAnno(year)+(mode==='cassa'?0:inpsGsCalc(year).totalCurrentYearOut);
   const imposta=Math.max(0,forfait-paidContrib)*taxRate;
   return {ts,base,parts,coeff,gsRate,taxRate,forfait,inps,imposta,paidContrib};
 }
+// IL SIMULATORE DELL'ANNO DOPO
+//
+// Le tasse di un anno si pagano l'anno successivo: quelle del 2027 a
+// giugno e novembre 2028. Per vederle serve una cosa sola che l'app non
+// puo' sapere, quanto si incassera' nel 2027. La propone dal ritmo
+// dell'anno in corso (la stessa media della proiezione, rivalsa
+// compresa) e la si corregge a mano. Tutto il resto viene dal
+// prospetto B dell'anno in corso: il saldo INPS e gli acconti che si
+// versano nel 2027 sono i contributi da dedurre, e gli acconti 2027
+// gia' versati si tolgono dai saldi.
+// Se gli acconti versati superano il dovuto non si paga un saldo zero:
+// si ha un CREDITO, che nell'F24 del 30 giugno si compensa con le altre
+// voci e le abbassa. Mostrando zero, la differenza spariva e si
+// prevedeva di pagare piu' del vero.
+function vociCredito(items,date,ref,inpsEccesso,impostaEccesso){
+  if(inpsEccesso>0.005)items.push({date,label:'Credito contributi INPS '+ref+' (acconti versati in più)',ref,amount:-inpsEccesso,kind:'credito'});
+  if(impostaEccesso>0.005)items.push({date,label:'Credito imposta sostitutiva '+ref+' (acconti versati in più)',ref,amount:-impostaEccesso,kind:'credito'});
+}
+function chiaveSimulazione(year){return 'simula_ricavi_'+(Number(year)+1)}
+function ricaviSimulati(year){
+  const v=Number(settingValue(chiaveSimulazione(year)));
+  if(v>0)return {valore:v,scelto:true};
+  return {valore:Math.round(projectionCalc(year).weightedMonthly*12),scelto:false};
+}
+async function cambiaRicaviSimulati(year,v){
+  const n=Number(String(v||'').replace(',','.'));
+  const res=await saveSetting(chiaveSimulazione(year),n>0?String(Math.round(n*100)/100):'');
+  if(res&&res.error)return setMsg('La cifra non si è salvata: '+motivoLeggibile(res.error),7000);
+  await reload();render();
+}
+function taxScheduleSimulato(year){
+  const N=Number(year)+1,M=N+1;
+  const ts=data.taxSettings.find(t=>Number(t.fiscal_year)===N)||currentTaxSetting(year);
+  const coeff=Number(ts.profitability_coefficient||0)/100,gsRate=Number(ts.inps_gs_rate??26.07)/100,taxRate=Number(ts.substitute_tax_rate||0)/100;
+  const r=ricaviSimulati(year);
+  const prima=taxScheduleItems(year,'previsione');
+  const somma=(kind,ref)=>prima.items.filter(i=>i.kind===kind&&Number(i.ref)===ref).reduce((t,i)=>t+i.amount,0);
+  // Si versano nel N: il saldo INPS dell'anno prima e gli acconti di N.
+  const inpsVersatiN=somma('inps',Number(year))+somma('inps',N);
+  const accontiInpsN=somma('inps',N),accontiImpostaN=somma('imposta',N);
+  const forfait=r.valore*coeff;const inps=forfait*gsRate;
+  const imposta=Math.max(0,forfait-inpsVersatiN)*taxRate;
+  const items=[];
+  const saldoInps=Math.max(0,inps-accontiInpsN);
+  if(saldoInps>0)items.push({date:M+'-06-30',label:'Saldo contributi INPS Gestione Separata',ref:N,amount:saldoInps,kind:'inps'});
+  if(inps>0){items.push({date:M+'-06-30',label:'Primo acconto contributi INPS (80% in 2 rate)',ref:M,amount:inps*0.4,kind:'inps'});
+    items.push({date:M+'-11-30',label:'Secondo acconto contributi INPS (80% in 2 rate)',ref:M,amount:inps*0.4,kind:'inps'});}
+  const saldoImposta=Math.max(0,imposta-accontiImpostaN);
+  if(saldoImposta>0)items.push({date:M+'-06-30',label:'Saldo imposta sostitutiva',ref:N,amount:saldoImposta,kind:'imposta'});
+  if(imposta>ACCONTO_MIN_IMPOSTA){
+    if(imposta<ACCONTO_UNICA_SOGLIA)items.push({date:M+'-11-30',label:'Acconto imposta sostitutiva (unica rata)',ref:M,amount:imposta,kind:'imposta'});
+    else{items.push({date:M+'-06-30',label:'Primo acconto imposta sostitutiva (40%)',ref:M,amount:imposta*0.4,kind:'imposta'});
+      items.push({date:M+'-11-30',label:'Secondo acconto imposta sostitutiva (60%)',ref:M,amount:imposta*0.6,kind:'imposta'});}}
+  vociCredito(items,M+'-06-30',N,accontiInpsN-inps,accontiImpostaN-imposta);
+  items.sort((a,b)=>a.date.localeCompare(b.date)||a.label.localeCompare(b.label));
+  const parts=[['Incassi '+N+' simulati',r.valore],['INPS versato nel '+N,inpsVersatiN]];
+  return {items,total:items.reduce((t,i)=>t+i.amount,0),bolloTot:0,simulato:r,
+    due:{ts,base:r.valore,parts,coeff,gsRate,taxRate,forfait,inps,imposta,paidContrib:inpsVersatiN,accontiInpsN,accontiImpostaN}};
+}
 function taxScheduleItems(year,mode){
+  if(mode==='simulato')return taxScheduleSimulato(year);
   const d=taxDueFor(year,mode);const N=year+1;const items=[];
   const bo=bolloCalc(year);const trimLabel=['I','II','III','IV'];
   const bolloDue=[[year+'-05-31','I'],[year+'-09-30','II'],[year+'-11-30','III'],[N+'-02-28','IV']];
   const bolloTot=bo.perTrim.reduce((s,v)=>s+v,0);
   if(bolloTot>0){bo.perTrim.forEach((v,i)=>{if(v>0)items.push({date:bolloDue[i][0],label:'Imposta di bollo fatture elettroniche · '+trimLabel[i]+' trimestre',ref:year,amount:v,kind:'bollo'});});}
-  const paidInps=d.paidContrib;
-  const saldoInps=Math.max(0,d.inps-paidInps);
+  // Il saldo e' il dovuto meno gli acconti gia' versati per l'anno. Il
+  // saldo stesso, una volta pagato, non lo azzera: resta in elenco come
+  // pagato, come le altre scadenze.
+  const saldoInps=Math.max(0,d.inps-accontiVersati(year,'inps'));
   if(saldoInps>0)items.push({date:N+'-06-30',label:'Saldo contributi INPS Gestione Separata',ref:year,amount:saldoInps,kind:'inps'});
   const accInps=d.inps*0.8;
   if(accInps>0){items.push({date:N+'-06-30',label:'Primo acconto contributi INPS (80% in 2 rate)',ref:N,amount:accInps/2,kind:'inps'});
     items.push({date:N+'-11-30',label:'Secondo acconto contributi INPS (80% in 2 rate)',ref:N,amount:accInps/2,kind:'inps'});}
-  if(d.imposta>0)items.push({date:N+'-06-30',label:'Saldo imposta sostitutiva',ref:year,amount:d.imposta,kind:'imposta'});
+  // Prima il saldo era l'imposta intera: gli acconti versati nell'anno
+  // si pagavano due volte.
+  const saldoImposta=Math.max(0,d.imposta-accontiVersati(year,'imposta'));
+  if(saldoImposta>0)items.push({date:N+'-06-30',label:'Saldo imposta sostitutiva',ref:year,amount:saldoImposta,kind:'imposta'});
   if(d.imposta>ACCONTO_MIN_IMPOSTA){
     if(d.imposta<ACCONTO_UNICA_SOGLIA){items.push({date:N+'-11-30',label:'Acconto imposta sostitutiva (unica rata)',ref:N,amount:d.imposta,kind:'imposta'});}
     else{items.push({date:N+'-06-30',label:'Primo acconto imposta sostitutiva (40%)',ref:N,amount:d.imposta*0.4,kind:'imposta'});
       items.push({date:N+'-11-30',label:'Secondo acconto imposta sostitutiva (60%)',ref:N,amount:d.imposta*0.6,kind:'imposta'});}}
+  // Solo nel prospetto B, che immagina l'anno chiuso: nel prospetto A,
+  // ad anno in corso, l'incassato e' parziale e il «credito» non c'e'.
+  if(mode!=='cassa')vociCredito(items,N+'-06-30',year,accontiVersati(year,'inps')-d.inps,accontiVersati(year,'imposta')-d.imposta);
   items.sort((a,b)=>a.date.localeCompare(b.date)||a.label.localeCompare(b.label));
   applicaVersamenti(items,year);
   return {items,total:items.reduce((s,i)=>s+i.amount,0),due:d,bolloTot};
@@ -4329,6 +4443,14 @@ function versatoBollo(year){
 // lavora sulla lista completa, in ordine di data: cosi' chi versa un
 // importo che copre due trimestri li vede coperti tutti e due.
 function applicaVersamenti(items,year){
+  // Un saldo registrato a mano, senza il pulsante, si riconosce lo
+  // stesso: versato per l'anno, ma dopo la sua fine.
+  ['inps','imposta'].forEach(kind=>{
+    const tipo=kind==='inps'?eVersamentoInps:eVersamentoImposta;
+    const versato=(data.taxPayments||[]).filter(p=>p.status==='paid'&&tipo(p)&&Number(p.fiscal_year)===Number(year)&&annoVersamento(p)>Number(year))
+      .reduce((s,p)=>s+Number(p.amount||0),0);
+    items.filter(i=>i.kind===kind&&Number(i.ref)===Number(year)).forEach(i=>{if(versato>=Number(i.amount||0)-0.005)i.coperta=true});
+  });
   let residuo=versatoBollo(year);
   items.filter(i=>i.kind==='bollo').sort((a,b)=>String(a.date).localeCompare(String(b.date)))
     .forEach(i=>{
@@ -4410,7 +4532,7 @@ function sceltaVistaTasse(){
   return `<div class="tabs" role="tablist" aria-label="Come guardare le scadenze">${TASSE_VISTE.map(([k,l])=>
     `<button type="button" role="tab" aria-selected="${k===v}" class="${k===v?'active':''}" onclick="cambiaVistaTasse('${k}')">${l}</button>`).join('')}</div>`;
 }
-const TASSE_TINTA={bollo:'gray',inps:'blue',imposta:'orange'};
+const TASSE_TINTA={bollo:'gray',inps:'blue',imposta:'orange',credito:'verde'};
 // Scaduta vuol dire che quel giorno e' passato: e' la prima cosa da
 // sapere guardando un elenco di cose da pagare, e prima non si vedeva.
 function statoScadenza(iso,oggi,pagata){
@@ -4480,6 +4602,8 @@ function apriChiudiTappa(chiave){
 // si apre per prima — non l'hanno mai avuto, e dall'app non c'era modo
 // di segnare niente senza passare dalla linea del tempo.
 function bottonePagata(it){
+  // Un credito non si paga: si usa nell'F24 per pagare meno.
+  if(it.kind==='credito')return '<span class="small">si scala nell’F24 dello stesso giorno</span>';
   const arg=`'${it.kind}',${Number(it.ref)},'${it.date}'`;
   if(scadenzaPagata(it))
     return `<button type="button" class="miniBtn vocePag" onclick="annullaPagata(${arg})">Non l'ho pagata</button>`;
@@ -4575,6 +4699,15 @@ function giorniA(iso,oggi){
 function taxScheduleCard(year,mode,title,desc){
   const r=taxScheduleItems(year,mode);const d=r.due;
   const oggi=todayISO();
+  // Nei tre riquadri in alto, all'euro: sul telefono i centesimi
+  // tagliavano le cifre («63.358,9…»). Il dettaglio resta al centesimo.
+  const tondo=n=>eurMigliaia(Math.round(Number(n)||0)).replace(/,00(?=\u00a0€)/,'');
+  const sim=mode==='simulato'?`<form class="form simulatore" style="margin:12px 0 0" onsubmit="event.preventDefault();cambiaRicaviSimulati(${year},this.ricavi.value)">
+      <div class="field"><label>Quanto pensi di incassare nel ${year+1}</label>
+      <input name="ricavi" type="number" step="100" min="0" inputmode="decimal" value="${Math.round(r.simulato.valore)}" onchange="cambiaRicaviSimulati(${year},this.value)"></div>
+      <div class="small">${r.simulato.scelto?'La cifra l’hai scritta tu. Svuota il campo per tornare alla proposta dell’app.':'Proposta dell’app: il ritmo mensile del '+year+' per 12 mesi.'} Rivalsa INPS compresa, bollo escluso.</div></form>
+      <div class="metricLine" style="margin-top:10px">Dovuti per il ${year+1}: INPS ${fmtEUR(d.inps)} <span class="dot">·</span> imposta ${fmtEUR(d.imposta)}</div>
+      <div class="metricLine">Acconti ${year+1} versati nel ${year+1}: INPS ${fmtEUR(d.accontiInpsN)} <span class="dot">·</span> imposta ${fmtEUR(d.accontiImpostaN)}</div>`:'';
   const vista=vistaTasse();
   // «Da versare» e' quello che resta davvero da versare: cio' che hai
   // gia' segnato pagato non e' piu' un debito, e il pagato dell'anno si
@@ -4588,8 +4721,8 @@ function taxScheduleCard(year,mode,title,desc){
     :tassePerScadenza(r.items,oggi);
   const scadute=r.items.filter(i=>String(i.date)<oggi&&!scadenzaPagata(i));
   const prossima=r.items.find(i=>String(i.date)>=oggi&&!scadenzaPagata(i));
-  return `<div class="card"><b>${title}</b><div class="desc" style="margin-top:2px">${desc}</div>
-    <div class="kpiGrid three" style="margin-top:14px"><div><span>Base</span><strong>${fmtEUR(d.base)}</strong></div><div><span>Imponibile</span><strong>${fmtEUR(d.forfait)}</strong></div><div><span>Da versare</span><strong>${fmtEUR(daVersare)}</strong></div></div>
+  return `<div class="card"><b>${title}</b><div class="desc" style="margin-top:2px">${desc}</div>${sim}
+    <div class="kpiGrid three" style="margin-top:14px"><div><span>Base</span><strong>${tondo(d.base)}</strong></div><div><span>Imponibile</span><strong>${tondo(d.forfait)}</strong></div><div><span>Da versare</span><strong>${tondo(daVersare)}</strong></div></div>
     <div class="metricLine" style="margin-top:8px">${d.parts.map(p=>esc(p[0])+' '+fmtEUR(p[1])).join(' <span class="dot">·</span> ')}</div>
     ${prossima?`<div class="metricLine" style="margin-top:10px"><span class="tag orange">Prossima</span> ${dataEstesa(prossima.date)} <span class="dot">·</span> ${giorniA(prossima.date,oggi)} <span class="dot">·</span> <b>${fmtEUR(r.items.filter(i=>i.date===prossima.date&&!scadenzaPagata(i)).reduce((s,i)=>s+i.amount,0))}</b></div>`:''}
     ${pagate.length?`<div class="metricLine" style="margin-top:6px"><span class="tag verde">Già pagate</span> ${pagate.length===1?'1 voce':pagate.length+' voci'} <span class="dot">·</span> ${fmtEUR(somPagate)}</div>`:''}
@@ -4603,12 +4736,14 @@ function taxScheduleCard(year,mode,title,desc){
         <button type="button" class="secondary" style="margin-top:12px" onclick="registraBollo(${year},${resta>0?resta.toFixed(2):dovuto.toFixed(2)})">Ho versato il bollo</button>
         <button type="button" class="secondary" style="margin-top:8px" onclick="go('taxPayments')">Vedi tutti i versamenti</button></div>`;})()}
 
-    ${(()=>{const acc=accantonamento(r.items,oggi);return acc?`<div class="salvadanaio"><div class="salvaCifra">${fmtEUR(acc.mese)}<span>al mese</span></div>
+    ${(()=>{// Nel simulatore no: prima di queste scadenze ci sono quelle
+      // dell'anno in corso, e la quota al mese verrebbe troppo bassa.
+      const acc=mode==='simulato'?null:accantonamento(r.items,oggi);return acc?`<div class="salvadanaio"><div class="salvaCifra">${fmtEUR(acc.mese)}<span>al mese</span></div>
       <div class="salvaTesto">per arrivare a ${dataEstesa(acc.ultima)} con ${fmtEUR(acc.tot)} da parte.
       Sono ${acc.mesi===1?'poco più di un mese':acc.mesi+' mesi'} da oggi.</div></div>`:''})()}
     ${r.items.length?sceltaVistaTasse():''}${corpo}</div>`;
 }
-function tasseFuture(){const year=currentYear();return appShell(`<h1>Tasse future ${year}</h1><p class="sub">Scadenze previste per contributi, imposta sostitutiva e bollo. Regime forfettario, base cassa. Stime indicative da verificare col commercialista.</p>${taxScheduleCard(year,'cassa','Prospetto A · solo incassato reale','Calcolato solo su quanto realmente incassato ad oggi. È il dato prudenziale.')}${taxScheduleCard(year,'previsione','Prospetto B · incassato + previsione',"Include anche da incassare, da fatturare e pianificato: quanto dovrai versare se tutto verrà incassato nell'anno.")}<details class="card moreFields"><summary>Note di calcolo e regole applicate</summary><div class="desc" style="margin-top:6px">· Contributi INPS Gestione Separata: acconto pari all'80% del dovuto, in due rate uguali (30/06 e 30/11).<br>· Imposta sostitutiva: acconto 100% del dovuto (40% + 60%); nessun acconto sotto ${fmtEUR(ACCONTO_MIN_IMPOSTA)}, unica rata a novembre sotto ${fmtEUR(ACCONTO_UNICA_SOGLIA)}.<br>· Imposta di bollo: ${fmtEUR(bolloCalc(year).unit)} per fattura sopra ${fmtEUR(BOLLO_SOGLIA)}, versamento trimestrale.<br>· L'imposta sostitutiva è calcolata al netto dei contributi INPS <b>effettivamente versati</b>.<br>· Base imponibile: compensi, rimborsi spese addebitati in fattura e rivalsa INPS <b>concorrono</b> al reddito; la marca da bollo riaddebitata è esclusa (anticipazione art. 15 DPR 633/72).<br>· Nel prospetto B la parte non ancora fatturata è maggiorata della rivalsa INPS, che sarà anch'essa ricavo imponibile.</div></details><div class="actions"><button type="button" class="secondary" onclick="go('tax')">Torna a Fiscalità</button></div>`)}
+function tasseFuture(){const year=currentYear();return appShell(`<h1>Tasse future ${year}</h1><p class="sub">Scadenze previste per contributi, imposta sostitutiva e bollo. Regime forfettario, base cassa. Stime indicative da verificare col commercialista.</p>${taxScheduleCard(year,'cassa','Prospetto A · solo incassato reale','Calcolato solo su quanto realmente incassato ad oggi. È il dato prudenziale.')}${taxScheduleCard(year,'previsione','Prospetto B · incassato + previsione',"Include anche da incassare, da fatturare e pianificato: quanto dovrai versare se tutto verrà incassato nell'anno.")}${taxScheduleCard(year,'simulato','Simulatore · tasse '+(year+1)+', da pagare nel '+(year+2),'Scrivi quanto pensi di incassare nel '+(year+1)+': l’app calcola saldi e acconti del '+(year+2)+'. Parte dal prospetto B, cioè immagina che il '+year+' si chiuda come previsto.')}<details class="card moreFields"><summary>Note di calcolo e regole applicate</summary><div class="desc" style="margin-top:6px">· Contributi INPS Gestione Separata: acconto pari all'80% del dovuto, in due rate uguali (30/06 e 30/11).<br>· Imposta sostitutiva: acconto 100% del dovuto (40% + 60%); nessun acconto sotto ${fmtEUR(ACCONTO_MIN_IMPOSTA)}, unica rata a novembre sotto ${fmtEUR(ACCONTO_UNICA_SOGLIA)}.<br>· Imposta di bollo: ${fmtEUR(bolloCalc(year).unit)} per fattura sopra ${fmtEUR(BOLLO_SOGLIA)}, versamento trimestrale.<br>· L'imposta sostitutiva è calcolata al netto dei contributi INPS <b>effettivamente versati</b>.<br>· Base imponibile: compensi, rimborsi spese addebitati in fattura e rivalsa INPS <b>concorrono</b> al reddito; la marca da bollo riaddebitata è esclusa (anticipazione art. 15 DPR 633/72).<br>· Nel prospetto B la parte non ancora fatturata è maggiorata della rivalsa INPS, che sarà anch'essa ricavo imponibile.</div></details><div class="actions"><button type="button" class="secondary" onclick="go('tax')">Torna a Fiscalità</button></div>`)}
 function forecastCalc(year=currentYear()){
   const ts=currentTaxSetting(year);const at=annualTotals(year);
   const coeff=Number(ts.profitability_coefficient||0)/100;const gsRate=Number(ts.inps_gs_rate??26.07)/100;const taxRate=Number(ts.substitute_tax_rate||0)/100;
@@ -4624,12 +4759,21 @@ function forecastCalc(year=currentYear()){
   // configurazione, la stessa che usa il cruscotto imposte. Senza
   // questo l'app diceva due cose diverse sullo stesso anno.
   const fuoriReddito=rimborsiFuoriReddito()?(at.rimborsiAnalitici||0):0;
-  const baseImponibile=Math.max(0,(at.imponibile||0)+pianificato);
-  const forfait=baseImponibile*coeff;const inps=forfait*gsRate;const imposta=Math.max(0,forfait-inps)*taxRate;
+  // La rivalsa INPS del 4% sta in fattura ed e' compenso: entra nel
+  // reddito. Prima qui mancava, e la previsione stava sotto del 4%.
+  const rivRate=(ts.inps_recharge_enabled??true)?Number(ts.inps_recharge_rate??4)/100:0;
+  const rivalsa=(fatturabile+pianificato)*rivRate;
+  const baseImponibile=Math.max(0,(at.imponibile||0)+pianificato+rivalsa);
+  // I contributi si deducono nell'anno in cui si versano: quelli gia'
+  // versati e quelli che l'anno deve ancora versare. Non i contributi
+  // dell'anno stesso, che si pagano l'anno dopo: il primo anno, quando
+  // non si e' versato niente, non c'e' niente da dedurre.
+  const contribDedotti=contributiVersatiNellAnno(year)+inpsGsCalc(year).totalCurrentYearOut;
+  const forfait=baseImponibile*coeff;const inps=forfait*gsRate;const imposta=Math.max(0,forfait-contribDedotti)*taxRate;
   const oneri=inps+imposta;const utileNetto=ricavi-costi-fuoriReddito-oneri;
-  return {ts,consuntivato,rimborsi,fatturabile,pianificato,ricavi,baseImponibile,fuoriReddito,forfait,inps,imposta,oneri,costi,utileNetto,fatturato:at.fatturato,fatturatoBase:at.fatturatoBase,daFatturare:at.daFatturare,limit:Number(ts.annual_revenue_limit||85000),coeff,gsRate,taxRate};
+  return {ts,consuntivato,rimborsi,fatturabile,pianificato,ricavi,rivalsa,rivRate,contribDedotti,baseImponibile,fuoriReddito,forfait,inps,imposta,oneri,costi,utileNetto,fatturato:at.fatturato,fatturatoBase:at.fatturatoBase,daFatturare:at.daFatturare,limit:Number(ts.annual_revenue_limit||85000),coeff,gsRate,taxRate};
 }
-function previsioneTasseCard(){const year=currentYear();const f=forecastCalc(year);if(f.ricavi<=0)return '';return `<div class="card"><b>Previsione imposte e contributi ${year}</b><div class="desc" style="margin-top:2px">Stima su base fatturabile + pianificato (competenza), coeff. ${fmtNum(f.coeff*100,0)}%. Le imposte effettive sono su base cassa (incassato).</div><div class="list" style="box-shadow:none;margin:12px 0 0"><div class="row"><div></div><div><div class="title">Base previsione (ricavi)</div><div class="desc">fatturabile ${fmtEUR(f.fatturabile)}${f.rimborsi>0?' (di cui '+fmtEUR(f.rimborsi)+' rimborsi spese)':''} + pianificato ${fmtEUR(f.pianificato)}</div></div><div class="value">${fmtEUR(f.ricavi)}</div></div>${f.fuoriReddito>0?`<div class="row"><div></div><div><div class="title" style="color:var(--red)">− Rimborsi fuori dal reddito</div><div class="desc">regola 2025, come hai scelto in Configurazione fiscale</div></div><div class="value" style="color:var(--red)">${fmtEUR(f.fuoriReddito)}</div></div><div class="row"><div></div><div><div class="title">= Base imponibile</div></div><div class="value">${fmtEUR(f.baseImponibile)}</div></div>`:''}<div class="row"><div></div><div><div class="title">Reddito forfettario</div><div class="desc">coeff. ${fmtNum(f.coeff*100,0)}% sulla base imponibile</div></div><div class="value">${fmtEUR(f.forfait)}</div></div><div class="row"><div></div><div><div class="title" style="color:var(--red)">− Contributi INPS ${fmtNum(f.gsRate*100,2)}%</div></div><div class="value" style="color:var(--red)">${fmtEUR(f.inps)}</div></div><div class="row"><div></div><div><div class="title" style="color:var(--red)">− Imposta sostitutiva ${fmtNum(f.taxRate*100,0)}%</div></div><div class="value" style="color:var(--red)">${fmtEUR(f.imposta)}</div></div><div class="row"><div></div><div><div class="title"><b>= Totale imposte e contributi previsti</b></div></div><div class="value"><b>${fmtEUR(f.oneri)}</b></div></div></div></div>`;}
+function previsioneTasseCard(){const year=currentYear();const f=forecastCalc(year);if(f.ricavi<=0)return '';return `<div class="card"><b>Previsione imposte e contributi ${year}</b><div class="desc" style="margin-top:2px">Stima su base fatturabile + pianificato (competenza), coeff. ${fmtNum(f.coeff*100,0)}%. Le imposte effettive sono su base cassa (incassato).</div><div class="list" style="box-shadow:none;margin:12px 0 0"><div class="row"><div></div><div><div class="title">Base previsione (ricavi)</div><div class="desc">fatturabile ${fmtEUR(f.fatturabile)}${f.rimborsi>0?' (di cui '+fmtEUR(f.rimborsi)+' rimborsi spese)':''} + pianificato ${fmtEUR(f.pianificato)}</div></div><div class="value">${fmtEUR(f.ricavi)}</div></div>${f.rivalsa>0?`<div class="row"><div></div><div><div class="title">+ Rivalsa INPS ${fmtNum(f.rivRate*100,0)}%</div><div class="desc">sta in fattura ed è compenso</div></div><div class="value">${fmtEUR(f.rivalsa)}</div></div>`:''}${f.fuoriReddito>0?`<div class="row"><div></div><div><div class="title" style="color:var(--red)">− Rimborsi fuori dal reddito</div><div class="desc">regola 2025, come hai scelto in Configurazione fiscale</div></div><div class="value" style="color:var(--red)">${fmtEUR(f.fuoriReddito)}</div></div>`:''}${f.rivalsa>0||f.fuoriReddito>0?`<div class="row"><div></div><div><div class="title">= Base imponibile</div></div><div class="value">${fmtEUR(f.baseImponibile)}</div></div>`:''}<div class="row"><div></div><div><div class="title">Reddito forfettario</div><div class="desc">coeff. ${fmtNum(f.coeff*100,0)}% sulla base imponibile</div></div><div class="value">${fmtEUR(f.forfait)}</div></div><div class="row"><div></div><div><div class="title" style="color:var(--red)">− Contributi INPS ${fmtNum(f.gsRate*100,2)}%</div></div><div class="value" style="color:var(--red)">${fmtEUR(f.inps)}</div></div><div class="row"><div></div><div><div class="title" style="color:var(--red)">− Imposta sostitutiva ${fmtNum(f.taxRate*100,0)}%</div><div class="desc">sul reddito forfettario meno i contributi versati nel ${year}: ${fmtEUR(f.contribDedotti)}</div></div><div class="value" style="color:var(--red)">${fmtEUR(f.imposta)}</div></div><div class="row"><div></div><div><div class="title"><b>= Totale imposte e contributi previsti</b></div></div><div class="value"><b>${fmtEUR(f.oneri)}</b></div></div></div></div>`;}
 function previsioneBilancioCard(){const year=currentYear();const f=forecastCalc(year);if(f.pianificato<=0)return '';return `<div class="card"><b>Previsione bilancio ${year}</b><div class="desc" style="margin-top:2px">Conto economico proiettato con ricavi = fatturabile + pianificato. Stima gestionale.</div><div class="list" style="box-shadow:none;margin:12px 0 0"><div class="row"><div></div><div><div class="title">Ricavi previsti</div><div class="desc">fatturabile + pianificato</div></div><div class="value">${fmtEUR(f.ricavi)}</div></div><div class="row"><div></div><div><div class="title" style="color:var(--red)">− Spese a mio carico</div></div><div class="value" style="color:var(--red)">${fmtEUR(f.costi)}</div></div>${f.fuoriReddito>0?`<div class="row"><div></div><div><div class="title" style="color:var(--red)">− Rimborsi fuori reddito</div><div class="desc">analitici esclusi dal reddito (regola 2025): anticipati e ripresi, escono com’erano entrati</div></div><div class="value" style="color:var(--red)">${fmtEUR(f.fuoriReddito)}</div></div>`:''}<div class="row"><div></div><div><div class="title" style="color:var(--red)">− Imposte e contributi previsti</div></div><div class="value" style="color:var(--red)">${fmtEUR(f.oneri)}</div></div><div class="row"><div></div><div><div class="title"><b>= Utile netto previsto</b></div></div><div class="value"><b>${fmtEUR(f.utileNetto)}</b></div></div></div></div>`;}
 function balFull(){return settingValue('bal_full')==='1'}
 async function toggleBalFull(){const r=await saveSetting('bal_full',balFull()?'0':'1');if(r.error)return setMsg(r.error.message,7000);await reload();render()}
@@ -7171,6 +7315,9 @@ Object.assign(window,{
   rimborsiFuoriReddito,
   scomposizioneRimborsi,
   forecastCalc,
+  taxDueFor,
+  taxScheduleItems,
+  cambiaRicaviSimulati,
   leggiFatturaXML,confrontaFattura,clientePerPiva,giorniConsuntivati,
   fatturaCarica,fatturaFileScelto,registraFattura,scaricaFatturaConservata,apriChiudiFattura,
   annualTaxCalc,
