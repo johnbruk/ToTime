@@ -87,11 +87,11 @@ console.log('\n=== UNA RIGA PER CLIENTE, CON CONSUNTIVATO, PIANIFICATO E TOTALE 
   ok(r.testa.join('|')==='Cliente|Consuntivato|Pianificato|Totale','le intestazioni',r.testa.join('|'));
   ok(r.righe.length===2,'una riga per cliente: Gamma non ha niente nel mese',r.righe.map(x=>x.nome).join(', '));
   const alfa=r.righe.find(x=>x.nome==='Cliente Alfa'),beta=r.righe.find(x=>x.nome==='Cliente Beta');
-  ok(alfa&&alfa.num.map(eur).join('|')==='1000|1500|3697.96','Alfa: 1.000 consuntivati, 1.500 pianificati, 3.697,96 in tutto coi rimborsi',alfa&&alfa.num.join(' | '));
-  ok(alfa&&/rimborsi spese/.test(alfa.nota)&&/totale/.test(alfa.nota)&&cifra(alfa.nota)===1197.96,'e sotto il nome dice quanti sono i rimborsi, e che stanno nel totale',alfa&&alfa.nota);
-  ok(beta&&beta.num.map(eur).join('|')==='600|0|1000','Beta: 600 consuntivati, niente pianificato, 1.000 coi 400 di rimborsi',beta&&beta.num.join(' | '));
+  ok(alfa&&alfa.num.map(eur).join('|')==='1000|1500|2500','Alfa: 1.000 consuntivati, 1.500 pianificati, 2.500 in tutto: i rimborsi non ci sono',alfa&&alfa.num.join(' | '));
+  ok(alfa&&/a parte/.test(alfa.nota)&&/rimborsi spese/.test(alfa.nota)&&/in fattura/.test(alfa.nota)&&!/totale/.test(alfa.nota)&&cifra(alfa.nota)===1197.96,'e sotto il nome i rimborsi si vedono, a parte, in fattura',alfa&&alfa.nota);
+  ok(beta&&beta.num.map(eur).join('|')==='600|0|600','Beta: 600 consuntivati, niente pianificato, 600 in tutto; i 400 di rimborsi a parte',beta&&beta.num.join(' | '));
   ok(!/di cui/.test(alfa&&alfa.nota||''),'i rimborsi non si dicono «di cui» del consuntivato: non ne fanno parte',alfa&&alfa.nota);
-  ok(r.righe.every(x=>Math.abs(eur(x.num[0])+eur(x.num[1])+segnata(x)-eur(x.num[2]))<0.005),'consuntivato + pianificato + rimborsi = totale, su ogni riga');
+  ok(r.righe.every(x=>Math.abs(eur(x.num[0])+eur(x.num[1])-eur(x.num[2]))<0.005),'consuntivato + pianificato = totale, su ogni riga: i rimborsi restano fuori');
   // Le colonne tornano con quello che dice la stessa pagina, e con la
   // dashboard: è la ragione per cui i rimborsi non stanno nel consuntivato.
   const somma=i=>Math.round(r.righe.reduce((a,x)=>a+eur(x.num[i]),0)*100)/100;
@@ -103,7 +103,7 @@ console.log('\n=== UNA RIGA PER CLIENTE, CON CONSUNTIVATO, PIANIFICATO E TOTALE 
   await pg.evaluate(()=>window.go('home'));await pg.waitForTimeout(400);
   const prev=await pg.evaluate(()=>{const m=document.querySelector('#app .mesePrevisto b');return m?m.textContent:''});
   const prevEur=eur(prev.split('·').pop());
-  ok(Math.abs(somma(2)-prevEur)<0.005&&Math.abs(somma(2)-4697.96)<0.005,'la colonna Totale somma al «Previsto del mese» della dashboard: 4.697,96',somma(2)+' / dashboard «'+prev.trim()+'»');
+  ok(Math.abs(somma(2)-prevEur)<0.005&&Math.abs(somma(2)-3100)<0.005,'la colonna Totale somma al «Previsto del mese» della dashboard: 3.100, senza rimborsi',somma(2)+' / dashboard «'+prev.trim()+'»');
   await pg.close();
 }
 
@@ -129,10 +129,10 @@ console.log('\n=== UN CLIENTE CHE FA ZERO SI VEDE LO STESSO ===');
   const riga=n=>r&&r.righe.find(x=>x.nome===n);
   const delta=riga('Cliente Delta'),zeta=riga('Cliente Zeta');
   ok(delta&&delta.num.map(eur).join('|')==='0|0|0','Delta, 1.000 di lavoro e -1.000 di rettifica, c’è: 0 · 0 · 0',delta?delta.num.join(' | '):r&&r.righe.map(x=>x.nome).join(', '));
-  ok(zeta&&zeta.num.map(eur).join('|')==='0|500|0','Zeta, 500 pianificati e -500 di rimborsi, c’è: 0 · 500 · 0',zeta?zeta.num.join(' | '):r&&r.righe.map(x=>x.nome).join(', '));
+  ok(zeta&&zeta.num.map(eur).join('|')==='0|500|500','Zeta, 500 pianificati e -500 di rimborsi a parte: 0 · 500 · 500',zeta?zeta.num.join(' | '):r&&r.righe.map(x=>x.nome).join(', '));
   ok(zeta&&/^\u2212/.test(zeta.nota)&&cifra(zeta.nota)===500&&/rimborsi spese/.test(zeta.nota),'e la rettifica dei rimborsi si dice, col meno',zeta&&zeta.nota);
   ok(!riga('Cliente Omega'),'Omega, che ha solo una riga che non vale niente, resta fuori',r&&r.righe.map(x=>x.nome).join(', '));
-  ok(r&&r.righe.every(x=>Math.abs(eur(x.num[0])+eur(x.num[1])+segnata(x)-eur(x.num[2]))<0.005),'consuntivato + pianificato ± rimborsi = totale, su ogni riga');
+  ok(r&&r.righe.every(x=>Math.abs(eur(x.num[0])+eur(x.num[1])-eur(x.num[2]))<0.005),'consuntivato + pianificato = totale, su ogni riga');
   const somma=i=>Math.round(r.righe.reduce((a,x)=>a+eur(x.num[i]),0)*100)/100;
   const riep=await pg.evaluate(()=>{const m=document.querySelector('#app .metricLine');return m?m.textContent:''});
   ok(somma(0)===eur((riep.match(/^(.*?)consuntivato/)||[])[1]),'la colonna Consuntivato torna ancora col riepilogo',somma(0)+' / «'+riep.trim()+'»');
@@ -141,7 +141,7 @@ console.log('\n=== UN CLIENTE CHE FA ZERO SI VEDE LO STESSO ===');
   // la dashboard mostra solo i totali: un cliente che fa zero li' non c'e', come prima
   await pg.evaluate(()=>window.go('home'));await pg.waitForTimeout(400);
   const dash=await pg.evaluate(()=>[...document.querySelectorAll('#app .meseClienti > div > span:first-child')].map(x=>x.textContent.trim()));
-  ok(dash.length===2&&!dash.includes('Cliente Delta')&&!dash.includes('Cliente Zeta'),'in dashboard, dove ci sono solo i totali, chi fa zero resta fuori come prima',dash.join(', '));
+  ok(dash.length===3&&!dash.includes('Cliente Delta')&&dash.includes('Cliente Zeta'),'in dashboard, dove ci sono solo i totali, chi fa zero resta fuori (Delta); Zeta coi suoi 500 pianificati c’è',dash.join(', '));
   await pg.close();
 }
 

@@ -99,13 +99,13 @@ console.log('\n=== CONSUNTIVATO, PIANIFICATO E RIMBORSI, CHE IN FATTURA CI VANNO
   const [c,p,rb]=r.voci;
   ok(/^Consuntivato 3,00 gg · 1\.600,00 €$/.test(c),'consuntivato: giorni ed euro sulla stessa riga',c);
   ok(/^Pianificato 3,00 gg · 1\.500,00 €$/.test(p),'pianificato: 3 giorni a 500',p);
-  ok(/^Rimborsi spese · 1\.597,96 €$/.test(rb),'rimborsi spese: 1.197,96 + 400',rb);
+  ok(/^Rimborsi spese · 1\.597,96 € · a parte, in fattura$/.test(rb),'rimborsi spese: 1.197,96 + 400, detti a parte',rb);
   ok(gior(r.previsto)===6,'il previsto conta 6 giorni: i rimborsi non sono giorni',r.previsto);
-  ok(Math.abs(eur(r.previsto.split('·')[1])-(1600+1500+1597.96))<0.005,
-     'e in euro è la somma delle tre voci: 4.697,96',r.previsto);
+  ok(Math.abs(eur(r.previsto.split('·')[1])-(1600+1500))<0.005,
+     'e in euro è consuntivato + pianificato: 3.100, i rimborsi restano fuori',r.previsto);
   const larg=Object.fromEntries(r.barra.map(x=>[x.k,x.w]));
-  ok(r.barra.length===3,'la barra ha tre pezzi',r.barra.map(x=>x.k).join(','));
-  ok(Math.abs(larg.f-1600/4697.96*100)<0.05&&Math.abs(larg.p-1500/4697.96*100)<0.05&&Math.abs(larg.r-1597.96/4697.96*100)<0.05,
+  ok(r.barra.length===2&&!larg.r,'la barra ha due pezzi: i rimborsi non ci sono',r.barra.map(x=>x.k).join(','));
+  ok(Math.abs(larg.f-1600/3100*100)<0.05&&Math.abs(larg.p-1500/3100*100)<0.05,
      'ognuno lungo quanto il suo importo',JSON.stringify(larg));
   await pg.close();
 }
@@ -116,8 +116,8 @@ console.log('\n=== SOTTO, IN GRIGIO, IL PREVISTO DI OGNI CLIENTE ===');
   const r=await leggi(pg);
   ok(r.clienti.length===2,'due clienti: Gamma nel mese non ha niente, e non compare',r.clienti.map(x=>x[0]).join(', '));
   const alfa=r.clienti.find(x=>x[0]==='Cliente Alfa'),beta=r.clienti.find(x=>x[0]==='Cliente Beta');
-  ok(alfa&&eur(alfa[1])===3697.96,'Alfa: 1.000 consuntivati + 1.500 pianificati + 1.197,96 di rimborsi',alfa&&alfa[1]);
-  ok(beta&&eur(beta[1])===1000,'Beta: 600 consuntivati + 400 di rimborsi',beta&&beta[1]);
+  ok(alfa&&eur(alfa[1])===2500,'Alfa: 1.000 consuntivati + 1.500 pianificati, senza i rimborsi',alfa&&alfa[1]);
+  ok(beta&&eur(beta[1])===600,'Beta: 600 consuntivati, senza i 400 di rimborsi',beta&&beta[1]);
   ok(r.clienti[0][0]==='Cliente Alfa','dal più grande',r.clienti.map(x=>x[0]).join(', '));
   const somma=r.clienti.reduce((a,x)=>a+eur(x[1]),0);
   ok(Math.abs(somma-eur(r.previsto.split('·')[1]))<0.005,'e i clienti sommano al previsto del mese',`${somma.toFixed(2)} contro ${r.previsto}`);
