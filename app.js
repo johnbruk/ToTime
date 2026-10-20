@@ -2232,7 +2232,9 @@ function sommePerCliente(){
   monthlyRows().forEach(e=>add(e.client_id,'fatto',Number(e.amount||0)));
   manualRows().forEach(e=>add(e.client_id,isPlanned(e)?'pianificato':'fatto',Number(e.amount||0)));
   expenseRows().filter(expIsInvoice).forEach(e=>add(e.client_id,'rimborsi',Number(e.amount||0)));
-  return Object.values(m).map(c=>({...c,totale:c.fatto+c.pianificato+c.rimborsi}))
+  // I rimborsi spese non entrano nel totale: il totale e' il lavoro,
+  // consuntivato e pianificato. In fattura ci vanno, e si mostrano a parte.
+  return Object.values(m).map(c=>({...c,totale:c.fatto+c.pianificato}))
     .sort((a,b)=>b.totale-a.totale||clientName(a.client_id).localeCompare(clientName(b.client_id)));
 }
 // «Per cliente» nel Timesheet. Era una riga per tipo di voce — il T&M
@@ -2240,12 +2242,10 @@ function sommePerCliente(){
 // importo e senza dire se era consuntivato o pianificato. Adesso una
 // riga per cliente, con consuntivato, pianificato e totale: le stesse
 // somme di previstoPerCliente(), quindi tornano con la dashboard.
-// I rimborsi spese non sono consuntivato — il consuntivato e' il
-// lavoro, e il riepilogo qui sopra li mette «a parte» —: la colonna
-// deve sommare a quello che dice il riepilogo. In fattura pero' ci
-// vanno, quindi stanno nel totale, come nel «Previsto del mese» della
-// dashboard, e sotto il nome si dice quanti sono — col segno, se sono
-// una rettifica. Un cliente resta anche se le sue cifre fanno zero:
+// I rimborsi spese non sono lavoro: non stanno ne' nel consuntivato
+// ne' nel totale («non c'entrano nulla con il consuntivato»). In
+// fattura pero' ci vanno, quindi si vedono sotto il nome, «a parte»
+// come nel riepilogo qui sopra — col segno, se sono una rettifica. Un cliente resta anche se le sue cifre fanno zero:
 // 1.000 di lavoro e una rettifica di -1.000 sono lavoro del mese, e le
 // sue righe si vedono qui sotto. Restano fuori solo i clienti senza
 // niente che valga — un'assenza, una riga a tariffa zero.
@@ -2254,27 +2254,29 @@ function perClienteCard(){
   if(!clienti.length)return '';
   return `<div class="card perCliente"><b>Per cliente</b><div class="pcTab">
 <div class="pcRiga pcTesta"><span class="pcNome">Cliente</span><span>Consuntivato</span><span>Pianificato</span><span>Totale</span></div>
-${clienti.map(c=>`<div class="pcRiga"><span class="pcNome"><span class="title">${esc(c.client_id?clientName(c.client_id):'Senza cliente')}</span>${Math.abs(c.rimborsi)>=0.005?`<small>${c.rimborsi<0?'\u2212':'+'} ${eurMigliaia(Math.abs(c.rimborsi))} rimborsi spese, nel totale</small>`:''}</span><span data-l="Consuntivato">${eurMigliaia(c.fatto)}</span><span data-l="Pianificato">${eurMigliaia(c.pianificato)}</span><b data-l="Totale">${eurMigliaia(c.totale)}</b></div>`).join('')}
+${clienti.map(c=>`<div class="pcRiga"><span class="pcNome"><span class="title">${esc(c.client_id?clientName(c.client_id):'Senza cliente')}</span>${Math.abs(c.rimborsi)>=0.005?`<small class="pcRimborsi"><s></s>${c.rimborsi<0?'\u2212':'+'} ${eurMigliaia(Math.abs(c.rimborsi))} rimborsi spese · a parte, in fattura</small>`:''}</span><span data-l="Consuntivato">${eurMigliaia(c.fatto)}</span><span data-l="Pianificato">${eurMigliaia(c.pianificato)}</span><b data-l="Totale">${eurMigliaia(c.totale)}</b></div>`).join('')}
 </div></div>`;
 }
 function homeMeseCard(t){
-  const fatto=t.amount,pian=t.plannedAmount,rimb=t.rimborsi,tot=fatto+pian+rimb;
+  // I rimborsi spese si mostrano, ma fuori dalla barra e dal previsto:
+  // vanno in fattura, non sono lavoro del mese.
+  const fatto=t.amount,pian=t.plannedAmount,rimb=t.rimborsi,tot=fatto+pian;
   const voci=[
     {k:'f',nome:'Consuntivato',gg:t.days,v:fatto},
     {k:'p',nome:'Pianificato',gg:t.plannedDays,v:pian},
-    {k:'r',nome:'Rimborsi spese',v:rimb}].filter(x=>x.k==='f'||x.v>0);
+    {k:'r',nome:'Rimborsi spese',v:rimb,aparte:true}].filter(x=>x.k==='f'||x.v>0);
   // La barra si misura sulle parti che si disegnano: un compenso
   // negativo — una rettifica — col totale netto come denominatore
   // allargava gli altri pezzi oltre la barra.
-  const positivi=voci.reduce((a,x)=>a+Math.max(0,x.v),0);
+  const positivi=voci.filter(x=>!x.aparte).reduce((a,x)=>a+Math.max(0,x.v),0);
   const pct=v=>positivi>0?Math.max(0,v)/positivi*100:0;
   const clienti=previstoPerCliente();
   return `<div class="card cardLink meseCard" onclick="go('timesheet')" role="button" title="Apri il timesheet di ${monthLabel(state.month)}">
 <div class="meseTesta"><b>Consuntivo · ${monthLabel(state.month)}</b><span class="cardLinkArrow">›</span></div>
 <div class="meseGrande">${eurMigliaia(fatto)}</div>
 <div class="meseSotto">consuntivato: ${fmtNum(t.days,2)} giorni · ${fmtNum(t.hours,1)} h</div>
-${positivi>0?`<div class="meseBarra" aria-hidden="true">${voci.filter(x=>x.v>0).map(x=>`<i class="${x.k}" style="width:${pct(x.v).toFixed(2)}%"></i>`).join('')}</div>`:''}
-<div class="meseLegenda">${voci.map(x=>`<div class="voce ${x.k}"><s></s><span>${x.nome}${x.gg!==undefined?` <b>${fmtNum(x.gg,2)} gg</b>`:''} · ${eurMigliaia(x.v)}</span></div>`).join('')}</div>
+${positivi>0?`<div class="meseBarra" aria-hidden="true">${voci.filter(x=>x.v>0&&!x.aparte).map(x=>`<i class="${x.k}" style="width:${pct(x.v).toFixed(2)}%"></i>`).join('')}</div>`:''}
+<div class="meseLegenda">${voci.map(x=>`<div class="voce ${x.k}"><s></s><span>${x.nome}${x.gg!==undefined?` <b>${fmtNum(x.gg,2)} gg</b>`:''} · ${eurMigliaia(x.v)}${x.aparte?' · a parte, in fattura':''}</span></div>`).join('')}</div>
 <div class="rigaPrevisto mesePrevisto"><span>Previsto del mese</span><b>${fmtNum(t.days+t.plannedDays,2)} gg · ${eurMigliaia(tot)}</b></div>
 ${clienti.length?`<div class="meseClienti">${clienti.map(c=>`<div><span>${esc(c.client_id?clientName(c.client_id):'Senza cliente')}</span><span>${eurMigliaia(c.totale)}</span></div>`).join('')}</div>`:''}
 </div>`;
