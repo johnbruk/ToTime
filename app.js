@@ -4297,7 +4297,67 @@ function taxDueFor(year,mode){const ts=currentTaxSetting(year);const {base,parts
   const imposta=Math.max(0,forfait-paidContrib)*taxRate;
   return {ts,base,parts,coeff,gsRate,taxRate,forfait,inps,imposta,paidContrib};
 }
+// IL SIMULATORE DELL'ANNO DOPO
+//
+// Le tasse di un anno si pagano l'anno successivo: quelle del 2027 a
+// giugno e novembre 2028. Per vederle serve una cosa sola che l'app non
+// puo' sapere, quanto si incassera' nel 2027. La propone dal ritmo
+// dell'anno in corso (la stessa media della proiezione, rivalsa
+// compresa) e la si corregge a mano. Tutto il resto viene dal
+// prospetto B dell'anno in corso: il saldo INPS e gli acconti che si
+// versano nel 2027 sono i contributi da dedurre, e gli acconti 2027
+// gia' versati si tolgono dai saldi.
+// Se gli acconti versati superano il dovuto non si paga un saldo zero:
+// si ha un CREDITO, che nell'F24 del 30 giugno si compensa con le altre
+// voci e le abbassa. Mostrando zero, la differenza spariva e si
+// prevedeva di pagare piu' del vero.
+function vociCredito(items,date,ref,inpsEccesso,impostaEccesso){
+  if(inpsEccesso>0.005)items.push({date,label:'Credito contributi INPS '+ref+' (acconti versati in più)',ref,amount:-inpsEccesso,kind:'credito'});
+  if(impostaEccesso>0.005)items.push({date,label:'Credito imposta sostitutiva '+ref+' (acconti versati in più)',ref,amount:-impostaEccesso,kind:'credito'});
+}
+function chiaveSimulazione(year){return 'simula_ricavi_'+(Number(year)+1)}
+function ricaviSimulati(year){
+  const v=Number(settingValue(chiaveSimulazione(year)));
+  if(v>0)return {valore:v,scelto:true};
+  return {valore:Math.round(projectionCalc(year).weightedMonthly*12),scelto:false};
+}
+async function cambiaRicaviSimulati(year,v){
+  const n=Number(String(v||'').replace(',','.'));
+  const res=await saveSetting(chiaveSimulazione(year),n>0?String(Math.round(n*100)/100):'');
+  if(res&&res.error)return setMsg('La cifra non si è salvata: '+motivoLeggibile(res.error),7000);
+  await reload();render();
+}
+function taxScheduleSimulato(year){
+  const N=Number(year)+1,M=N+1;
+  const ts=data.taxSettings.find(t=>Number(t.fiscal_year)===N)||currentTaxSetting(year);
+  const coeff=Number(ts.profitability_coefficient||0)/100,gsRate=Number(ts.inps_gs_rate??26.07)/100,taxRate=Number(ts.substitute_tax_rate||0)/100;
+  const r=ricaviSimulati(year);
+  const prima=taxScheduleItems(year,'previsione');
+  const somma=(kind,ref)=>prima.items.filter(i=>i.kind===kind&&Number(i.ref)===ref).reduce((t,i)=>t+i.amount,0);
+  // Si versano nel N: il saldo INPS dell'anno prima e gli acconti di N.
+  const inpsVersatiN=somma('inps',Number(year))+somma('inps',N);
+  const accontiInpsN=somma('inps',N),accontiImpostaN=somma('imposta',N);
+  const forfait=r.valore*coeff;const inps=forfait*gsRate;
+  const imposta=Math.max(0,forfait-inpsVersatiN)*taxRate;
+  const items=[];
+  const saldoInps=Math.max(0,inps-accontiInpsN);
+  if(saldoInps>0)items.push({date:M+'-06-30',label:'Saldo contributi INPS Gestione Separata',ref:N,amount:saldoInps,kind:'inps'});
+  if(inps>0){items.push({date:M+'-06-30',label:'Primo acconto contributi INPS (80% in 2 rate)',ref:M,amount:inps*0.4,kind:'inps'});
+    items.push({date:M+'-11-30',label:'Secondo acconto contributi INPS (80% in 2 rate)',ref:M,amount:inps*0.4,kind:'inps'});}
+  const saldoImposta=Math.max(0,imposta-accontiImpostaN);
+  if(saldoImposta>0)items.push({date:M+'-06-30',label:'Saldo imposta sostitutiva',ref:N,amount:saldoImposta,kind:'imposta'});
+  if(imposta>ACCONTO_MIN_IMPOSTA){
+    if(imposta<ACCONTO_UNICA_SOGLIA)items.push({date:M+'-11-30',label:'Acconto imposta sostitutiva (unica rata)',ref:M,amount:imposta,kind:'imposta'});
+    else{items.push({date:M+'-06-30',label:'Primo acconto imposta sostitutiva (40%)',ref:M,amount:imposta*0.4,kind:'imposta'});
+      items.push({date:M+'-11-30',label:'Secondo acconto imposta sostitutiva (60%)',ref:M,amount:imposta*0.6,kind:'imposta'});}}
+  vociCredito(items,M+'-06-30',N,accontiInpsN-inps,accontiImpostaN-imposta);
+  items.sort((a,b)=>a.date.localeCompare(b.date)||a.label.localeCompare(b.label));
+  const parts=[['Incassi '+N+' simulati',r.valore],['INPS versato nel '+N,inpsVersatiN]];
+  return {items,total:items.reduce((t,i)=>t+i.amount,0),bolloTot:0,simulato:r,
+    due:{ts,base:r.valore,parts,coeff,gsRate,taxRate,forfait,inps,imposta,paidContrib:inpsVersatiN,accontiInpsN,accontiImpostaN}};
+}
 function taxScheduleItems(year,mode){
+  if(mode==='simulato')return taxScheduleSimulato(year);
   const d=taxDueFor(year,mode);const N=year+1;const items=[];
   const bo=bolloCalc(year);const trimLabel=['I','II','III','IV'];
   const bolloDue=[[year+'-05-31','I'],[year+'-09-30','II'],[year+'-11-30','III'],[N+'-02-28','IV']];
@@ -4319,6 +4379,9 @@ function taxScheduleItems(year,mode){
     if(d.imposta<ACCONTO_UNICA_SOGLIA){items.push({date:N+'-11-30',label:'Acconto imposta sostitutiva (unica rata)',ref:N,amount:d.imposta,kind:'imposta'});}
     else{items.push({date:N+'-06-30',label:'Primo acconto imposta sostitutiva (40%)',ref:N,amount:d.imposta*0.4,kind:'imposta'});
       items.push({date:N+'-11-30',label:'Secondo acconto imposta sostitutiva (60%)',ref:N,amount:d.imposta*0.6,kind:'imposta'});}}
+  // Solo nel prospetto B, che immagina l'anno chiuso: nel prospetto A,
+  // ad anno in corso, l'incassato e' parziale e il «credito» non c'e'.
+  if(mode!=='cassa')vociCredito(items,N+'-06-30',year,accontiVersati(year,'inps')-d.inps,accontiVersati(year,'imposta')-d.imposta);
   items.sort((a,b)=>a.date.localeCompare(b.date)||a.label.localeCompare(b.label));
   applicaVersamenti(items,year);
   return {items,total:items.reduce((s,i)=>s+i.amount,0),due:d,bolloTot};
@@ -4469,7 +4532,7 @@ function sceltaVistaTasse(){
   return `<div class="tabs" role="tablist" aria-label="Come guardare le scadenze">${TASSE_VISTE.map(([k,l])=>
     `<button type="button" role="tab" aria-selected="${k===v}" class="${k===v?'active':''}" onclick="cambiaVistaTasse('${k}')">${l}</button>`).join('')}</div>`;
 }
-const TASSE_TINTA={bollo:'gray',inps:'blue',imposta:'orange'};
+const TASSE_TINTA={bollo:'gray',inps:'blue',imposta:'orange',credito:'verde'};
 // Scaduta vuol dire che quel giorno e' passato: e' la prima cosa da
 // sapere guardando un elenco di cose da pagare, e prima non si vedeva.
 function statoScadenza(iso,oggi,pagata){
@@ -4539,6 +4602,8 @@ function apriChiudiTappa(chiave){
 // si apre per prima — non l'hanno mai avuto, e dall'app non c'era modo
 // di segnare niente senza passare dalla linea del tempo.
 function bottonePagata(it){
+  // Un credito non si paga: si usa nell'F24 per pagare meno.
+  if(it.kind==='credito')return '<span class="small">si scala nell’F24 dello stesso giorno</span>';
   const arg=`'${it.kind}',${Number(it.ref)},'${it.date}'`;
   if(scadenzaPagata(it))
     return `<button type="button" class="miniBtn vocePag" onclick="annullaPagata(${arg})">Non l'ho pagata</button>`;
@@ -4634,6 +4699,15 @@ function giorniA(iso,oggi){
 function taxScheduleCard(year,mode,title,desc){
   const r=taxScheduleItems(year,mode);const d=r.due;
   const oggi=todayISO();
+  // Nei tre riquadri in alto, all'euro: sul telefono i centesimi
+  // tagliavano le cifre («63.358,9…»). Il dettaglio resta al centesimo.
+  const tondo=n=>eurMigliaia(Math.round(Number(n)||0)).replace(/,00(?=\u00a0€)/,'');
+  const sim=mode==='simulato'?`<form class="form simulatore" style="margin:12px 0 0" onsubmit="event.preventDefault();cambiaRicaviSimulati(${year},this.ricavi.value)">
+      <div class="field"><label>Quanto pensi di incassare nel ${year+1}</label>
+      <input name="ricavi" type="number" step="100" min="0" inputmode="decimal" value="${Math.round(r.simulato.valore)}" onchange="cambiaRicaviSimulati(${year},this.value)"></div>
+      <div class="small">${r.simulato.scelto?'La cifra l’hai scritta tu. Svuota il campo per tornare alla proposta dell’app.':'Proposta dell’app: il ritmo mensile del '+year+' per 12 mesi.'} Rivalsa INPS compresa, bollo escluso.</div></form>
+      <div class="metricLine" style="margin-top:10px">Dovuti per il ${year+1}: INPS ${fmtEUR(d.inps)} <span class="dot">·</span> imposta ${fmtEUR(d.imposta)}</div>
+      <div class="metricLine">Acconti ${year+1} versati nel ${year+1}: INPS ${fmtEUR(d.accontiInpsN)} <span class="dot">·</span> imposta ${fmtEUR(d.accontiImpostaN)}</div>`:'';
   const vista=vistaTasse();
   // «Da versare» e' quello che resta davvero da versare: cio' che hai
   // gia' segnato pagato non e' piu' un debito, e il pagato dell'anno si
@@ -4647,8 +4721,8 @@ function taxScheduleCard(year,mode,title,desc){
     :tassePerScadenza(r.items,oggi);
   const scadute=r.items.filter(i=>String(i.date)<oggi&&!scadenzaPagata(i));
   const prossima=r.items.find(i=>String(i.date)>=oggi&&!scadenzaPagata(i));
-  return `<div class="card"><b>${title}</b><div class="desc" style="margin-top:2px">${desc}</div>
-    <div class="kpiGrid three" style="margin-top:14px"><div><span>Base</span><strong>${fmtEUR(d.base)}</strong></div><div><span>Imponibile</span><strong>${fmtEUR(d.forfait)}</strong></div><div><span>Da versare</span><strong>${fmtEUR(daVersare)}</strong></div></div>
+  return `<div class="card"><b>${title}</b><div class="desc" style="margin-top:2px">${desc}</div>${sim}
+    <div class="kpiGrid three" style="margin-top:14px"><div><span>Base</span><strong>${tondo(d.base)}</strong></div><div><span>Imponibile</span><strong>${tondo(d.forfait)}</strong></div><div><span>Da versare</span><strong>${tondo(daVersare)}</strong></div></div>
     <div class="metricLine" style="margin-top:8px">${d.parts.map(p=>esc(p[0])+' '+fmtEUR(p[1])).join(' <span class="dot">·</span> ')}</div>
     ${prossima?`<div class="metricLine" style="margin-top:10px"><span class="tag orange">Prossima</span> ${dataEstesa(prossima.date)} <span class="dot">·</span> ${giorniA(prossima.date,oggi)} <span class="dot">·</span> <b>${fmtEUR(r.items.filter(i=>i.date===prossima.date&&!scadenzaPagata(i)).reduce((s,i)=>s+i.amount,0))}</b></div>`:''}
     ${pagate.length?`<div class="metricLine" style="margin-top:6px"><span class="tag verde">Già pagate</span> ${pagate.length===1?'1 voce':pagate.length+' voci'} <span class="dot">·</span> ${fmtEUR(somPagate)}</div>`:''}
@@ -4662,12 +4736,14 @@ function taxScheduleCard(year,mode,title,desc){
         <button type="button" class="secondary" style="margin-top:12px" onclick="registraBollo(${year},${resta>0?resta.toFixed(2):dovuto.toFixed(2)})">Ho versato il bollo</button>
         <button type="button" class="secondary" style="margin-top:8px" onclick="go('taxPayments')">Vedi tutti i versamenti</button></div>`;})()}
 
-    ${(()=>{const acc=accantonamento(r.items,oggi);return acc?`<div class="salvadanaio"><div class="salvaCifra">${fmtEUR(acc.mese)}<span>al mese</span></div>
+    ${(()=>{// Nel simulatore no: prima di queste scadenze ci sono quelle
+      // dell'anno in corso, e la quota al mese verrebbe troppo bassa.
+      const acc=mode==='simulato'?null:accantonamento(r.items,oggi);return acc?`<div class="salvadanaio"><div class="salvaCifra">${fmtEUR(acc.mese)}<span>al mese</span></div>
       <div class="salvaTesto">per arrivare a ${dataEstesa(acc.ultima)} con ${fmtEUR(acc.tot)} da parte.
       Sono ${acc.mesi===1?'poco più di un mese':acc.mesi+' mesi'} da oggi.</div></div>`:''})()}
     ${r.items.length?sceltaVistaTasse():''}${corpo}</div>`;
 }
-function tasseFuture(){const year=currentYear();return appShell(`<h1>Tasse future ${year}</h1><p class="sub">Scadenze previste per contributi, imposta sostitutiva e bollo. Regime forfettario, base cassa. Stime indicative da verificare col commercialista.</p>${taxScheduleCard(year,'cassa','Prospetto A · solo incassato reale','Calcolato solo su quanto realmente incassato ad oggi. È il dato prudenziale.')}${taxScheduleCard(year,'previsione','Prospetto B · incassato + previsione',"Include anche da incassare, da fatturare e pianificato: quanto dovrai versare se tutto verrà incassato nell'anno.")}<details class="card moreFields"><summary>Note di calcolo e regole applicate</summary><div class="desc" style="margin-top:6px">· Contributi INPS Gestione Separata: acconto pari all'80% del dovuto, in due rate uguali (30/06 e 30/11).<br>· Imposta sostitutiva: acconto 100% del dovuto (40% + 60%); nessun acconto sotto ${fmtEUR(ACCONTO_MIN_IMPOSTA)}, unica rata a novembre sotto ${fmtEUR(ACCONTO_UNICA_SOGLIA)}.<br>· Imposta di bollo: ${fmtEUR(bolloCalc(year).unit)} per fattura sopra ${fmtEUR(BOLLO_SOGLIA)}, versamento trimestrale.<br>· L'imposta sostitutiva è calcolata al netto dei contributi INPS <b>effettivamente versati</b>.<br>· Base imponibile: compensi, rimborsi spese addebitati in fattura e rivalsa INPS <b>concorrono</b> al reddito; la marca da bollo riaddebitata è esclusa (anticipazione art. 15 DPR 633/72).<br>· Nel prospetto B la parte non ancora fatturata è maggiorata della rivalsa INPS, che sarà anch'essa ricavo imponibile.</div></details><div class="actions"><button type="button" class="secondary" onclick="go('tax')">Torna a Fiscalità</button></div>`)}
+function tasseFuture(){const year=currentYear();return appShell(`<h1>Tasse future ${year}</h1><p class="sub">Scadenze previste per contributi, imposta sostitutiva e bollo. Regime forfettario, base cassa. Stime indicative da verificare col commercialista.</p>${taxScheduleCard(year,'cassa','Prospetto A · solo incassato reale','Calcolato solo su quanto realmente incassato ad oggi. È il dato prudenziale.')}${taxScheduleCard(year,'previsione','Prospetto B · incassato + previsione',"Include anche da incassare, da fatturare e pianificato: quanto dovrai versare se tutto verrà incassato nell'anno.")}${taxScheduleCard(year,'simulato','Simulatore · tasse '+(year+1)+', da pagare nel '+(year+2),'Scrivi quanto pensi di incassare nel '+(year+1)+': l’app calcola saldi e acconti del '+(year+2)+'. Parte dal prospetto B, cioè immagina che il '+year+' si chiuda come previsto.')}<details class="card moreFields"><summary>Note di calcolo e regole applicate</summary><div class="desc" style="margin-top:6px">· Contributi INPS Gestione Separata: acconto pari all'80% del dovuto, in due rate uguali (30/06 e 30/11).<br>· Imposta sostitutiva: acconto 100% del dovuto (40% + 60%); nessun acconto sotto ${fmtEUR(ACCONTO_MIN_IMPOSTA)}, unica rata a novembre sotto ${fmtEUR(ACCONTO_UNICA_SOGLIA)}.<br>· Imposta di bollo: ${fmtEUR(bolloCalc(year).unit)} per fattura sopra ${fmtEUR(BOLLO_SOGLIA)}, versamento trimestrale.<br>· L'imposta sostitutiva è calcolata al netto dei contributi INPS <b>effettivamente versati</b>.<br>· Base imponibile: compensi, rimborsi spese addebitati in fattura e rivalsa INPS <b>concorrono</b> al reddito; la marca da bollo riaddebitata è esclusa (anticipazione art. 15 DPR 633/72).<br>· Nel prospetto B la parte non ancora fatturata è maggiorata della rivalsa INPS, che sarà anch'essa ricavo imponibile.</div></details><div class="actions"><button type="button" class="secondary" onclick="go('tax')">Torna a Fiscalità</button></div>`)}
 function forecastCalc(year=currentYear()){
   const ts=currentTaxSetting(year);const at=annualTotals(year);
   const coeff=Number(ts.profitability_coefficient||0)/100;const gsRate=Number(ts.inps_gs_rate??26.07)/100;const taxRate=Number(ts.substitute_tax_rate||0)/100;
@@ -7241,6 +7317,7 @@ Object.assign(window,{
   forecastCalc,
   taxDueFor,
   taxScheduleItems,
+  cambiaRicaviSimulati,
   leggiFatturaXML,confrontaFattura,clientePerPiva,giorniConsuntivati,
   fatturaCarica,fatturaFileScelto,registraFattura,scaricaFatturaConservata,apriChiudiFattura,
   annualTaxCalc,

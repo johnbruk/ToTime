@@ -81,6 +81,33 @@ await pg.evaluate(()=>window.go('tax'));await pg.waitForTimeout(400);
 const t=await pg.evaluate(()=>document.getElementById('app').innerText);
 ok(/Rivalsa INPS 4%/.test(t),'La rivalsa si vede nella previsione');
 
+console.log('\n=== E. Il simulatore dell\'anno dopo ===');
+await carica([scheda(3,20800,'collected','2026-04-10')]);
+let sim=await pg.evaluate(()=>{const b=window.taxScheduleItems(2026,'previsione');const s=window.taxScheduleItems(2026,'simulato');return {b:b.items,s}});
+const sommaB=(k,ref)=>sim.b.filter(i=>i.kind===k&&i.ref===ref).reduce((t,i)=>t+i.amount,0);
+ok(sim.s.items.every(i=>i.date.startsWith('2028-')),'Le scadenze simulate sono tutte nel 2028');
+ok(vicino(sim.s.due.paidContrib,sommaB('inps',2026)+sommaB('inps',2027)),'Si deduce l\'INPS che si versa nel 2027',sim.s.due.paidContrib);
+const v=sim.s.due.base;
+ok(vicino(sim.s.due.imposta,Math.max(0,v*0.67-sim.s.due.paidContrib)*0.05),'Imposta 2027 al netto dei contributi',sim.s.due.imposta);
+const saldoImp=sim.s.items.find(i=>i.kind==='imposta'&&/Saldo/.test(i.label));
+ok(!saldoImp||vicino(saldoImp.amount,Math.max(0,sim.s.due.imposta-sommaB('imposta',2027))),'Il saldo imposta toglie gli acconti 2027',saldoImp&&saldoImp.amount);
+await pg.evaluate(()=>window.cambiaRicaviSimulati(2026,'50000'));await pg.waitForTimeout(400);
+sim=await pg.evaluate(()=>window.taxScheduleItems(2026,'simulato'));
+ok(sim.simulato.scelto&&vicino(sim.due.base,50000),'La cifra scritta a mano comanda',sim.due.base);
+ok(vicino(sim.due.inps,50000*0.67*0.2607),'INPS 2027 sulla cifra scritta',sim.due.inps);
+await pg.evaluate(()=>window.go('tasseFuture'));await pg.waitForTimeout(500);
+const tt=await pg.evaluate(()=>document.getElementById('app').innerText);
+ok(/Simulatore · tasse 2027, da pagare nel 2028/.test(tt),'Il simulatore si vede in Tasse future');
+// Acconti 2027 piu' alti del dovuto: non un saldo zero ma un credito.
+await pg.evaluate(()=>window.cambiaRicaviSimulati(2026,'5000'));await pg.waitForTimeout(400);
+sim=await pg.evaluate(()=>window.taxScheduleItems(2026,'simulato'));
+const cred=sim.items.filter(i=>i.kind==='credito');
+ok(cred.length&&cred.every(i=>i.amount<0&&i.date==='2028-06-30'),'Gli acconti versati in più diventano un credito a giugno 2028',JSON.stringify(cred.map(i=>i.amount)));
+ok(vicino(sim.total,sim.items.reduce((t,i)=>t+i.amount,0)),'Il totale lo scala');
+await pg.evaluate(()=>window.cambiaRicaviSimulati(2026,''));await pg.waitForTimeout(400);
+sim=await pg.evaluate(()=>window.taxScheduleItems(2026,'simulato'));
+ok(!sim.simulato.scelto,'Svuotando il campo torna la proposta dell\'app');
+
 ok(!errs.length,'Nessun errore in pagina',errs.join(' | '));
 await b.close();srv.close();
 console.log(`\n${pass} OK, ${fail} KO`);
