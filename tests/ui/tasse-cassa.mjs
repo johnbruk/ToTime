@@ -108,6 +108,15 @@ await pg.evaluate(()=>window.cambiaRicaviSimulati(2026,''));await pg.waitForTime
 sim=await pg.evaluate(()=>window.taxScheduleItems(2026,'simulato'));
 ok(!sim.simulato.scelto,'Svuotando il campo torna la proposta dell\'app');
 
+console.log('\n=== F. Quanto accantonare al mese ===');
+await carica([scheda(3,20800,'collected','2026-04-10')]);
+const media=await pg.evaluate(()=>['cassa','previsione','simulato'].map(m=>{const r=window.taxScheduleItems(2026,m);return {m,t:window.tasseDellAnno(2026,m,r.due),inps:r.due.inps,imp:r.due.imposta}}));
+media.forEach(x=>ok(vicino(x.t.totale,x.inps+x.imp+x.t.bollo)&&vicino(x.t.mese,x.t.totale/12),'Prospetto '+x.m+': tasse dell\'anno diviso 12',x.t.mese));
+ok(media[2].t.anno===2027&&media[0].t.anno===2026,'Il simulatore parla del 2027');
+await pg.evaluate(()=>window.go('tasseFuture'));await pg.waitForTimeout(500);
+const blocchi=await pg.evaluate(()=>[...document.querySelectorAll('#app .mediaTasse')].map(x=>x.innerText.replace(/\s+/g,' ')));
+ok(blocchi.length===3&&blocchi.every(t=>/al mese/i.test(t)&&/da accantonare per le tasse del 20\d\d/.test(t)),'Un riquadro per prospetto',blocchi.length);
+
 ok(!errs.length,'Nessun errore in pagina',errs.join(' | '));
 await b.close();srv.close();
 console.log(`\n${pass} OK, ${fail} KO`);

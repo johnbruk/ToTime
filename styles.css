@@ -101,12 +101,14 @@ button,input,select,textarea{font-family:var(--font-body)} button{cursor:pointer
    ===================================================================== */
 .salvadanaio{display:flex;align-items:center;gap:14px;margin-top:14px;padding:14px;
   border:1px solid var(--line);background:rgba(124,137,166,.10)}
-.salvaCifra{font-family:var(--font-heading);font-size:24px;font-weight:750;letter-spacing:-.4px;
+.salvaCifra,.mtCifra{font-family:var(--font-heading);font-size:24px;font-weight:750;letter-spacing:-.4px;
   line-height:1.05;flex:0 0 auto;white-space:nowrap}
-.salvaCifra span{display:block;font-family:var(--font-body);font-size:11.5px;font-weight:750;
+.salvaCifra span,.mtCifra span{display:block;font-family:var(--font-body);font-size:11.5px;font-weight:750;
   color:var(--muted);text-transform:uppercase;letter-spacing:.03em;margin-top:4px}
-.salvaTesto{color:var(--soft);font-size:13.5px;line-height:1.4;min-width:0}
-@media(max-width:430px){.salvadanaio{flex-direction:column;align-items:flex-start;gap:8px}}
+.salvaTesto,.mtTesto{color:var(--soft);font-size:13.5px;line-height:1.4;min-width:0}
+.mediaTasse{display:flex;align-items:center;gap:14px;margin-top:14px;padding:14px;
+  border:1px solid var(--line);background:rgba(46,160,67,.10)}
+@media(max-width:430px){.salvadanaio,.mediaTasse{flex-direction:column;align-items:flex-start;gap:8px}}
 
 .refHead .scaduta{color:var(--red)}
 /* La testata del giorno e' un pulsante: si apre solo la scadenza che

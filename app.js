@@ -4696,6 +4696,31 @@ function giorniA(iso,oggi){
   const m=Math.round(g/30.44);
   return 'fra circa '+m+(m===1?' mese':' mesi');
 }
+// QUANTO ACCANTONARE AL MESE
+//
+// Le scadenze arrivano a ondate, giugno e novembre: per reggerle
+// bisogna mettere da parte un tanto al mese. Il tanto giusto e' quello
+// che costa l'anno, tutto insieme: bollo, contributi INPS e imposta
+// sostitutiva DELL'ANNO, diviso dodici. Gli acconti dell'anno dopo non
+// ci vanno: sono le tasse dell'anno dopo pagate in anticipo, e si
+// accantonano l'anno dopo. Ogni prospetto ha la sua base, quindi la
+// sua media.
+function tasseDellAnno(year,mode,d){
+  // Il simulatore non sa quante fatture farai: per il bollo usa quello
+  // dell'anno in corso, che e' l'unico ritmo che si conosce.
+  const bollo=bolloCalc(year).dovuto;
+  const anno=mode==='simulato'?Number(year)+1:Number(year);
+  const inps=Number(d.inps||0),imposta=Number(d.imposta||0);
+  const totale=bollo+inps+imposta;
+  return {anno,bollo,inps,imposta,totale,mese:totale/12};
+}
+function mediaTasseAnno(year,mode,d){
+  const t=tasseDellAnno(year,mode,d);
+  if(t.totale<=0)return '';
+  return `<div class="mediaTasse"><div class="mtCifra">${fmtEUR(t.mese)}<span>al mese</span></div>
+    <div class="mtTesto">da accantonare per le tasse del ${t.anno}: <b>${fmtEUR(t.totale)}</b> in un anno, diviso 12.
+    <div class="small" style="margin-top:4px">INPS ${fmtEUR(t.inps)} <span class="dot">·</span> imposta ${fmtEUR(t.imposta)} <span class="dot">·</span> bollo ${fmtEUR(t.bollo)}${mode==='simulato'?' (come quest’anno)':''}</div></div></div>`;
+}
 function taxScheduleCard(year,mode,title,desc){
   const r=taxScheduleItems(year,mode);const d=r.due;
   const oggi=todayISO();
@@ -4736,6 +4761,7 @@ function taxScheduleCard(year,mode,title,desc){
         <button type="button" class="secondary" style="margin-top:12px" onclick="registraBollo(${year},${resta>0?resta.toFixed(2):dovuto.toFixed(2)})">Ho versato il bollo</button>
         <button type="button" class="secondary" style="margin-top:8px" onclick="go('taxPayments')">Vedi tutti i versamenti</button></div>`;})()}
 
+    ${mediaTasseAnno(year,mode,d)}
     ${(()=>{// Nel simulatore no: prima di queste scadenze ci sono quelle
       // dell'anno in corso, e la quota al mese verrebbe troppo bassa.
       const acc=mode==='simulato'?null:accantonamento(r.items,oggi);return acc?`<div class="salvadanaio"><div class="salvaCifra">${fmtEUR(acc.mese)}<span>al mese</span></div>
@@ -7317,6 +7343,7 @@ Object.assign(window,{
   forecastCalc,
   taxDueFor,
   taxScheduleItems,
+  tasseDellAnno,
   cambiaRicaviSimulati,
   leggiFatturaXML,confrontaFattura,clientePerPiva,giorniConsuntivati,
   fatturaCarica,fatturaFileScelto,registraFattura,scaricaFatturaConservata,apriChiudiFattura,
