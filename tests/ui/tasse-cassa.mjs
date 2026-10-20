@@ -108,6 +108,17 @@ await pg.evaluate(()=>window.cambiaRicaviSimulati(2026,''));await pg.waitForTime
 sim=await pg.evaluate(()=>window.taxScheduleItems(2026,'simulato'));
 ok(!sim.simulato.scelto,'Svuotando il campo torna la proposta dell\'app');
 
+console.log('\n=== F. Quanto accantonare al mese, da gennaio a dicembre ===');
+await carica([scheda(3,20800,'collected','2026-04-10')]);
+const acc=await pg.evaluate(()=>['cassa','previsione','simulato'].map(m=>{const r=window.taxScheduleItems(2026,m);return {m,a:window.accantonaAnno(2026,m,r),tot:r.total,bo:window.bolloCalc?null:null}}));
+acc.slice(0,2).forEach(x=>ok(vicino(x.a.totale,x.tot)&&vicino(x.a.mese,x.tot/12),'Prospetto '+x.m+': tutto il prospetto diviso 12',x.a.mese));
+acc.forEach(x=>ok(vicino(x.a.giugno+x.a.novembre+x.a.bollo,x.a.totale),'Prospetto '+x.m+': giugno + novembre + bollo fanno il totale'));
+ok(acc[0].a.anno===2026&&acc[2].a.anno===2027,'Il simulatore accantona nel 2027');
+await pg.evaluate(()=>window.go('tasseFuture'));await pg.waitForTimeout(500);
+const blocchi=await pg.evaluate(()=>[...document.querySelectorAll('#app .mediaTasse')].map(x=>x.innerText.replace(/\s+/g,' ')));
+ok(blocchi.length===3&&blocchi.every(t=>/al mese/i.test(t)&&/da gennaio a dicembre 20\d\d/.test(t)),'Un riquadro per prospetto',blocchi.length);
+ok(await pg.evaluate(()=>document.querySelectorAll('#app .salvadanaio').length)===3,'E niente secondo riquadro che confonde');
+
 ok(!errs.length,'Nessun errore in pagina',errs.join(' | '));
 await b.close();srv.close();
 console.log(`\n${pass} OK, ${fail} KO`);
