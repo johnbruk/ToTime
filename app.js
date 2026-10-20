@@ -4671,19 +4671,6 @@ function tasseLineaDelTempo(items,oggi){
     <div class="tappaCorpo"><div class="tappaQui">non c'è niente da versare da qui in avanti</div></div></li>`;
   return bloccoScadute(scadute,oggi,'t-scadute')+`<ol class="lineaTempo">${tappe}${vuoto}</ol>`;
 }
-// Quanto mettere da parte ogni mese per arrivarci senza sorprese: e'
-// la domanda vera di chi ha partita IVA, e il conto l'app ce l'ha gia'
-// tutto in mano. Si guarda solo il futuro: lo scaduto va pagato, non
-// accantonato.
-function accantonamento(items,oggi){
-  const futuri=items.filter(i=>String(i.date)>=oggi&&!scadenzaPagata(i));
-  if(!futuri.length)return null;
-  const ultima=futuri[futuri.length-1].date;
-  const tot=futuri.reduce((s,i)=>s+i.amount,0);
-  const a=new Date(ultima+'T00:00:00'),b=new Date(oggi+'T00:00:00');
-  const mesi=Math.max(1,Math.round((a-b)/86400000/30.44));
-  return {tot,mesi,mese:tot/mesi,ultima};
-}
 // Quanto manca, detto come lo direbbe una persona
 function giorniA(iso,oggi){
   const a=new Date(iso+'T00:00:00'),b=new Date(oggi+'T00:00:00');
@@ -4698,28 +4685,33 @@ function giorniA(iso,oggi){
 }
 // QUANTO ACCANTONARE AL MESE
 //
-// Le scadenze arrivano a ondate, giugno e novembre: per reggerle
-// bisogna mettere da parte un tanto al mese. Il tanto giusto e' quello
-// che costa l'anno, tutto insieme: bollo, contributi INPS e imposta
-// sostitutiva DELL'ANNO, diviso dodici. Gli acconti dell'anno dopo non
-// ci vanno: sono le tasse dell'anno dopo pagate in anticipo, e si
-// accantonano l'anno dopo. Ogni prospetto ha la sua base, quindi la
-// sua media.
-function tasseDellAnno(year,mode,d){
-  // Il simulatore non sa quante fatture farai: per il bollo usa quello
-  // dell'anno in corso, che e' l'unico ritmo che si conosce.
-  const bollo=bolloCalc(year).dovuto;
+// La regola di chi usa l'app: da gennaio a dicembre di un anno si mette
+// da parte, un tanto al mese, tutto quello che quell'anno fa pagare
+// l'anno dopo. Cosi' a giugno e a novembre si arriva pronti, e a
+// dicembre si e' gia' preparato tutto. Quindi la quota e' il totale del
+// prospetto (bollo dell'anno, saldi dell'anno e acconti dell'anno
+// dopo, meno gli eventuali crediti) diviso 12. Gli acconti dell'anno
+// dopo ci stanno: si pagano a giugno e novembre con il saldo, e l'anno
+// dopo si accantona per le scadenze di quello successivo.
+// Nel simulatore i mesi sono quelli dell'anno simulato, e il bollo e'
+// stimato uguale a quello di quest'anno.
+function accantonaAnno(year,mode,r){
   const anno=mode==='simulato'?Number(year)+1:Number(year);
-  const inps=Number(d.inps||0),imposta=Number(d.imposta||0);
-  const totale=bollo+inps+imposta;
-  return {anno,bollo,inps,imposta,totale,mese:totale/12};
+  const bollo=mode==='simulato'?bolloCalc(year).dovuto:r.items.filter(i=>i.kind==='bollo').reduce((t,i)=>t+i.amount,0);
+  const dopo=String(anno+1);
+  const altre=r.items.filter(i=>i.kind!=='bollo');
+  const somma=f=>altre.filter(f).reduce((t,i)=>t+i.amount,0);
+  const giugno=somma(i=>String(i.date).startsWith(dopo)&&String(i.date).slice(5,7)<='07');
+  const novembre=somma(i=>String(i.date).startsWith(dopo)&&String(i.date).slice(5,7)>'07');
+  const totale=bollo+altre.reduce((t,i)=>t+i.amount,0);
+  return {anno,bollo,giugno,novembre,totale,mese:totale/12};
 }
-function mediaTasseAnno(year,mode,d){
-  const t=tasseDellAnno(year,mode,d);
-  if(t.totale<=0)return '';
-  return `<div class="mediaTasse"><div class="mtCifra">${fmtEUR(t.mese)}<span>al mese</span></div>
-    <div class="mtTesto">da accantonare per le tasse del ${t.anno}: <b>${fmtEUR(t.totale)}</b> in un anno, diviso 12.
-    <div class="small" style="margin-top:4px">INPS ${fmtEUR(t.inps)} <span class="dot">·</span> imposta ${fmtEUR(t.imposta)} <span class="dot">·</span> bollo ${fmtEUR(t.bollo)}${mode==='simulato'?' (come quest’anno)':''}</div></div></div>`;
+function accantonaBlocco(year,mode,r){
+  const a=accantonaAnno(year,mode,r);
+  if(a.totale<=0)return '';
+  return `<div class="salvadanaio mediaTasse"><div class="salvaCifra">${fmtEUR(a.mese)}<span>al mese</span></div>
+    <div class="salvaTesto">da mettere da parte da gennaio a dicembre ${a.anno}: <b>${fmtEUR(a.totale)}</b> diviso 12, per arrivare pronto alle scadenze del ${a.anno+1}.
+    <div class="small" style="margin-top:4px">30/06/${a.anno+1} ${fmtEUR(a.giugno)} <span class="dot">·</span> 30/11/${a.anno+1} ${fmtEUR(a.novembre)} <span class="dot">·</span> bollo ${fmtEUR(a.bollo)}${mode==='simulato'?' (stimato come quest’anno)':''}</div></div></div>`;
 }
 function taxScheduleCard(year,mode,title,desc){
   const r=taxScheduleItems(year,mode);const d=r.due;
@@ -4761,12 +4753,7 @@ function taxScheduleCard(year,mode,title,desc){
         <button type="button" class="secondary" style="margin-top:12px" onclick="registraBollo(${year},${resta>0?resta.toFixed(2):dovuto.toFixed(2)})">Ho versato il bollo</button>
         <button type="button" class="secondary" style="margin-top:8px" onclick="go('taxPayments')">Vedi tutti i versamenti</button></div>`;})()}
 
-    ${mediaTasseAnno(year,mode,d)}
-    ${(()=>{// Nel simulatore no: prima di queste scadenze ci sono quelle
-      // dell'anno in corso, e la quota al mese verrebbe troppo bassa.
-      const acc=mode==='simulato'?null:accantonamento(r.items,oggi);return acc?`<div class="salvadanaio"><div class="salvaCifra">${fmtEUR(acc.mese)}<span>al mese</span></div>
-      <div class="salvaTesto">per arrivare a ${dataEstesa(acc.ultima)} con ${fmtEUR(acc.tot)} da parte.
-      Sono ${acc.mesi===1?'poco più di un mese':acc.mesi+' mesi'} da oggi.</div></div>`:''})()}
+    ${accantonaBlocco(year,mode,r)}
     ${r.items.length?sceltaVistaTasse():''}${corpo}</div>`;
 }
 function tasseFuture(){const year=currentYear();return appShell(`<h1>Tasse future ${year}</h1><p class="sub">Scadenze previste per contributi, imposta sostitutiva e bollo. Regime forfettario, base cassa. Stime indicative da verificare col commercialista.</p>${taxScheduleCard(year,'cassa','Prospetto A · solo incassato reale','Calcolato solo su quanto realmente incassato ad oggi. È il dato prudenziale.')}${taxScheduleCard(year,'previsione','Prospetto B · incassato + previsione',"Include anche da incassare, da fatturare e pianificato: quanto dovrai versare se tutto verrà incassato nell'anno.")}${taxScheduleCard(year,'simulato','Simulatore · tasse '+(year+1)+', da pagare nel '+(year+2),'Scrivi quanto pensi di incassare nel '+(year+1)+': l’app calcola saldi e acconti del '+(year+2)+'. Parte dal prospetto B, cioè immagina che il '+year+' si chiuda come previsto.')}<details class="card moreFields"><summary>Note di calcolo e regole applicate</summary><div class="desc" style="margin-top:6px">· Contributi INPS Gestione Separata: acconto pari all'80% del dovuto, in due rate uguali (30/06 e 30/11).<br>· Imposta sostitutiva: acconto 100% del dovuto (40% + 60%); nessun acconto sotto ${fmtEUR(ACCONTO_MIN_IMPOSTA)}, unica rata a novembre sotto ${fmtEUR(ACCONTO_UNICA_SOGLIA)}.<br>· Imposta di bollo: ${fmtEUR(bolloCalc(year).unit)} per fattura sopra ${fmtEUR(BOLLO_SOGLIA)}, versamento trimestrale.<br>· L'imposta sostitutiva è calcolata al netto dei contributi INPS <b>effettivamente versati</b>.<br>· Base imponibile: compensi, rimborsi spese addebitati in fattura e rivalsa INPS <b>concorrono</b> al reddito; la marca da bollo riaddebitata è esclusa (anticipazione art. 15 DPR 633/72).<br>· Nel prospetto B la parte non ancora fatturata è maggiorata della rivalsa INPS, che sarà anch'essa ricavo imponibile.</div></details><div class="actions"><button type="button" class="secondary" onclick="go('tax')">Torna a Fiscalità</button></div>`)}
@@ -7343,7 +7330,7 @@ Object.assign(window,{
   forecastCalc,
   taxDueFor,
   taxScheduleItems,
-  tasseDellAnno,
+  accantonaAnno,
   cambiaRicaviSimulati,
   leggiFatturaXML,confrontaFattura,clientePerPiva,giorniConsuntivati,
   fatturaCarica,fatturaFileScelto,registraFattura,scaricaFatturaConservata,apriChiudiFattura,

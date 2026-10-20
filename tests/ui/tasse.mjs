@@ -160,8 +160,10 @@ ok(rif2.length>0,'e dentro ogni voce porta il suo riferimento',[...new Set(rif2)
 
 console.log('\n=== E. Quanto mettere da parte ===');
 ok(/€/.test(t.salva),'la scheda dice una cifra al mese',t.salva);
-ok(/per arrivare a \d{2}\/\d{2}\/\d{4}/.test(t.salvaTesto),
-   'e per arrivare a quale data',t.salvaTesto);
+// Come uno stipendiato: da gennaio a dicembre si mette da parte tutto
+// quello che l'anno fa pagare l'anno dopo.
+ok(/da gennaio a dicembre 2026/.test(t.salvaTesto)&&/scadenze del 2027/.test(t.salvaTesto),
+   'da gennaio a dicembre, per le scadenze dell\'anno dopo',t.salvaTesto);
 
 console.log('\n=== F. La scelta si ricorda ===');
 const salvato=await pg.evaluate(()=>(window.__stores.app_settings||[])
@@ -228,7 +230,9 @@ const num=t=>Number(String(t).replace(/[^0-9,]/g,'').replace(',','.'));
 ok(num(daVersareDopo)<num(daVersarePrima),'«da versare» scende di quello che hai pagato',
    daVersarePrima+' → '+daVersareDopo);
 const dopo=await scheda(pg3);
-ok(num(dopo.salva)<num(prima.salva),'e anche quanto mettere da parte al mese',
+// La quota al mese e' il costo dell'anno: pagare una scadenza non lo
+// cambia.
+ok(num(dopo.salva)===num(prima.salva),'la quota al mese resta il costo dell\'anno',
    prima.salva+' → '+dopo.salva);
 const pagateRiga=await pg3.evaluate(()=>[...document.querySelectorAll('#app .card .metricLine')]
   .map(x=>x.textContent.replace(/\s+/g,' ').trim()).find(t=>/Già pagate/.test(t))||'');
