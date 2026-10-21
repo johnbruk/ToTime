@@ -1059,3 +1059,10 @@ table.griglia.numeriRiga td.riga .n{font-variant-numeric:tabular-nums}
 /* I rimborsi spese, sotto il nome del cliente: a parte, ma in evidenza */
 .perCliente .pcNome small.pcRimborsi{color:var(--text);font-weight:var(--w-med);display:flex;gap:var(--sp-2);align-items:baseline}
 .perCliente .pcNome small.pcRimborsi s{display:inline-block;width:8px;height:8px;flex:0 0 8px;background:var(--cRimb);text-decoration:none}
+/* Le azioni del bollo: link in linea, non pulsanti a tutta larghezza.
+   La pagina Tasse future e' gia' densa, qui basta un rimando discreto. */
+.bolloAzioni{display:flex;flex-wrap:wrap;align-items:center;gap:2px 6px;margin-top:6px}
+.bolloAzioni .dot{color:var(--muted)}
+.bolloAzioni button{border:0;background:transparent;box-shadow:none;width:auto;padding:4px 0;font-size:var(--t-sm,13px);font-weight:var(--w-med,600);color:var(--primary);text-decoration:underline;text-underline-offset:3px}
+.bolloAzioni button:hover{color:var(--text)}
+@media(pointer:coarse){.bolloAzioni button{min-height:44px;padding:0 4px}}

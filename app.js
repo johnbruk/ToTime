@@ -4749,9 +4749,8 @@ function taxScheduleCard(year,mode,title,desc){
       return `<div class="calc" style="margin-top:12px">
         <b>Imposta di bollo ${year}</b>
         <div class="metricLine" style="margin-top:8px">Dovuta ${fmtEUR(dovuto)} <span class="dot">·</span> versata ${fmtEUR(versato)}${resta>0?` <span class="dot">·</span> <b>resta ${fmtEUR(resta)}</b>`:' <span class="tag verde">tutto versato</span>'}</div>
-        <div class="small" style="margin-top:8px">Il bollo si paga sul portale <b>Fatture e Corrispettivi</b> dell'Agenzia delle Entrate, che lo calcola da sé. Quando l'hai versato, registralo qui: le scadenze si scalano da sole, dalla più vecchia.</div>
-        <button type="button" class="secondary" style="margin-top:12px" onclick="registraBollo(${year},${resta>0?resta.toFixed(2):dovuto.toFixed(2)})">Ho versato il bollo</button>
-        <button type="button" class="secondary" style="margin-top:8px" onclick="go('taxPayments')">Vedi tutti i versamenti</button></div>`;})()}
+        <div class="small" style="margin-top:6px">Si paga sul portale <b>Fatture e Corrispettivi</b> dell'Agenzia delle Entrate. Quando l'hai versato registralo qui: le scadenze si scalano da sole.</div>
+        <div class="bolloAzioni"><button type="button" onclick="registraBollo(${year},${resta>0?resta.toFixed(2):dovuto.toFixed(2)})">Ho versato il bollo</button><span class="dot">·</span><button type="button" onclick="go('taxPayments')">Vedi i versamenti</button></div></div>`;})()}
 
     ${accantonaBlocco(year,mode,r)}
     ${r.items.length?sceltaVistaTasse():''}${corpo}</div>`;
