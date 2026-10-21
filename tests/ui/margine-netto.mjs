@@ -202,58 +202,84 @@ console.log('\n=== LA RIVALSA È QUELLA SALVATA SULLA SCHEDA DEL MESE ===');
   }
 }
 
-// ─── Il Bilancio, con la stessa regola ───
+// ─── Il Bilancio: conto economico a scalare ───
+//
+// Stessi numeri fatti a mano dell'intestazione, ma per l'anno intero e
+// con le tasse come le calcola la Tassazione (contributi dedotti
+// nell'anno in cui si versano: il primo anno niente).
+//   ricavi   compensi 4.400 (sett., fattura meno 200 di treno) + 920
+//            (ago. fattura) + 800 (ago. K2) + 2.300 (ott.) = 8.420
+//            rimborsi 200 + 100 = 300 · rivalsa 184 + 36,80 + 32 + 96 = 348,80
+//            totale 9.068,80 (il bollo addebitato non c'e')
+//   costi    cancelleria 50 + 30 = 80 · prima delle tasse 8.988,80
+//   tasse    reddito 78% = 7.073,664 · INPS 1.844,10 · imposta 353,68
+//   utile    6.791,01
+//   a fine anno + 460 di pianificato a ottobre, con la sua rivalsa
 const leggiBilancio=pg=>pg.evaluate(()=>{
   const t=document.getElementById('app').innerText.replace(/\s+/g,' ');
-  const card=tit=>[...document.querySelectorAll('#app .card')].find(c=>c.querySelector('b')?.textContent.startsWith(tit));
-  const amt=c=>c?c.querySelector('.amount')?.textContent.trim():null;
-  const righe=c=>c?[...c.querySelectorAll('.row')].map(r=>({t:r.querySelector('.title')?.textContent.trim(),v:r.querySelector('.value')?.textContent.trim()})):[];
-  return {t,utile:amt(card('Utile netto stimato')),margine:amt(card('Margine operativo')),
-    costi:righe(card('Costi ')),ricavi:righe(card('Ricavi ')),
+  const righe=[...document.querySelectorAll('#app .ceTab tbody tr')].map(r=>{
+    const td=[...r.querySelectorAll('td')];
+    return {cls:r.className,t:td[0]?.childNodes[0]?.textContent.trim(),v:td[1]?.textContent.trim(),f:td[2]?.textContent.trim()};});
+  const kpi=[...document.querySelectorAll('#app .bilKpi>div')].map(d=>({l:d.querySelector('span').textContent.trim(),v:d.querySelector('strong').textContent.trim()}));
+  const sp=[...document.querySelectorAll('#app .list .row')].filter(r=>!r.getAttribute('onclick')).map(r=>({t:r.querySelector('.title')?.textContent.trim(),v:r.querySelector('.value')?.textContent.trim()}));
+  return {t,righe,kpi,sp,
     mesi:[...document.querySelectorAll('#app .row')].filter(r=>r.getAttribute('onclick')?.startsWith('openMonthExpenses')).map(r=>({m:r.querySelector('.title')?.textContent.trim(),d:r.querySelector('.desc')?.textContent.trim(),v:r.querySelector('.value')?.textContent.trim()}))};
 });
 const bilancio=async(semi)=>{const pg=await apri(1280,semi);await pg.evaluate(()=>window.go('balance'));await pg.waitForTimeout(500);return pg};
+const voce=(x,re)=>x.righe.find(r=>re.test(r.t||''))||{};
+const vicino=(a,b)=>Math.abs(eur(a)-b)<0.006;
 
-console.log('\n=== BILANCIO: I RIMBORSI IN FATTURA SONO COMPENSI, NON COSTI ===');
+console.log('\n=== BILANCIO: UN CONTO ECONOMICO CHE ARRIVA ALL’UTILE ===');
 {
   const pg=await bilancio(SEMI);
   const x=await leggiBilancio(pg);
-  ok(!/Spese anticipate rimborsate/.test(x.t),'fra i costi non c’è più «Spese anticipate rimborsate»',x.costi.map(c=>c.t).join(' · '));
-  ok(!/partite di giro\)/.test(x.t)&&/sono compensi/.test(x.t),'e il Bilancio dice che i rimborsi in fattura sono compensi');
-  const rimb=x.ricavi.find(r=>/Rimborsi spese in fattura/.test(r.t||''));
-  ok(rimb&&Math.abs(eur(rimb.v)-300)<0.005,'fra i ricavi ci sono i 300 € di rimborsi: 200 di treno e 100 di km',rimb?.v);
-  ok(!x.costi.some(c=>/fuori reddito/.test(c.t||'')),'senza la regola 2025 non c’è nessun rimborso fra i costi');
+  ok(pg.errs.length===0,'nessun errore JS',pg.errs.slice(0,2).join(' | ')||'nessuno');
+  ok(vicino(voce(x,/^Compensi/).v,8420),'compensi 8.420: dove c’è la fattura valgono i suoi numeri',voce(x,/^Compensi/).v);
+  ok(vicino(voce(x,/^Rimborsi spese in fattura/).v,300),'rimborsi in fattura 300, fra i ricavi: sono compensi',voce(x,/^Rimborsi/).v);
+  ok(vicino(voce(x,/^Rivalsa INPS/).v,348.8),'rivalsa 348,80: quella delle fatture più il 4% del da fatturare',voce(x,/^Rivalsa/).v);
+  ok(vicino(voce(x,/^Totale ricavi/).v,9068.8),'totale ricavi 9.068,80, senza il bollo addebitato',voce(x,/^Totale ricavi/).v);
+  ok(vicino(voce(x,/^Cancelleria/).v,-80)||vicino(voce(x,/^Cancelleria/).v.replace('−',''),80),'fra i costi la cancelleria, 80',voce(x,/^Cancelleria/).v);
+  ok(!x.righe.some(r=>/Spese anticipate|bollo addebitata|Marca da bollo pagata/i.test(r.t||'')),'niente righe di bollo che si annullano né rimborsi fra i costi');
+  ok(vicino(voce(x,/^Risultato prima/).v,8988.8),'risultato prima delle tasse 8.988,80',voce(x,/^Risultato prima/).v);
+  ok(vicino(voce(x,/^Contributi INPS/).v.replace('−',''),1844.10),'INPS 1.844,10',voce(x,/^Contributi INPS/).v);
+  ok(vicino(voce(x,/^Imposta sostitutiva/).v.replace('−',''),353.68),'imposta 353,68: il primo anno non si deduce niente',voce(x,/^Imposta/).v);
+  const ut=voce(x,/^Utile netto/);
+  ok(/fin/.test(ut.cls)&&vicino(ut.v,6791.01),'e in fondo l’utile netto: 6.791,01',ut.v);
+  ok(x.kpi.map(k=>k.l).join('|')==='Ricavi|Costi e tasse|Utile netto'&&eur(x.kpi[2].v)===6791,'in cima ricavi, costi e tasse, utile, all’euro',x.kpi.map(k=>k.l+' '+k.v).join(' · '));
+  ok(vicino(voce(x,/^Compensi/).f,8880)&&vicino(ut.f,6791.01+(460*1.04)*(1-0.78*0.2607-0.78*0.05)),'a fine anno si aggiunge il pianificato, rivalsa compresa',`${voce(x,/^Compensi/).f} · ${ut.f}`);
+  const s=n=>x.sp.find(r=>r.t&&r.t.startsWith(n))||{};
+  ok(vicino(s('Fatture da incassare').v,5744.8),'ti devono le due fatture emesse: 5.744,80',s('Fatture da incassare').v);
+  ok(vicino(s('Lavoro da fatturare').v,3328),'e il lavoro da fatturare: 3.328,00, come in dashboard',s('Lavoro da fatturare').v);
+  ok(vicino(s('Bollo 2026').v.replace('−',''),4),'devi i 4 € di bollo',s('Bollo 2026').v);
+  ok(/non è uno stato patrimoniale completo/.test(x.t),'e dice cosa non sa: il conto e i beni');
   const ott=x.mesi.find(m=>m.m==='Ottobre')||{};
-  ok(/Rimborsi in fattura/.test(ott.d||'')&&Math.abs(eur(ott.v)-2400)<0.005,'ottobre nel mese per mese: 2.300 di compensi + 100 di rimborsi = 2.400',`${ott.d} → ${ott.v}`);
+  ok(/Rimborsi in fattura/.test(ott.d||'')&&vicino(ott.v,2400),'ottobre nel mese per mese: 2.300 di compensi + 100 di rimborsi = 2.400',`${ott.d} → ${ott.v}`);
   await pg.close();
 }
 {
-  // la prova: lo stesso anno con un rimborso in piu'. Le imposte del
-  // Bilancio sono per cassa e qui non c'e' niente di incassato, quindi
-  // non si muovono: l'utile deve salire di tutti i 250.
+  // un rimborso in fattura in piu' e' un ricavo: l'utile sale di 250
+  // meno le tasse che ci si pagano sopra (con la sua rivalsa)
   const piu=SEMI+`S.travel_expenses.push({id:'r9',expense_date:'2026-10-08',client_id:'sol',expense_category_id:'tr',amount:250,reimbursement_type:'invoice',reimbursable:true});`;
   const a=await bilancio(SEMI),pa=await leggiBilancio(a);await a.close();
   const c=await bilancio(piu),pc=await leggiBilancio(c);await c.close();
-  ok(Math.abs(eur(pc.utile)-eur(pa.utile)-250)<0.005,'un rimborso in fattura di 250 € alza l’utile di 250: restano a te',`${pa.utile} → ${pc.utile}`);
+  const atteso=250*1.04*(1-0.78*0.2607-0.78*0.05);
+  ok(Math.abs(eur(voce(pc,/^Utile netto/).v)-eur(voce(pa,/^Utile netto/).v)-atteso)<0.015,'un rimborso in fattura di 250 € alza l’utile: resta a te, tolte le tasse',`+${(eur(voce(pc,/^Utile netto/).v)-eur(voce(pa,/^Utile netto/).v)).toFixed(2)} atteso ${atteso.toFixed(2)}`);
 }
 
-console.log('\n=== CON LA REGOLA 2025 IL RIMBORSO FUORI REDDITO RESTA PARTITA DI GIRO ===');
+console.log('\n=== CON LA REGOLA 2025 IL RIMBORSO FUORI REDDITO RESTA FUORI ===');
 {
-  // settembre incassato, treno pagato con carta e con la ricevuta: il
-  // rimborso regge i requisiti, e con la scelta attiva esce dal reddito
+  // treno di settembre pagato con carta e con la ricevuta: regge i
+  // requisiti, e con la scelta attiva esce dal reddito. Non e' un
+  // ricavo ne' un costo: l'utile e' quello di chi non l'avesse avuto.
   const base=SEMI+`
     S.app_settings.push({id:'f',setting_key:'rimborsi_fuori_reddito',setting_value:'si'});
     const h=S.billing_headers.find(x=>x.id==='h9');h.status='collected';h.collected_amount=4786;h.collection_date='2026-10-05';
     const t=S.travel_expenses.find(x=>x.id==='r2');t.payment_method='carta';t.receipt_kept=true;`;
-  const senza=base+`S.travel_expenses=S.travel_expenses.filter(x=>x.id!=='r2');`;
-  const a=await bilancio(senza),pa=await leggiBilancio(a),ta=await a.evaluate(()=>window.annualTaxCalc(2026));await a.close();
-  const c=await bilancio(base),pc=await leggiBilancio(c),tc=await c.evaluate(()=>window.annualTaxCalc(2026));await c.close();
-  const riga=pc.costi.find(x=>/Rimborsi fuori reddito/.test(x.t||''));
-  ok(riga&&Math.abs(eur(riga.v)-200)<0.005,'fra i costi compare «− Rimborsi fuori reddito»: 200 €',riga?.v);
-  const tasseGiu=(ta.substituteTax+ta.forfaitIncome*0.2607)-(tc.substituteTax+tc.forfaitIncome*0.2607);
-  const utileSu=eur(pc.utile)-eur(pa.utile);
-  ok(tasseGiu>0,'le imposte scendono, perché i 200 escono dalla base',tasseGiu.toFixed(2));
-  ok(Math.abs(utileSu-tasseGiu)<0.015,'e l’utile sale SOLO di quanto scendono le imposte: entrano 200 ed escono 200',`utile +${utileSu.toFixed(2)} · imposte −${tasseGiu.toFixed(2)}`);
+  const c=await bilancio(base),pc=await leggiBilancio(c);await c.close();
+  const r=voce(pc,/^Rimborsi spese in fattura/);
+  ok(vicino(r.v,100),'fra i ricavi restano solo i 100 di km',r.v);
+  ok(/esclusi 200,00 € fuori reddito/.test(pc.t),'e la riga dice che 200 sono esclusi, partita di giro');
+  ok(vicino(voce(pc,/^Totale ricavi/).v,8868.8),'totale ricavi 8.868,80: 200 in meno',voce(pc,/^Totale ricavi/).v);
 }
 
 await b.close(); srv.close();

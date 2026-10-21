@@ -1059,3 +1059,22 @@ table.griglia.numeriRiga td.riga .n{font-variant-numeric:tabular-nums}
 /* I rimborsi spese, sotto il nome del cliente: a parte, ma in evidenza */
 .perCliente .pcNome small.pcRimborsi{color:var(--text);font-weight:var(--w-med);display:flex;gap:var(--sp-2);align-items:baseline}
 .perCliente .pcNome small.pcRimborsi s{display:inline-block;width:8px;height:8px;flex:0 0 8px;background:var(--cRimb);text-decoration:none}
+/* Bilancio: conto economico a scalare */
+.bilKpi .utile strong{color:var(--green)}
+.bilKpi .perdita strong{color:var(--red)}
+.ceTab{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;margin-top:12px}
+.ceTab th{font-size:12px;color:var(--muted);font-weight:750;text-align:right;padding:6px 0 6px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+.ceTab td{padding:9px 0 9px 10px;border-bottom:1px solid var(--line);text-align:right;font-size:15px;font-weight:600;white-space:nowrap;vertical-align:top}
+.ceTab th:first-child,.ceTab td:first-child{text-align:left;white-space:normal;padding-left:0}
+.ceTab td .d{display:block;font-size:12px;font-weight:400;color:var(--muted);margin-top:2px}
+.ceTab tr.sez td{font-size:12px;font-weight:750;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);padding-top:18px}
+.ceTab td.vuota{color:var(--muted);font-weight:400;text-align:left}
+.ceTab td.meno{color:var(--red)}
+.ceTab tr.tot td{font-weight:750;background:rgba(124,137,166,.07)}
+.ceTab tr.fin td{font-size:17px;font-weight:750;border-top:2px solid var(--text);border-bottom:0;padding-top:12px}
+.ceTab tr.fin td:not(:first-child){color:var(--green)}
+.ceTab tr.fin.perdita td:not(:first-child){color:var(--red)}
+.list .row .value.meno{color:var(--red)}
+.list .row.tot{background:rgba(124,137,166,.07)}
+.list .row.tot .title,.list .row.tot .value{font-weight:750}
+@media(max-width:430px){.ceTab td{font-size:13.5px}.ceTab tr.fin td{font-size:15px}}
