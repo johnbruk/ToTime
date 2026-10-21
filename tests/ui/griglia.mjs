@@ -201,6 +201,15 @@ ok(await pg.evaluate(()=>document.querySelector('[name=entry_date]')?.value)==='
    'con la data di quel giorno gia\' compilata',
    await pg.evaluate(()=>document.querySelector('[name=entry_date]')?.value));
 
+// Nel timesheet il cliente sta nella testata del gruppo; nel dettaglio
+// del giorno non c'e' testata, quindi ogni riga deve dire di chi e'.
+const righeGiorno=async iso=>{await pg.evaluate(i=>window.openDay(i),iso);await pg.waitForTimeout(350);
+  return pg.evaluate(()=>[...document.querySelectorAll('.list .row')].map(r=>[r.querySelector('.rigaCliente')?.textContent.trim()||'',r.querySelector('.title')?.textContent.trim()||'']))};
+let rg=await righeGiorno('2026-07-14');
+ok(rg.length>0&&rg.every(([c,t])=>c==='Equans'&&/^Beta/.test(t)),'nel dettaglio del giorno ogni riga dice il cliente, sopra il progetto',JSON.stringify(rg));
+rg=await righeGiorno('2026-07-20');
+ok(rg.length===1&&rg[0][0]==='Zeta','anche quando la voce non ha progetto',JSON.stringify(rg));
+
 console.log('\n=== L. La griglia su telefono: una settimana per volta ===');
 const pgw=await b.newPage({viewport:{width:390,height:844},deviceScaleFactor:2});
 pgw.on('pageerror',e=>errs.push('PAGEERROR(mobile): '+e.message));
