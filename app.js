@@ -517,15 +517,17 @@ const MENU=[
   // prima fatture emesse, incassi, report e il resto si raggiungevano
   // solo dai pulsanti dentro le pagine, e chi non sapeva dove cercarli
   // non li trovava.
+  // Poi erano diventate otto, e meta' ripetevano le altre: «Incassi» e'
+  // l'elenco delle fatture emesse filtrato, «Da fatturare» spiegava un
+  // numero che la pagina dell'anno gia' mostra, «Report economico» e'
+  // il riassunto in euro di «Per commessa», «Carica fattura emessa» e'
+  // un'azione e non una pagina. Ognuna ora sta dentro la pagina che la
+  // contiene, con un pulsante ben visibile.
   {main:'billing',ic:'€',l:'Fatturazione',sub:[
     {v:'billing',l:'Il mese'},
     {v:'billingAnno',l:'L’anno'},
-    {v:'annualInvoices',l:'Fatture emesse',edit:'issued'},
-    {v:'annualInvoices',l:'Incassi',edit:'collected'},
-    {v:'fatturatoDetail',l:'Da fatturare'},
-    {v:'fatturazioneCommessa',l:'Per commessa'},
-    {v:'reportEconomico',l:'Report economico'},
-    {v:'fatturaCarica',l:'Carica fattura emessa'}]},
+    {v:'annualInvoices',l:'Fatture e incassi'},
+    {v:'fatturazioneCommessa',l:'Per commessa'}]},
   {v:'balance',ic:'∑',l:'Bilancio'},
   {main:'tax',ic:'%',l:'Tassazione',sub:[
     {v:'tasseFuture',l:'Tasse future'},
@@ -549,7 +551,7 @@ const MENU=[
 const NAV_CHILDREN={
   timesheet:['timesheet','calendario','giorno','griglia','pivot','reportWbs','tmManage','tmForm','importaConsuntivi','dailyForm','dailyEdit','monthlyForm','monthlyEdit','manualForm','manualEdit','annualMonths'],
   expenses:['expenses','expenseForm','expenseEdit','tripNew','tripEdit'],
-  billing:['billing','billingAnno','billingDetail','annualInvoices','fatturaCarica','fatturatoDetail','fatturazioneCommessa','reportEconomico'],
+  billing:['billing','billingAnno','billingDetail','annualInvoices','fatturaCarica','fatturazioneCommessa','reportEconomico'],
   tax:['tax','tasseFuture','taxPayments','taxPaymentEdit','taxSettings'],
   settings:['settings','clients','clientEdit','clientDetail','engagements','engagementDetail','engagementNew','engagementEdit','projects','projectEdit','projectDetail','projectNew','wbsEdit','activities','activityEdit','expenseCategories','expenseCategoryEdit','invoiceTemplates','invoiceTemplateEdit','appearance','account','exportTimesheet']
 };
@@ -2068,8 +2070,7 @@ function annualChartSvg(){
 function monthChartSvg(){const series=monthSeries();const max=niceMax(Math.max(...series));const pts=series.map((v,i)=>`${(i/(series.length-1||1))*100},${52-(v/max)*46}`).join(' ');return `<div class="lineChartWrap">${axisY(max)}<div class="lineChartCol"><svg class="lineChart" viewBox="0 0 100 58" preserveAspectRatio="none"><line x1="0" y1="52" x2="100" y2="52"></line><line x1="0" y1="30" x2="100" y2="30"></line><polyline points="${pts}"></polyline></svg></div></div>`}
 function homeIncassiCard(){const yr=currentYear();const cur=annualTotals(yr);const daIncassare=Math.max(0,cur.fatturato-cur.incassato);return `<div class="card cardLink" onclick="openAnnualInvoices('collected')" role="button" title="Elenco incassi ${yr}"><b>I tuoi incassi ${yr} <span class="cardLinkArrow">›</span></b><div class="statRow"><div class="stat tint-sage"><div class="statHead"><span class="statDot"></span><span class="statLbl">Incassato</span></div><strong>${fmtEUR(cur.incassato)}</strong></div><div class="stat tint-pink"><div class="statHead"><span class="statDot"></span><span class="statLbl">Da incassare</span></div><strong>${fmtEUR(daIncassare)}</strong></div></div></div>`}
 function forfettarioBarCard(){const yr=currentYear();const ts=currentTaxSetting(yr);const limit=Number(ts.annual_revenue_limit||85000);const incassato=annualTotals(yr).incassato;const pct=limit?Math.min(100,(incassato/limit)*100):0;const remaining=Math.max(0,limit-incassato);const over=incassato>limit;const color=over?'#D9534F':pct>=90?'#D9534F':pct>=70?'#E0A24E':'var(--primary)';return `<div class="card"><div class="threshVals"><strong>${fmtEUR(incassato)}</strong> <span class="threshLimit">/ ${fmtEUR(limit)}</span></div><div class="threshBar"><span style="width:${pct.toFixed(1)}%;background:${color}"></span></div><div class="threshNote">${over?`Hai superato il limite del regime forfettario di <b>${fmtEUR(incassato-limit)}</b>.`:`Puoi incassare ancora <b>${fmtEUR(remaining)}</b> quest'anno per non superare il limite del regime forfettario.`}</div></div>`}
-function homeFatturatoCard(){const yr=currentYear();const cur=annualTotals(yr);const daFatturare=cur.daFatturare;return `<div class="card cardLink" onclick="go('fatturatoDetail')" role="button" title="Come si calcolano fatturato e da fatturare"><b>Il tuo fatturato ${yr} <span class="cardLinkArrow">›</span></b><div class="statRow"><div class="stat tint-blue"><div class="statHead"><span class="statDot"></span><span class="statLbl">Fatturato</span></div><strong>${fmtEUR(cur.fatturato)}</strong></div><div class="stat tint-orange"><div class="statHead"><span class="statDot"></span><span class="statLbl">Da fatturare</span></div><strong>${fmtEUR(daFatturare)}</strong></div></div><div class="small" style="margin-top:10px">Imponibile fatturato ${fmtEUR(cur.fatturatoBase)}</div></div>`}
-function fatturatoDetail(){const year=currentYear();const at=annualTotals(year);const md=annualMonthData(year);const rows=md.map((m,i)=>({i,cons:Number(m.fatturabile||0),base:m.fatturatoBase,diff:Number(m.fatturabile||0)-m.fatturatoBase})).filter(r=>r.cons||r.base);return appShell(`<h1>Da fatturare ${year}</h1><p class="sub">Come si ottiene il totale "da fatturare".</p><div class="card"><b>Calcolo ${year}</b><div class="list" style="box-shadow:none;margin:12px 0 0"><div class="row"><div></div><div><div class="title">Consuntivato anno</div><div class="desc">il lavoro registrato, senza i rimborsi spese</div></div><div class="value">${fmtEUR(at.consuntivato)}</div></div><div class="row"><div></div><div><div class="title">+ Rimborsi spese in fattura</div><div class="desc">riaddebitati in fattura: non sono lavoro, ma sono compensi e la fattura li comprende</div></div><div class="value">${fmtEUR(at.rimborsiFattura)}</div></div><div class="row"><div></div><div><div class="title">= Fatturabile</div><div class="desc">quello che va confrontato con le fatture emesse</div></div><div class="value">${fmtEUR(at.fatturabile)}</div></div><div class="row"><div></div><div><div class="title" style="color:var(--red)">− Base imponibile fatturata</div><div class="desc">imponibili delle fatture emesse/incassate, senza rivalsa INPS e bollo</div></div><div class="value" style="color:var(--red)">${fmtEUR(at.fatturatoBase)}</div></div><div class="row"><div></div><div><div class="title"><b>= Da fatturare</b></div><div class="desc">fatturabile non ancora messo in fattura</div></div><div class="value"><b>${fmtEUR(at.daFatturare)}</b></div></div></div><div class="metricLine" style="margin-top:8px">Fatturato lordo ${fmtEUR(at.fatturato)} · include rivalsa INPS 4% e bollo</div></div><div class="card"><b>Dettaglio mensile ${year}</b><div class="desc" style="margin-top:2px">Per ogni mese: fatturabile (lavoro + rimborsi spese), base già fatturata e residuo da fatturare. Tocca un mese per il timesheet.</div><div class="list" style="box-shadow:none;margin:10px 0 0">${rows.map(r=>`<div class="row" onclick="openMonthTimesheet(${year},${r.i+1})"><div class="date">${monthNames[r.i].slice(0,3)}</div><div><div class="title">${monthNames[r.i]}</div><div class="desc">Fatturabile ${fmtEUR(r.cons)} · Fatturato base ${fmtEUR(r.base)}</div></div><div class="value" style="${r.diff>0.005?'color:var(--orange)':''}">${fmtEUR(Math.max(0,r.diff))}</div></div>`).join('')||'<div class="empty">Nessun dato nel '+year+'.</div>'}</div></div><button type="button" class="secondary" onclick="openAnnualInvoices('issued')">Vedi fatture emesse ›</button>`)}
+function homeFatturatoCard(){const yr=currentYear();const cur=annualTotals(yr);const daFatturare=cur.daFatturare;return `<div class="card cardLink" onclick="go('billingAnno')" role="button" title="Come si calcolano fatturato e da fatturare"><b>Il tuo fatturato ${yr} <span class="cardLinkArrow">›</span></b><div class="statRow"><div class="stat tint-blue"><div class="statHead"><span class="statDot"></span><span class="statLbl">Fatturato</span></div><strong>${fmtEUR(cur.fatturato)}</strong></div><div class="stat tint-orange"><div class="statHead"><span class="statDot"></span><span class="statLbl">Da fatturare</span></div><strong>${fmtEUR(daFatturare)}</strong></div></div><div class="small" style="margin-top:10px">Imponibile fatturato ${fmtEUR(cur.fatturatoBase)}</div></div>`}
 function openAnnualMonths(){navigateTo('annualMonths')}
 function openAnnualInvoices(mode){navigateTo('annualInvoices',{edit:mode})}
 function openMonthTimesheet(year,month){state.month=`${year}-${String(month).padStart(2,'0')}`;navigateTo('timesheet')}
@@ -2230,7 +2231,7 @@ async function eliminaFattura(id){
 // nessuno dei due anni. Adesso compare per intero in tutti e due; il
 // totale dell'anno resta per competenza, cioe' conta solo i mesi
 // dell'anno, e quando le due cifre non si sommano la scheda lo dice.
-function annualInvoices(modeArg){const year=currentYear();const mode=modeArg||(state.edit==='collected'?'collected':'issued');let emesse=data.billingHeaders.filter(h=>['invoice_issued','collected'].includes(h.status));if(mode==='collected')emesse=emesse.filter(h=>h.status==='collected');const diAnno=h=>Number(h.year)===Number(year);const rows=emesse.filter(diAnno);const ordine=x=>Number(x.year)*12+Number(x.month);const gruppi=gruppiFatture(emesse).filter(g=>g.some(diAnno)).sort((A,B)=>{const a=A[A.length-1],b=B[B.length-1];return (ordine(b)-ordine(a))||clientName(a.client_id).localeCompare(clientName(b.client_id))});const aCavallo=gruppi.filter(g=>!g.every(diAnno));const title=mode==='collected'?`Incassi ${year}`:`Fatture emesse ${year}`;const amountOf=h=>mode==='collected'?Number(h.collected_amount||h.invoice_total_amount||h.total_amount||0):Number(h.invoice_total_amount||h.total_amount||0);const total=rows.reduce((s,h)=>s+amountOf(h),0);const nota=aCavallo.length?`<p class="small notaCavallo">Nel totale contano solo i mesi del ${year}. ${aCavallo.length>1?'Le fatture':'La fattura'} ${aCavallo.map(g=>esc(numeroFattura(g[0])||'senza numero')).join(', ')} ${aCavallo.length>1?'coprono':'copre'} anche mesi di un altro anno: nell’elenco ${aCavallo.length>1?'compaiono':'compare'} per intero.</p>`:'';return appShell(`<h1>${title}</h1><p class="sub">Tocca una voce per aprire il dettaglio della fattura.</p><div class="card"><b>Totale ${mode==='collected'?'incassato':'fatturato'} ${year}</b><div class="amount" style="margin-top:8px">${eurMigliaia(total)}</div>${nota}</div>${rows.length?intestazioneFatture():''}<div class="list">${gruppi.map(g=>g.length>1?rigaGruppoFatture(g,amountOf):rigaFattura(g[0],amountOf(g[0]))).join('')||`<div class="empty">${mode==='collected'?'Nessun incasso registrato':'Nessuna fattura emessa'} nel ${year}.</div>`}</div>`)}
+function annualInvoices(modeArg){const year=currentYear();const mode=modeArg||(state.edit==='collected'?'collected':'issued');let emesse=data.billingHeaders.filter(h=>['invoice_issued','collected'].includes(h.status));if(mode==='collected')emesse=emesse.filter(h=>h.status==='collected');const diAnno=h=>Number(h.year)===Number(year);const rows=emesse.filter(diAnno);const ordine=x=>Number(x.year)*12+Number(x.month);const gruppi=gruppiFatture(emesse).filter(g=>g.some(diAnno)).sort((A,B)=>{const a=A[A.length-1],b=B[B.length-1];return (ordine(b)-ordine(a))||clientName(a.client_id).localeCompare(clientName(b.client_id))});const aCavallo=gruppi.filter(g=>!g.every(diAnno));const title=mode==='collected'?`Incassi ${year}`:`Fatture emesse ${year}`;const amountOf=h=>mode==='collected'?Number(h.collected_amount||h.invoice_total_amount||h.total_amount||0):Number(h.invoice_total_amount||h.total_amount||0);const total=rows.reduce((s,h)=>s+amountOf(h),0);const nota=aCavallo.length?`<p class="small notaCavallo">Nel totale contano solo i mesi del ${year}. ${aCavallo.length>1?'Le fatture':'La fattura'} ${aCavallo.map(g=>esc(numeroFattura(g[0])||'senza numero')).join(', ')} ${aCavallo.length>1?'coprono':'copre'} anche mesi di un altro anno: nell’elenco ${aCavallo.length>1?'compaiono':'compare'} per intero.</p>`:'';const scelta=`<div class="tabs"><button type="button" class="${mode==='issued'?'active':''}" onclick="openAnnualInvoices('issued')">Fatture emesse</button><button type="button" class="${mode==='collected'?'active':''}" onclick="openAnnualInvoices('collected')">Incassi</button></div>`;return appShell(`<h1>${title}</h1><p class="sub">Tocca una voce per aprire il dettaglio della fattura.</p>${scelta}<div class="miniActions"><button type="button" class="miniBtn" onclick="go('fatturaCarica')" title="Carica l’XML di una fattura già emessa e confrontalo coi consuntivi">⤒ Carica fattura emessa</button></div><div class="card"><b>Totale ${mode==='collected'?'incassato':'fatturato'} ${year}</b><div class="amount" style="margin-top:8px">${eurMigliaia(total)}</div>${nota}</div>${rows.length?intestazioneFatture():''}<div class="list">${gruppi.map(g=>g.length>1?rigaGruppoFatture(g,amountOf):rigaFattura(g[0],amountOf(g[0]))).join('')||`<div class="empty">${mode==='collected'?'Nessun incasso registrato':'Nessuna fattura emessa'} nel ${year}.</div>`}</div>`)}
 // ─── Il riquadro del mese, in dashboard ─────────────────────
 //
 // Prima erano tre colonne di giorni con lo stesso peso —
@@ -4063,17 +4064,29 @@ ${anticipo>0
   ? riga('− Fatturato in anticipo','emesso oltre quello che risulta maturato',anticipo)
   : riga('+ Ancora da fatturare','maturato quest’anno e non ancora in fattura',at.daFatturare)}
 ${riga('= Maturato nel '+year,'lavoro e spese dell’anno, fatturati o no',at.fatturabile,true)}
+${riga('di cui consuntivato','il lavoro registrato, senza i rimborsi spese',at.consuntivato)}
+${riga('di cui rimborsi spese in fattura','riaddebitati in fattura: non sono lavoro, ma la fattura li comprende',at.rimborsiFattura)}
 ${f.pianificato>0?riga('+ Pianificato','giorni già a calendario, non ancora lavorati',f.pianificato):''}
 ${f.pianificato>0?riga('= Previsione ricavi '+year,'se tutto il pianificato si realizza',f.ricavi,true):''}
 </div></div>`;
 }
+// Il dettaglio mese per mese stava in una pagina a parte, «Da
+// fatturare», che ripeteva il calcolo della scheda qui sopra: ora sta
+// sotto quella scheda, ed e' la stessa pagina dove porta la dashboard.
+function billingAnnoMesiCard(){
+  const year=currentYear();
+  const rows=annualMonthData(year).map((m,i)=>({i,cons:Number(m.fatturabile||0),base:m.fatturatoBase,diff:Number(m.fatturabile||0)-m.fatturatoBase})).filter(r=>r.cons||r.base);
+  return `<div class="card"><b>Da fatturare, mese per mese</b>
+<div class="desc" style="margin-top:2px">Per ogni mese: maturato (lavoro + rimborsi spese), base già fatturata e residuo da fatturare. Tocca un mese per il timesheet.</div>
+<div class="list" style="box-shadow:none;margin:10px 0 0">${rows.map(r=>`<div class="row" onclick="openMonthTimesheet(${year},${r.i+1})"><div class="date">${monthNames[r.i].slice(0,3)}</div><div><div class="title">${monthNames[r.i]}</div><div class="desc">Maturato ${fmtEUR(r.cons)} · Fatturato base ${fmtEUR(r.base)}</div></div><div class="value" style="${r.diff>0.005?'color:var(--orange)':''}">${fmtEUR(Math.max(0,r.diff))}</div></div>`).join('')||'<div class="empty">Nessun dato nel '+year+'.</div>'}</div></div>`;
+}
 const linkReportEconomico=()=>`<div class="list"><div class="row" onclick="go('reportEconomico')"><div></div>
       <div><div class="title">Report economico</div>
-      <div class="desc">Ricavi, costi e margine, mese per mese.</div></div><div class="chev">›</div></div></div>`;
+      <div class="desc">Per progetto e commessa: ore, fatturato e residuo in euro.</div></div><div class="chev">›</div></div></div>`;
 function billingAnno(){
   return appShell(`<h1>Fatturazione dell’anno</h1>${yearSelector()}
 <h2>La cassa</h2>${billingCassaCard()}${forfettarioBarCard()}
-<h2>Maturato e previsione</h2>${billingAnnoCard()}
+<h2>Maturato e previsione</h2>${billingAnnoCard()}${billingAnnoMesiCard()}
     ${linkReportEconomico()}`);
 }
 function billing(){const groups=billingGroupsByClient();const total=groups.reduce((s,g)=>s+g.total,0);
@@ -6832,6 +6845,7 @@ function fatturazioneCommessa(){
 
   return appShell(`<h1>Fatturazione per commessa</h1>
     <p class="sub">Si registra sull'attività, si fattura sul progetto. Un progetto raccoglie tutte le sue commesse: il dettaglio qui sotto è il prospetto di controllo, non finisce in fattura.</p>
+    ${linkReportEconomico()}
     <div class="card"><b>Cosa fatturare</b>
       <div class="field" style="margin-top:12px"><label>Cliente contrattuale</label>
         <select onchange="setFatt('client_id',this.value)">${clienti.map(c=>`<option value="${c.id}" ${c.id===cid?'selected':''}>${esc(c.code||'')} · ${esc(c.name)}</option>`).join('')}</select></div>
@@ -7114,7 +7128,7 @@ function render(){
       <button type="button" class="primary" onclick="go('home')">Torna alla dashboard</button>`;
   }
 }
-function renderInterno(){document.documentElement.setAttribute('data-view',state.view||'home');if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,reportWbs,reportEconomico,fatturazioneCommessa,engagements,engagementNew,engagementEdit,engagementDetail,projectNew,projectDetail,clientDetail,wbsEdit,importaConsuntivi,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,tripNew,tripEdit,timesheet,griglia,pivot,billing,billingAnno,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,vehicles,vehicleEdit,policyRimborsi,fatturaCarica,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,balance,taxSettings,tasseFuture,fatturatoDetail,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
+function renderInterno(){document.documentElement.setAttribute('data-view',state.view||'home');if(state.loading){document.getElementById('app').innerHTML=loadingView();return}if(state.view==='resetPassword'){document.getElementById('app').innerHTML=resetPasswordView();return}if(!session){const authMap={register:registerView,forgotPassword:forgotPasswordView};document.getElementById('app').innerHTML=(authMap[state.view]||loginView)();return}let html='';const map={home,reportWbs,reportEconomico,fatturazioneCommessa,engagements,engagementNew,engagementEdit,engagementDetail,projectNew,projectDetail,clientDetail,wbsEdit,importaConsuntivi,dailyForm,dailyEdit,calendario,giorno,tmForm,tmManage,monthlyForm,monthlyEdit,manualForm,manualEdit,expenseForm,expenseEdit,tripNew,tripEdit,timesheet,griglia,pivot,billing,billingAnno,billingDetail:billingDetailView,settings,clients,projects,activities,clientEdit,projectEdit,activityEdit,expenseCategories,expenseCategoryEdit,vehicles,vehicleEdit,policyRimborsi,fatturaCarica,invoiceTemplates,invoiceTemplateEdit,appearance,exportTimesheet,tax,taxPayments,taxPaymentEdit,annualMonths,annualInvoices,balance,taxSettings,tasseFuture,expenses,account};html=(map[state.view]||home)();document.getElementById('app').innerHTML=html}
 
 Object.assign(window,{
   setRep,
@@ -7279,7 +7293,6 @@ Object.assign(window,{
   costsForYear,
   balance,
   taxSettings,
-  fatturatoDetail,
   billingMeseCard,
   billingAnno,yearSelector,
   apriNuovoCliente,chiudiNuovoCliente,

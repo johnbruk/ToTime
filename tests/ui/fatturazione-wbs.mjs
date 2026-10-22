@@ -42,6 +42,8 @@ await pg.evaluate(()=>window.go('fatturazioneCommessa'));await pg.waitForTimeout
 
 console.log('\n=== A. Il prospetto di controllo per WBS ===');
 ok(await pg.$('table.prospetto')!==null,'il prospetto c\'è');
+ok(await pg.evaluate(()=>[...document.querySelectorAll('#app .row')].some(r=>/^Report economico/.test(r.textContent.trim()))),
+   'e da qui si apre il report economico, che non sta piu\' nel menu');
 const righe=await pg.evaluate(()=>[...document.querySelectorAll('table.prospetto tbody tr')]
   .map(tr=>[...tr.querySelectorAll('td')].map(td=>td.textContent.replace(/\s+/g,' ').trim())));
 ok(righe.length===3,'una riga per WBS: il dettaglio si vede tutto',righe.length+' righe');

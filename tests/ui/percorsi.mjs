@@ -75,15 +75,17 @@ const PERCORSI=[
   {nome:'Fatturazione dell’anno dal menu', tetto:3,
    passi:[/^☰$/,/Fatturazione/,/^L’anno$/], arrivo:/Fatturazione dell’anno/i},
   // Le altre pagine della fatturazione stanno nel suo gruppo: tre tocchi
-  // come le altre sottovoci.
-  {nome:'Report economico dal menu', tetto:3,
-   passi:[/^☰$/,/Fatturazione/,/^Report economico$/], arrivo:/Report economico/i},
+  // come le altre sottovoci. Gli incassi sono un filtro dell'elenco, a
+  // un tocco in piu'; il report economico si apre dal mese, dall'anno e
+  // da «Per commessa» (questo lo prova fatturazione-wbs.mjs, che ha le commesse).
   {nome:'Fatture emesse dal menu', tetto:3,
-   passi:[/^☰$/,/Fatturazione/,/^Fatture emesse$/], arrivo:/Fatture emesse/i},
+   passi:[/^☰$/,/Fatturazione/,/^Fatture e incassi$/], arrivo:/Fatture emesse/i},
+  {nome:'Incassi dal menu', tetto:4,
+   passi:[/^☰$/,/Fatturazione/,/^Fatture e incassi$/,/^Incassi$/], arrivo:/Incassi/i},
   // E la porta dalla pagina del mese resta: se si rompesse, quella dal
   // menu non se ne accorgerebbe.
   {nome:'Report economico dalla fatturazione del mese', tetto:4,
-   passi:[/^☰$/,/Fatturazione/,/^Il mese$/,/^Report economico\s*Ricavi/], arrivo:/Report economico/i},
+   passi:[/^☰$/,/Fatturazione/,/^Il mese$/,/^Report economico\s*Per progetto/], arrivo:/Report economico/i},
 ];
 
 console.log('\n=== I percorsi di ogni giorno ===');

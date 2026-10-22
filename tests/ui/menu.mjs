@@ -64,17 +64,23 @@ ok(spente.length===0,'le voci dirette restano evidenziate da dentro le loro sche
 // e' resta accesa.
 await pg.evaluate(()=>window.go('billingAnno'));await pg.waitForTimeout(160);
 const fat=await gruppo();
-ok(fat.sottovoci.join(',')==='Il mese,L’anno,Fatture emesse,Incassi,Da fatturare,Per commessa,Report economico,Carica fattura emessa',
-   'sotto Fatturazione stanno tutte le pagine della fatturazione',fat.sottovoci.join(', '));
+// Quattro voci e non otto: incassi, da fatturare, report economico e
+// carica fattura stanno dentro la pagina che li contiene.
+ok(fat.sottovoci.join(',')==='Il mese,L’anno,Fatture e incassi,Per commessa',
+   'sotto Fatturazione stanno solo le pagine, senza doppioni',fat.sottovoci.join(', '));
 const accesa=await pg.evaluate(()=>[...document.querySelectorAll('.sidebarNav .navSubItem.active')].map(b=>b.textContent.trim()));
 ok(accesa.join(',')==='L’anno','e dalla pagina dell’anno è accesa «L’anno»',accesa.join(', ')||'nessuna');
 // Fatture emesse e Incassi sono la stessa vista con un filtro diverso:
-// deve accendersi una sola delle due, quella giusta.
+// una voce sola, accesa in entrambi i casi, e il filtro dentro la pagina.
 for(const [modo,attesa] of [['issued','Fatture emesse'],['collected','Incassi']]){
   await pg.evaluate(m=>window.openAnnualInvoices(m),modo);await pg.waitForTimeout(160);
   const acc=await pg.evaluate(()=>[...document.querySelectorAll('.sidebarNav .navSubItem.active')].map(b=>b.textContent.trim()));
-  ok(acc.join(',')===attesa,`dagli ${attesa.toLowerCase()} è accesa «${attesa}», e solo quella`,acc.join(', ')||'nessuna');
+  ok(acc.join(',')==='Fatture e incassi',`dagli ${attesa.toLowerCase()} è accesa «Fatture e incassi»`,acc.join(', ')||'nessuna');
+  const tab=await pg.evaluate(()=>[...document.querySelectorAll('#app .tabs button.active')].map(b=>b.textContent.trim()).join(','));
+  ok(tab===attesa,`e nella pagina è scelto «${attesa}»`,tab||'nessuno');
 }
+ok(await pg.evaluate(()=>[...document.querySelectorAll('#app button')].some(b=>/Carica fattura emessa/.test(b.textContent))),
+   'dall’elenco delle fatture si carica una fattura emessa');
 await pg.evaluate(()=>window.go('fatturaCarica'));await pg.waitForTimeout(160);
 ok((await gruppo()).aperto==='Fatturazione','e caricando una fattura il gruppo resta aperto',(await gruppo()).aperto||'chiuso');
 
