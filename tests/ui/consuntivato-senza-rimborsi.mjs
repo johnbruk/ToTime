@@ -98,12 +98,13 @@ console.log('\n=== MA «DA FATTURARE» DEVE CONTARLI, O SI FATTURA DI MENO ===')
   // «da fatturare» direbbe 1.000 invece di 1.250 e quei 250 anticipati
   // al cliente non verrebbero mai chiesti indietro.
   const pg=await apri();
-  await pg.evaluate(()=>window.go('fatturatoDetail'));
+  // il calcolo sta nella pagina dell'anno, dove porta anche la dashboard
+  await pg.evaluate(()=>window.go('billingAnno'));
   await pg.waitForTimeout(500);
   const t=await testo(pg);
-  ok(/Consuntivato anno/.test(t)&&/1\.000,00/.test(t),'la pagina parte dal consuntivato: 1.000,00');
-  ok(/Rimborsi spese in fattura/.test(t)&&/250,00/.test(t),'ci somma i 250,00 di rimborsi');
-  ok(/Fatturabile/.test(t)&&/1\.250,00/.test(t),'arrivando a 1.250,00 di fatturabile');
+  ok(/di cui consuntivato[^€]{0,60}1\.000,00/i.test(t),'il maturato parte dal consuntivato: 1.000,00');
+  ok(/di cui rimborsi spese in fattura[^€]{0,90}250,00/i.test(t),'ci somma i 250,00 di rimborsi');
+  ok(/Maturato nel[\s\S]{0,200}1\.250,00/.test(t),'arrivando a 1.250,00 di maturato');
   ok(/Da fatturare/.test(t),'e da lì calcola il da fatturare');
   // senza fatture emesse, da fatturare = tutto il fatturabile
   const df=await pg.evaluate(()=>window.annualTotals?window.annualTotals().daFatturare:null);
