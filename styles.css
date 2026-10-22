@@ -1088,3 +1088,9 @@ table.griglia.numeriRiga td.riga .n{font-variant-numeric:tabular-nums}
 .bolloAzioni button{border:0;background:transparent;box-shadow:none;width:auto;padding:4px 0;font-size:var(--t-sm,13px);font-weight:var(--w-med,600);color:var(--primary);text-decoration:underline;text-underline-offset:3px}
 .bolloAzioni button:hover{color:var(--text)}
 @media(pointer:coarse){.bolloAzioni button{min-height:44px;padding:0 4px}}
+/* Tasse future: imponibile, tasse dell'anno, acconti e da versare. Sul
+   telefono due per riga, se no le cifre non ci stanno. */
+.kpiGrid.four{grid-template-columns:repeat(4,1fr)}
+.kpiGrid.four span,.kpiGrid.four small{font-size:var(--t-xs)}
+.kpiGrid.four strong{font-size:var(--t-lg)}
+@media(max-width:560px){.kpiGrid.four{grid-template-columns:1fr 1fr;row-gap:14px}.kpiGrid.four>div:nth-child(2n){border-right:0}}

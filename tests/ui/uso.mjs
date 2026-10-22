@@ -144,7 +144,7 @@ ok(await siLegge(pgC,'Imposta di bollo 2026'),'la pagina dice quanto bollo è do
 ok(await siLegge(pgC,'Ho versato il bollo'),'e offre di registrarlo',
    (await siLegge(pgC,'Ho versato il bollo'))?'c\'è':'NON c\'è: il modo nuovo è irraggiungibile');
 
-const dovutoPrima=await pgC.evaluate(()=>document.querySelectorAll('#app .card .kpiGrid strong')[2].textContent.trim());
+const dovutoPrima=await pgC.evaluate(()=>document.querySelectorAll('#app .card .kpiGrid strong')[3].textContent.trim());
 ok(await tocca(pgC,'Ho versato il bollo'),'e toccandolo si arriva da qualche parte');
 ok(/Pagamenti fiscali/i.test(await schermata(pgC)),'cioè ai Pagamenti fiscali',await schermata(pgC));
 
@@ -166,7 +166,7 @@ ok(scritto.length===1&&scritto[0].s==='paid','il versamento è registrato',JSON.
 
 // e tornando alle tasse, le scadenze del bollo risultano coperte
 await vaiA(pgC,'Tassazione','Tasse future');
-const dovutoDopo=await pgC.evaluate(()=>document.querySelectorAll('#app .card .kpiGrid strong')[2].textContent.trim());
+const dovutoDopo=await pgC.evaluate(()=>document.querySelectorAll('#app .card .kpiGrid strong')[3].textContent.trim());
 const n=t=>Number(String(t).replace(/[^0-9,]/g,'').replace(',','.'));
 ok(n(dovutoDopo)<n(dovutoPrima),'e «da versare» è sceso senza aver spuntato niente',
    dovutoPrima+' → '+dovutoDopo);
