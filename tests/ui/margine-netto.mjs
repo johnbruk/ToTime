@@ -15,17 +15,18 @@
 // rimborsi fuori reddito, se si è scelta la regola 2025.
 //
 // I numeri si fanno a mano: coefficiente 78%, INPS 26,07% sul reddito
-// forfettario, imposta 5% sul reddito meno l'INPS.
+// forfettario, imposta 5% sul reddito meno i contributi VERSATI nell'anno
+// (qui nessuno: e' il primo anno), come in Tassazione e nel Bilancio.
 //   settembre  fattura 4.786,00 (bollo 2 addebitato), spese 50 + bollo 2
-//              base 4.784 · INPS 972,81 · imposta 137,94 · netto 3.623,26 (76%)
+//              base 4.784 · INPS 972,81 · imposta 186,58 · netto 3.574,62 (75%)
 //   ottobre    nessuna fattura: 5 giorni a 460 + 100 di rimborso km,
 //              più rivalsa 4% = 2.496,00 da fatturare
-//              INPS 507,55 · imposta 71,97 · netto 1.916,48 (77%)
+//              INPS 507,55 · imposta 97,34 · netto 1.891,10 (76%)
 //   agosto     fattura 958,80 di un cliente + 2 giorni a 400 di un altro,
-//              non fatturati: 832,00 da fatturare · netto 1.373,48
+//              non fatturati: 832,00 da fatturare · netto 1.355,29
 //   giugno     solo 30 di spese a carico: −30,00, in perdita
 //   luglio     scheda esclusa dalla fatturazione: non c'è
-//   anno       9.072,80 di cui 3.328,00 da fatturare · netto 6.883,22 (76%)
+//   anno       9.072,80 di cui 3.328,00 da fatturare · netto 6.791,01 (75%), come l'utile del Bilancio
 import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
 import http from 'node:http'; import fs from 'node:fs'; import path from 'node:path';
 const ROOT=new URL('../..',import.meta.url).pathname.replace(/\/$/,'');
@@ -111,22 +112,22 @@ console.log('\n=== UNA RIGA PER MESE, COI NUMERI FATTI A MANO ===');
   ok(r.map(x=>x.mese).join(',')==='6,8,9,10,anno','giugno, agosto, settembre, ottobre e l’anno; luglio, escluso, non c’è',r.map(x=>x.mese).join(','));
   const set=riga(r,9);
   ok(set.sotto==='4.786,00 € fatturati','settembre: 4.786,00 € fatturati, il totale della fattura',set.sotto);
-  ok(set.netto==='3.623,26 €','ti restano 3.623,26 €',set.netto);
-  ok(set.resta==='ti resta il 76%','cioè il 76%',set.resta);
+  ok(set.netto==='3.574,62 €','ti restano 3.574,62 €',set.netto);
+  ok(set.resta==='ti resta il 75%','cioè il 75%',set.resta);
   ok(!set.stima,'ed è fatturato, quindi pieno, non a righe');
   const ott=riga(r,10);
   ok(ott.sotto==='2.496,00 € da fatturare','ottobre non ha fattura: 5 giorni a 460 più 100 di km, più rivalsa: 2.496,00 € da fatturare',ott.sotto);
   ok(ott.stima,'ed è a righe, perché è una stima');
-  ok(ott.netto==='1.916,48 €'&&ott.resta==='ti resta il 77%','netto 1.916,48 €, il 77%',ott.netto+' · '+ott.resta);
+  ok(ott.netto==='1.891,10 €'&&ott.resta==='ti resta il 76%','netto 1.891,10 €, il 76%',ott.netto+' · '+ott.resta);
   const ago=riga(r,8);
   ok(ago.sotto==='958,80 € fatturati + 832,00 € da fatturare','agosto: la fattura di un cliente, e i 2 giorni dell’altro ancora da fatturare',ago.sotto);
   ok(!ago.stima,'un mese in parte fatturato non è a righe: lo dice la scritta');
-  ok(ago.netto==='1.373,48 €','netto 1.373,48 €',ago.netto);
+  ok(ago.netto==='1.355,29 €','netto 1.355,29 €',ago.netto);
   const giu=riga(r,6);
   ok(giu.netto==='-30,00 €'&&giu.resta==='in perdita','giugno ha solo 30 € di spese: −30,00, «in perdita»',giu.netto+' · '+giu.resta);
   const anno=riga(r,'anno');
   ok(anno.sotto==='9.072,80 € di cui 3.328,00 € da fatturare','l’anno: 9.072,80 €, di cui 3.328,00 da fatturare',anno.sotto);
-  ok(anno.netto==='6.883,22 €'&&anno.resta==='ti resta il 76%','e ti restano 6.883,22 €, il 76%',anno.netto+' · '+anno.resta);
+  ok(anno.netto==='6.791,01 €'&&anno.resta==='ti resta il 75%','e ti restano 6.791,01 €, il 75%: lo stesso utile del Bilancio',anno.netto+' · '+anno.resta);
   const somma=r.filter(x=>x.mese!=='anno').reduce((a,x)=>a+eur(x.netto),0);
   ok(Math.abs(somma-eur(anno.netto))<0.015,'la riga dell’anno è la somma dei mesi',somma.toFixed(2));
   await pg.close();
@@ -139,7 +140,7 @@ console.log('\n=== LA BARRA: LUNGA QUANTO IL FATTURATO, VERDE QUANTO TI RESTA ==
   const set=riga(r,9),ott=riga(r,10);
   ok(Math.abs(set.larga-1)<0.01,'settembre, il mese più fatturato, ha la barra intera',set.larga?.toFixed(3));
   ok(Math.abs(ott.larga-2496/4786)<0.01,'ottobre è lunga in proporzione: 2.496 su 4.786',ott.larga?.toFixed(3));
-  ok(Math.abs(set.verde-3623.26/4786)<0.01,'e il verde di settembre è il 76% della sua barra',set.verde?.toFixed(3));
+  ok(Math.abs(set.verde-3574.62/4786)<0.01,'e il verde di settembre è il 75% della sua barra',set.verde?.toFixed(3));
   ok(riga(r,6).verde===0,'giugno, in perdita, non ha verde');
   await pg.close();
 }
@@ -151,8 +152,8 @@ console.log('\n=== TOCCANDO UN MESE SI VEDONO LE VOCI ===');
   await pg.evaluate(()=>document.querySelector('#app .margineRiga[data-mese="9"]').click());await pg.waitForTimeout(400);
   let r=await righe(pg);const set=riga(r,9);
   ok(set.aperta==='true','settembre si apre',set.aperta);
-  ok(set.conto.join(' | ')==='Spese a tuo carico 52,00 € | Contributi INPS 972,81 € | Imposta 137,94 € | Netto 3.623,26 €',
-     'spese 50 + bollo 2, INPS 972,81, imposta 137,94, netto 3.623,26',set.conto.join(' | '));
+  ok(set.conto.join(' | ')==='Spese a tuo carico 52,00 € | Contributi INPS 972,81 € | Imposta 186,58 € | Netto 3.574,62 €',
+     'spese 50 + bollo 2, INPS 972,81, imposta 186,58, netto 3.574,62',set.conto.join(' | '));
   // la prova della regola: il rimborso in fattura di ottobre e' fatturato, non spesa
   await pg.evaluate(()=>document.querySelector('#app .margineRiga[data-mese="10"]').click());await pg.waitForTimeout(400);
   r=await righe(pg);
@@ -281,6 +282,31 @@ console.log('\n=== CON LA REGOLA 2025 IL RIMBORSO FUORI REDDITO RESTA FUORI ==='
   ok(vicino(r.v,100),'fra i ricavi restano solo i 100 di km',r.v);
   ok(/esclusi 200,00 € fuori reddito/.test(pc.t),'e la riga dice che 200 sono esclusi, partita di giro');
   ok(vicino(voce(pc,/^Totale ricavi/).v,8868.8),'totale ricavi 8.868,80: 200 in meno',voce(pc,/^Totale ricavi/).v);
+}
+
+console.log('\n=== DASHBOARD, BILANCIO E FISCALITÀ DICONO LO STESSO ===');
+{
+  // 1.000 di INPS versati nel 2026: l'imposta scende di 50 (5% di 1.000)
+  // e l'utile sale di 50, nella dashboard e nel Bilancio allo stesso modo
+  const versato=SEMI+`S.tax_payments=[{id:'p1',fiscal_year:2025,payment_type:'inps',payment_date:'2026-06-30',amount:1000,status:'paid'}];`;
+  const pg=await apri(1280,versato);
+  const anno=(await righe(pg)).find(r=>r.mese==='anno')||{};
+  await pg.evaluate(()=>window.go('balance'));await pg.waitForTimeout(500);
+  const x=await leggiBilancio(pg);
+  ok(anno.netto==='6.841,01 €','dashboard: 6.791,01 + 50 di imposta in meno = 6.841,01',anno.netto);
+  ok(vicino(voce(x,/^Utile netto/).v,6841.01),'e il Bilancio dice lo stesso',voce(x,/^Utile netto/).v);
+  ok(vicino(voce(x,/^Imposta sostitutiva/).v.replace('−',''),303.68),'imposta (7.073,66 − 1.000) × 5% = 303,68',voce(x,/^Imposta/).v);
+  await pg.close();
+}
+{
+  // Fiscalità, netto dopo l'imposta: settembre incassato (4.786, bollo 2)
+  // base 4.784 · reddito 3.731,52 · INPS 972,81 · imposta 186,58
+  // netto 4.784 − 972,81 − 186,58 = 3.624,61
+  const inc=SEMI+`const h=S.billing_headers.find(x=>x.id==='h9');h.status='collected';h.collected_amount=4786;h.collection_date='2026-10-05';`;
+  const pg=await apri(1280,inc);
+  const net=await pg.evaluate(()=>window.annualTaxCalc(2026).net);
+  ok(Math.abs(net-3624.61)<0.01,'in Fiscalità il netto toglie anche l’INPS che l’incassato fa maturare',net.toFixed(2));
+  await pg.close();
 }
 
 await b.close(); srv.close();
