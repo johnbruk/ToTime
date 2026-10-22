@@ -4209,12 +4209,10 @@ async function deleteTaxPayment(idv){if(!confirm('Eliminare questo pagamento fis
 
 function costsForYear(year=currentYear()){return data.travelExpenses.filter(e=>String(e.expense_date||'').startsWith(String(year)+'-')&&expIsOwn(e))}
 function expensesForYear(year=currentYear()){return data.travelExpenses.filter(e=>String(e.expense_date||'').startsWith(String(year)+'-'))}
-function monthBars(vals){const max=Math.max(1,...vals.map(v=>Math.abs(v)));return `<div class="barChart">${vals.map((v,i)=>`<div class="bar ${v<0?'neg':''}" style="height:${Math.max(2,Math.abs(v)/max*100)}%" title="${monthNames[i]}: ${fmtEUR(v)}"></div>`).join('')}</div><div class="barLabels">${monthNames.map(m=>`<span>${m.slice(0,1)}</span>`).join('')}</div>`}
 // Il margine di un mese: compensi e rimborsi in fattura, che sono
 // compensi anche loro, meno le spese a proprio carico. I rimborsi fuori
 // reddito, se si e' scelta la regola 2025, sono una partita di giro.
 function margineMensile(m){return m.compensi+(m.rimborsiFattura||0)-(rimborsiFuoriReddito()?(m.rimborsiAnalitici||0):0)-m.costi}
-function balanceMarginBars(year){return monthBars(annualMonthData(year).map(margineMensile))}
 const BOLLO_SOGLIA=77.47;
 // Le nature che l'Agenzia delle Entrate considera assoggettate al
 // bollo: escluse (N1), non soggette per altri motivi (N2.2), non
@@ -4269,9 +4267,7 @@ function bolloCalc(year=currentYear()){
   return {unit,soglia:BOLLO_SOGLIA,modo,nFatture,dovuto,addebitato,aCarico,perTrim,perMese,rows:rows.length};
 }
 function billingExtras(year=currentYear()){let rivalsa=0,bollo=0;data.billingHeaders.filter(h=>Number(h.year)===Number(year)&&['invoice_issued','collected'].includes(h.status)).forEach(h=>{rivalsa+=Number(h.inps_recharge_amount||0);bollo+=Number(h.stamp_duty_amount||0)});return {rivalsa,bollo}}
-function balanceCompositionBar(costi,inps,imposta,utile){const parts=[['Spese a mio carico',Math.max(0,costi),'var(--red)'],['Contributi INPS',Math.max(0,inps),'var(--primary2)'],['Imposta sostitutiva',Math.max(0,imposta),'var(--orange)'],['Utile netto',Math.max(0,utile),'var(--green)']];const tot=parts.reduce((s,p)=>s+p[1],0)||1;return `<div class="segBar">${parts.map(p=>`<span style="width:${p[1]/tot*100}%;background:${p[2]}" title="${p[0]}: ${fmtEUR(p[1])}"></span>`).join('')}</div><div class="segLegend">${parts.map(p=>`<span class="li"><span class="sdot" style="background:${p[2]}"></span>${p[0]} · ${fmtEUR(p[1])}</span>`).join('')}</div>`}
 function costsByCategoryData(year){const m={};expenseRowsForYear(year).filter(expIsOwn).forEach(e=>{const n=expenseCategoryName(e.expense_category_id);m[n]=(m[n]||0)+Number(e.amount||0)});return Object.entries(m).map(([name,amount])=>({name,amount})).sort((a,b)=>b.amount-a.amount)}
-function costsByCategoryBars(year){const rows=costsByCategoryData(year).slice(0,8);if(!rows.length)return '';const max=Math.max(1,...rows.map(r=>r.amount));return `<div class="hbars">${rows.map(r=>`<div class="hbar"><div>${esc(r.name)}</div><div class="htrack"><div class="hfill" style="width:${Math.max(2,r.amount/max*100)}%"></div></div><div>${fmtEUR(r.amount)}</div></div>`).join('')}</div>`}
 const ACCONTO_MIN_IMPOSTA=51.65,ACCONTO_UNICA_SOGLIA=257.52;
 function taxBaseFor(year,mode){const at=annualTotals(year);const ts=currentTaxSetting(year);
   // Il bollo riaddebitato è anticipazione ex art.15 DPR 633/72: non è ricavo imponibile.
@@ -4790,19 +4786,147 @@ function forecastCalc(year=currentYear()){
   return {ts,consuntivato,rimborsi,fatturabile,pianificato,ricavi,rivalsa,rivRate,contribDedotti,baseImponibile,fuoriReddito,forfait,inps,imposta,oneri,costi,utileNetto,fatturato:at.fatturato,fatturatoBase:at.fatturatoBase,daFatturare:at.daFatturare,limit:Number(ts.annual_revenue_limit||85000),coeff,gsRate,taxRate};
 }
 function previsioneTasseCard(){const year=currentYear();const f=forecastCalc(year);if(f.ricavi<=0)return '';return `<div class="card"><b>Previsione imposte e contributi ${year}</b><div class="desc" style="margin-top:2px">Stima su base fatturabile + pianificato (competenza), coeff. ${fmtNum(f.coeff*100,0)}%. Le imposte effettive sono su base cassa (incassato).</div><div class="list" style="box-shadow:none;margin:12px 0 0"><div class="row"><div></div><div><div class="title">Base previsione (ricavi)</div><div class="desc">fatturabile ${fmtEUR(f.fatturabile)}${f.rimborsi>0?' (di cui '+fmtEUR(f.rimborsi)+' rimborsi spese)':''} + pianificato ${fmtEUR(f.pianificato)}</div></div><div class="value">${fmtEUR(f.ricavi)}</div></div>${f.rivalsa>0?`<div class="row"><div></div><div><div class="title">+ Rivalsa INPS ${fmtNum(f.rivRate*100,0)}%</div><div class="desc">sta in fattura ed è compenso</div></div><div class="value">${fmtEUR(f.rivalsa)}</div></div>`:''}${f.fuoriReddito>0?`<div class="row"><div></div><div><div class="title" style="color:var(--red)">− Rimborsi fuori dal reddito</div><div class="desc">regola 2025, come hai scelto in Configurazione fiscale</div></div><div class="value" style="color:var(--red)">${fmtEUR(f.fuoriReddito)}</div></div>`:''}${f.rivalsa>0||f.fuoriReddito>0?`<div class="row"><div></div><div><div class="title">= Base imponibile</div></div><div class="value">${fmtEUR(f.baseImponibile)}</div></div>`:''}<div class="row"><div></div><div><div class="title">Reddito forfettario</div><div class="desc">coeff. ${fmtNum(f.coeff*100,0)}% sulla base imponibile</div></div><div class="value">${fmtEUR(f.forfait)}</div></div><div class="row"><div></div><div><div class="title" style="color:var(--red)">− Contributi INPS ${fmtNum(f.gsRate*100,2)}%</div></div><div class="value" style="color:var(--red)">${fmtEUR(f.inps)}</div></div><div class="row"><div></div><div><div class="title" style="color:var(--red)">− Imposta sostitutiva ${fmtNum(f.taxRate*100,0)}%</div><div class="desc">sul reddito forfettario meno i contributi versati nel ${year}: ${fmtEUR(f.contribDedotti)}</div></div><div class="value" style="color:var(--red)">${fmtEUR(f.imposta)}</div></div><div class="row"><div></div><div><div class="title"><b>= Totale imposte e contributi previsti</b></div></div><div class="value"><b>${fmtEUR(f.oneri)}</b></div></div></div></div>`;}
-function previsioneBilancioCard(){const year=currentYear();const f=forecastCalc(year);if(f.pianificato<=0)return '';return `<div class="card"><b>Previsione bilancio ${year}</b><div class="desc" style="margin-top:2px">Conto economico proiettato con ricavi = fatturabile + pianificato. Stima gestionale.</div><div class="list" style="box-shadow:none;margin:12px 0 0"><div class="row"><div></div><div><div class="title">Ricavi previsti</div><div class="desc">fatturabile + pianificato</div></div><div class="value">${fmtEUR(f.ricavi)}</div></div><div class="row"><div></div><div><div class="title" style="color:var(--red)">− Spese a mio carico</div></div><div class="value" style="color:var(--red)">${fmtEUR(f.costi)}</div></div>${f.fuoriReddito>0?`<div class="row"><div></div><div><div class="title" style="color:var(--red)">− Rimborsi fuori reddito</div><div class="desc">analitici esclusi dal reddito (regola 2025): anticipati e ripresi, escono com’erano entrati</div></div><div class="value" style="color:var(--red)">${fmtEUR(f.fuoriReddito)}</div></div>`:''}<div class="row"><div></div><div><div class="title" style="color:var(--red)">− Imposte e contributi previsti</div></div><div class="value" style="color:var(--red)">${fmtEUR(f.oneri)}</div></div><div class="row"><div></div><div><div class="title"><b>= Utile netto previsto</b></div></div><div class="value"><b>${fmtEUR(f.utileNetto)}</b></div></div></div></div>`;}
-function balFull(){return settingValue('bal_full')==='1'}
-async function toggleBalFull(){const r=await saveSetting('bal_full',balFull()?'0':'1');if(r.error)return setMsg(r.error.message,7000);await reload();render()}
-function balance(){const year=currentYear();const c=annualTaxCalc(year);const at=c;const ex=billingExtras(year);const gsRate=Number(c.settings.inps_gs_rate??26.07)/100;const inpsDovuto=c.forfaitIncome*gsRate;const imposta=c.substituteTax;const bo=bolloCalc(year);const totRicavi=at.compensi+at.rimborsiFattura+ex.rivalsa+ex.bollo;const fuoriReddito=Number(c.rimborsiFuori||0);const totCosti=at.costi+fuoriReddito+ex.bollo+bo.aCarico;const margine=totRicavi-totCosti;const oneri=inpsDovuto+imposta;const utileNetto=margine-oneri;return appShell(`<h1>Bilancio ${year}</h1><p class="sub">Conto economico completo: ricavi, costi, imposte e contributi. I rimborsi spese in fattura sono compensi: ci paghi le tasse e restano a te. Il bollo addebitato è una partita di giro (ricavo = costo).</p>
-${balFull()?`
-<div class="card"><b>Ricavi ${year}</b><div class="list" style="box-shadow:none;margin:12px 0 0"><div class="row"><div></div><div><div class="title">Compensi professionali</div><div class="desc">consulenze, consuntivato del lavoro</div></div><div class="value">${fmtEUR(at.compensi)}</div></div><div class="row"><div></div><div><div class="title">Rivalsa INPS addebitata</div><div class="desc">4% riaddebitato al cliente in fattura</div></div><div class="value">${fmtEUR(ex.rivalsa)}</div></div><div class="row"><div></div><div><div class="title">Rimborsi spese in fattura</div><div class="desc">riaddebitati al cliente: sono compensi, ci paghi le tasse</div></div><div class="value">${fmtEUR(at.rimborsiFattura)}</div></div><div class="row"><div></div><div><div class="title">Marca da bollo addebitata</div><div class="desc">bolli riaddebitati in fattura</div></div><div class="value">${fmtEUR(ex.bollo)}</div></div><div class="row"><div></div><div><div class="title"><b>= Totale ricavi</b></div><div class="desc">fatturato dell'anno</div></div><div class="value"><b>${fmtEUR(totRicavi)}</b></div></div></div></div>
-<div class="card"><b>Costi ${year}</b><div class="list" style="box-shadow:none;margin:12px 0 0"><div class="row" onclick="go('expenses')"><div></div><div><div class="title" style="color:var(--red)">− Spese a mio carico</div><div class="desc">spese non rimborsate</div></div><div class="value" style="color:var(--red)">${fmtEUR(at.costi)}</div></div>${fuoriReddito>0?`<div class="row"><div></div><div><div class="title">− Rimborsi fuori reddito</div><div class="desc">analitici esclusi dal reddito (regola 2025): anticipati e ripresi · partita di giro</div></div><div class="value">${fmtEUR(fuoriReddito)}</div></div>`:''}<div class="row" onclick="go('tax')"><div></div><div><div class="title" style="color:var(--red)">− Marca da bollo a mio carico</div><div class="desc">${bo.nFatture} fatture sopra ${fmtEUR(bo.soglia)} × ${fmtEUR(bo.unit)} · dovuta ${fmtEUR(bo.dovuto)}, non riaddebitata al cliente</div></div><div class="value" style="color:var(--red)">${fmtEUR(bo.aCarico)}</div></div><div class="row"><div></div><div><div class="title">− Marca da bollo pagata</div><div class="desc">bolli versati · partita di giro</div></div><div class="value">${fmtEUR(ex.bollo)}</div></div><div class="row"><div></div><div><div class="title"><b>= Totale costi</b></div><div class="desc">costi dell'anno</div></div><div class="value"><b>${fmtEUR(totCosti)}</b></div></div></div></div>
-<div class="card"><b>Margine operativo ${year}</b><div class="amount" style="margin-top:8px">${fmtEUR(margine)}</div><div class="desc">Ricavi − costi: compensi, rimborsi in fattura e rivalsa INPS, meno le spese a mio carico. Il bollo addebitato si compensa con quello versato.</div></div>
-`:''}<div class="card"><b>Dove vanno i ricavi ${year}</b><div class="desc" style="margin-top:2px">Ripartizione tra spese, contributi, imposte e utile netto</div>${balanceCompositionBar(at.costi+bo.aCarico,inpsDovuto,imposta,utileNetto)}</div>
-<div class="card"><b>Rimborsi ${year}</b><div class="desc" style="margin-top:2px">In fattura sono compensi; a piè di lista li chiedi a parte, e sono una partita di giro.</div><div class="statRow" style="margin-top:14px"><div class="stat tint-blue"><div class="statHead"><span class="statDot"></span><span class="statLbl">Rimborsi in fattura</span></div><strong>${fmtEUR(at.rimborsiFattura)}</strong></div><div class="stat tint-sage"><div class="statHead"><span class="statDot"></span><span class="statLbl">Piè di lista</span></div><strong>${fmtEUR(at.pieDiLista)}</strong></div></div><div class="metricLine" style="margin-top:12px">Fatturato ${fmtEUR(at.fatturato)} <span class="dot">·</span> Incassato ${fmtEUR(at.incassato)}</div></div>
-<div class="card"><b>Imposte e contributi ${year} (stima)</b><div class="desc" style="margin-top:2px">Regime forfettario · calcolo su base cassa (incassato). Da verificare col commercialista.</div><div class="list" style="box-shadow:none;margin:12px 0 0"><div class="row" onclick="go('taxPayments')"><div></div><div><div class="title" style="color:var(--red)">− Contributi INPS Gestione Separata</div><div class="desc">${fmtNum(gsRate*100,2)}% sul reddito forfettario · versati ${fmtEUR(c.paidContrib)}</div></div><div class="value" style="color:var(--red)">${fmtEUR(inpsDovuto)}</div></div><div class="row" onclick="go('tax')"><div></div><div><div class="title" style="color:var(--red)">− Imposta sostitutiva</div><div class="desc">aliquota ${fmtNum(c.settings.substitute_tax_rate,0)}% su reddito forfettario netto contributi</div></div><div class="value" style="color:var(--red)">${fmtEUR(imposta)}</div></div><div class="row"><div></div><div><div class="title"><b>= Totale imposte e contributi</b></div></div><div class="value"><b>${fmtEUR(oneri)}</b></div></div></div></div>
-<div class="card"><b>Utile netto stimato ${year}</b><div class="amount" style="margin-top:8px">${fmtEUR(utileNetto)}</div><div class="desc">Margine operativo − imposte − contributi. Stima gestionale, non sostituisce il commercialista. Dettaglio e proiezione in Tassazione ›</div></div>${previsioneBilancioCard()}
-${costsByCategoryBars(year)?`<div class="card"><b>Costi a mio carico per voce ${year}</b>${costsByCategoryBars(year)}</div>`:''}<div class="card"><b>Margine mensile ${year}</b><div class="desc" style="margin-top:2px">Compensi e rimborsi in fattura − costi a mio carico, mese per mese</div>${balanceMarginBars(year)}</div><h2>Andamento mensile ${year}</h2><div class="list">${annualMonthData(year).filter(m=>m.compensi||m.costi||m.rimborsiFattura||m.pieDiLista).map(m=>`<div class="row" onclick="openMonthExpenses(${year},${m.month})"><div class="date">${m.label}</div><div><div class="title">${monthNames[m.month-1]}</div><div class="desc">Compensi ${fmtEUR(m.compensi)}${m.rimborsiFattura?` · Rimborsi in fattura ${fmtEUR(m.rimborsiFattura)}`:''} · Costi ${fmtEUR(m.costi)}</div></div><div class="value">${fmtEUR(margineMensile(m))}</div></div>`).join('')||`<div class="empty">Nessun dato nel ${year}.</div>`}</div><button type="button" class="secondary dashToggle" onclick="toggleBalFull()">${balFull()?'▴ Nascondi dettaglio ricavi e costi':'▾ Mostra dettaglio ricavi e costi'}</button>`)}
+// ─── Bilancio ────────────────────────────────────────────────────────
+//
+// «Per me il bilancio è chiaro: stato patrimoniale e conto economico.
+// Alla fine si arriva a utile o perdita.» La pagina di prima mescolava
+// il lavoro fatto (ricavi) con l'incassato (tasse), mostrava righe di
+// bollo che si annullavano a vicenda e ripeteva gli stessi numeri in
+// otto riquadri. Adesso e' un conto economico a scalare, come quello
+// di QuickBooks o Xero, e sotto quello che ti devono e quello che devi.
+//
+// Il conto economico e' per COMPETENZA: il lavoro dell'anno, fatturato
+// o no. Le tasse sono calcolate sugli stessi ricavi, con le regole
+// della Tassazione (contributi dedotti nell'anno in cui si versano):
+// sono le tasse che quel lavoro genera, non le scadenze. Il bollo
+// addebitato al cliente non c'e': entra e riesce uguale. Quello che
+// paghi tu e' un costo. I rimborsi a pie' di lista neanche: anticipati
+// e restituiti. I rimborsi in fattura si', sono compensi; se si e'
+// scelta la regola 2025 quelli fuori reddito sono una partita di giro
+// e restano fuori anche loro.
+// I ricavi si contano per cliente e per mese, come nel margine netto
+// della dashboard: dove la fattura e' emessa valgono i suoi numeri (la
+// fattura vince sul consuntivo), dove non c'e' ancora vale il lavoro,
+// con la rivalsa di quella scheda. La scheda esclusa non si conta.
+// I rimborsi in fattura si leggono dalle spese del mese, dentro la base
+// della fattura: quello che resta della base sono i compensi.
+function ricaviCompetenza(year,conPianificato){
+  const ts=currentTaxSetting(year),fuori=rimborsiFuoriReddito(),cm={};
+  const get=(c,i)=>cm[c+'|'+i]||(cm[c+'|'+i]={lavoro:0,pian:0,rimb:0,fuori:0,base:0,riv:0,emessa:false,esclusa:false,h:null});
+  rowsForYear(year).forEach(e=>{const x=get(e.client_id,monthIndexFromDate(e.entry_date));if(isPlanned(e))x.pian+=dailyAmount(e);else x.lavoro+=dailyAmount(e)});
+  monthlyRowsForYear(year).forEach(e=>{get(e.client_id,Number(e.month||1)-1).lavoro+=Number(e.amount||0)});
+  manualRowsForYear(year).forEach(e=>{const x=get(e.client_id,monthIndexFromDate(e.entry_date));const v=Number(e.amount||0);if(isPlanned(e))x.pian+=v;else x.lavoro+=v});
+  expenseRowsForYear(year).filter(e=>expType(e)==='invoice').forEach(e=>{const x=get(e.client_id,monthIndexFromDate(e.expense_date));const v=Number(e.amount||0);x.rimb+=v;if(fuori&&spesaFuoriReddito(e,year))x.fuori+=v});
+  data.billingHeaders.filter(h=>Number(h.year)===Number(year)).forEach(h=>{
+    const i=Number(h.month||1)-1;if(i<0||i>11)return;const x=get(h.client_id,i);x.h=h;
+    if(['invoice_issued','collected'].includes(h.status)){
+      const riv=Number(h.inps_recharge_amount||0),bollo=Number(h.stamp_duty_amount||0);
+      x.base+=Number(h.total_amount||0)||Math.max(0,Number(h.invoice_total_amount||0)-riv-bollo);x.riv+=riv;x.emessa=true;
+    }else if(h.status==='excluded')x.esclusa=true;
+  });
+  let compensi=0,rimborsi=0,fuoriReddito=0,rivalsa=0,daFatturare=0,pianificato=0;
+  Object.values(cm).forEach(x=>{
+    if(x.esclusa&&!x.emessa)return;
+    const h=x.h||{};
+    const rate=(h.inps_recharge_enabled??ts.inps_recharge_enabled??true)?Number(h.inps_recharge_rate??ts.inps_recharge_rate??4)/100:0;
+    if(x.emessa){const r=Math.min(x.rimb,x.base);rimborsi+=r;compensi+=x.base-r;rivalsa+=x.riv;fuoriReddito+=Math.min(x.fuori,r);return}
+    compensi+=x.lavoro;rimborsi+=x.rimb;fuoriReddito+=x.fuori;rivalsa+=(x.lavoro+x.rimb)*rate;daFatturare+=(x.lavoro+x.rimb)*(1+rate);
+    if(conPianificato){compensi+=x.pian;pianificato+=x.pian;rivalsa+=x.pian*rate}
+  });
+  return {compensi,rimborsi,fuoriReddito,rivalsa,daFatturare,pianificato};
+}
+function contoEconomico(year,conPianificato){
+  const ts=currentTaxSetting(year);const r=ricaviCompetenza(year,conPianificato);const bo=bolloCalc(year);
+  const coeff=Number(ts.profitability_coefficient||0)/100,gsRate=Number(ts.inps_gs_rate??26.07)/100,taxRate=Number(ts.substitute_tax_rate||0)/100;
+  const rivRate=(ts.inps_recharge_enabled??true)?Number(ts.inps_recharge_rate??4)/100:0;
+  const rimborsiNetti=r.rimborsi-r.fuoriReddito;
+  const ricaviTot=r.compensi+rimborsiNetti+r.rivalsa;
+  const voci=costsByCategoryData(year);
+  const costiTot=voci.reduce((s,v)=>s+v.amount,0)+bo.aCarico;
+  // Le stesse regole della Tassazione: i contributi si deducono
+  // nell'anno in cui si versano, quelli versati e quelli che l'anno
+  // deve ancora versare. Il primo anno non c'e' niente da dedurre.
+  const contribDedotti=contributiVersatiNellAnno(year)+inpsGsCalc(year).totalCurrentYearOut;
+  const forfait=ricaviTot*coeff,inps=forfait*gsRate,imposta=Math.max(0,forfait-contribDedotti)*taxRate;
+  const primaTasse=ricaviTot-costiTot,oneri=inps+imposta;
+  return {...r,rimborsiNetti,ricaviTot,voci,bolloACarico:bo.aCarico,costiTot,primaTasse,coeff,gsRate,taxRate,rivRate,contribDedotti,forfait,inps,imposta,oneri,utile:primaTasse-oneri};
+}
+// Quello che ti devono e quello che devi, a oggi. Non e' uno stato
+// patrimoniale completo e non lo finge: l'app non conosce il saldo del
+// conto ne' i beni, e inventarli sarebbe peggio che non dirli.
+// I crediti: le fatture emesse e non incassate, di qualunque anno, e il
+// lavoro dell'anno non ancora fatturato, rivalsa compresa.
+// I debiti: imposta e contributi maturati su quanto hai INCASSATO (il
+// forfettario e' per cassa), meno quanto hai gia' versato per quell'anno,
+// e il bollo non ancora versato. Sui crediti, quando li incasserai,
+// maturano le tasse: per questo non stanno fra i debiti.
+function debitiFiscaliAnno(year){
+  const d=taxDueFor(year,'cassa');
+  const versato=tipo=>(data.taxPayments||[]).filter(p=>p.status==='paid'&&tipo(p)&&Number(p.fiscal_year)===Number(year))
+    .reduce((s,p)=>s+Number(p.amount||0),0);
+  const inps=Math.max(0,d.inps-versato(eVersamentoInps));
+  const imposta=Math.max(0,d.imposta-versato(eVersamentoImposta));
+  const bollo=Math.max(0,bolloCalc(year).dovuto-versatoBollo(year));
+  return {inps,imposta,bollo,tot:inps+imposta+bollo};
+}
+function creditiDebiti(year){
+  const aperte=(data.billingHeaders||[]).filter(h=>h.status==='invoice_issued');
+  const fatture=new Set(aperte.map(h=>{const n=chiaveNumero(h.invoice_number);return n?h.client_id+'|'+n:'scheda|'+h.id}));
+  const daIncassare=aperte.reduce((s,h)=>s+Number(h.invoice_total_amount||h.total_amount||0),0);
+  const daFatturare=ricaviCompetenza(year,false).daFatturare;
+  const qui=debitiFiscaliAnno(year),prima=debitiFiscaliAnno(year-1);
+  const crediti=daIncassare+daFatturare,debiti=qui.tot+prima.tot;
+  return {daIncassare,nFatture:fatture.size,daFatturare,qui,prima,crediti,debiti,netto:crediti-debiti};
+}
+function balance(){
+  const year=currentYear();const oggi=contoEconomico(year,false),fine=contoEconomico(year,true);
+  const due=fine.pianificato>0.005;
+  const pct=(n,d)=>d>0.005?fmtNum(n/d*100,0)+'%':'';
+  const cella=(v,meno)=>`<td class="${meno&&v>0.005?'meno':''}">${meno&&v>0.005?'− ':''}${fmtEUR(v)}</td>`;
+  const riga=(t,d,a,b,meno,cls='')=>`<tr class="${cls}"><td>${t}${d?`<span class="d">${d}</span>`:''}</td>${cella(a,meno)}${due?cella(b,meno):''}</tr>`;
+  const sez=t=>`<tr class="sez"><td colspan="${due?3:2}">${t}</td></tr>`;
+  const perdita=oggi.utile<-0.005;
+  // In cima all'euro, come nelle Tasse future: sul telefono i centesimi tagliavano le cifre.
+  const tondo=n=>eurMigliaia(Math.round(Number(n)||0)).replace(/,00(?=\u00a0€)/,'');
+  // Le spese in una riga sola: il dettaglio per voce sta in Spese. Nella
+  // descrizione le tre voci piu' grandi, che dicono dove vanno i soldi.
+  const spese=oggi.voci.reduce((t,v)=>t+v.amount,0);
+  const prime=oggi.voci.slice(0,3).map(v=>esc(v.name)+' '+fmtEUR(v.amount));
+  const altre=oggi.voci.slice(3).reduce((t,v)=>t+v.amount,0);
+  const voci=spese>0.005?riga('Spese a tuo carico',prime.join(' · ')+(altre>0.005?' · altre '+fmtEUR(altre):''),spese,spese,true):'';
+  const ce=`<table class="ceTab"><thead><tr><th></th><th>Ad oggi</th>${due?'<th>A fine anno</th>':''}</tr></thead><tbody>
+    ${sez('Ricavi')}
+    ${riga('Compensi','il lavoro fatto'+(due?'; a fine anno anche il pianificato':''),oggi.compensi,fine.compensi)}
+    ${oggi.rimborsi>0.005?riga('Rimborsi spese in fattura','sono compensi: ci paghi le tasse e restano a te'+(oggi.fuoriReddito>0.005?` · esclusi ${fmtEUR(oggi.fuoriReddito)} fuori reddito, partita di giro`:''),oggi.rimborsiNetti,fine.rimborsiNetti):''}
+    ${oggi.rivalsa>0.005?riga('Rivalsa INPS '+fmtNum(oggi.rivRate*100,0)+'%','addebitata al cliente in fattura',oggi.rivalsa,fine.rivalsa):''}
+    ${riga('Totale ricavi','',oggi.ricaviTot,fine.ricaviTot,false,'tot')}
+    ${sez('Costi')}
+    ${voci}
+    ${oggi.bolloACarico>0.005?riga('Marca da bollo a tuo carico','non riaddebitata al cliente',oggi.bolloACarico,fine.bolloACarico,true):''}
+    ${!voci&&oggi.bolloACarico<=0.005?`<tr><td colspan="${due?3:2}" class="vuota">Nessuna spesa a tuo carico.</td></tr>`:''}
+    ${riga('Risultato prima delle tasse','ricavi meno costi',oggi.primaTasse,fine.primaTasse,false,'tot')}
+    ${sez('Tasse e contributi')}
+    ${riga('Contributi INPS '+fmtNum(oggi.gsRate*100,2)+'%','sul reddito forfettario, '+fmtNum(oggi.coeff*100,0)+'% dei ricavi',oggi.inps,fine.inps,true)}
+    ${riga('Imposta sostitutiva '+fmtNum(oggi.taxRate*100,0)+'%','sul reddito forfettario meno i contributi versati nell’anno ('+fmtEUR(oggi.contribDedotti)+')',oggi.imposta,fine.imposta,true)}
+    ${riga(perdita?'Perdita':'Utile netto','quello che ti resta',oggi.utile,fine.utile,false,'fin'+(perdita?' perdita':''))}
+  </tbody></table>`;
+  const cd=creditiDebiti(year);
+  const r=(t,d,v,meno)=>`<div class="row"><div></div><div><div class="title">${t}</div>${d?`<div class="desc">${d}</div>`:''}</div><div class="value${meno&&v>0.005?' meno':''}">${meno&&v>0.005?'− ':''}${fmtEUR(v)}</div></div>`;
+  const prima=cd.prima.tot>0.005?r('Tasse e contributi del '+(year-1)+' da versare','imposta, INPS e bollo non ancora versati',cd.prima.tot,true):'';
+  const sp=`<div class="list" style="box-shadow:none;margin:12px 0 0">
+    ${r('Fatture da incassare',cd.nFatture?(cd.nFatture===1?'1 fattura emessa, non ancora pagata':cd.nFatture+' fatture emesse, non ancora pagate'):'nessuna fattura in attesa',cd.daIncassare)}
+    ${r('Lavoro da fatturare','fatto nel '+year+' e non ancora in fattura, rivalsa compresa',cd.daFatturare)}
+    ${prima}
+    ${r('Tasse e contributi '+year+' maturati','imposta '+fmtEUR(cd.qui.imposta)+' · INPS '+fmtEUR(cd.qui.inps)+' sull’incassato, non ancora versati',cd.qui.imposta+cd.qui.inps,true)}
+    ${cd.qui.bollo>0.005?r('Bollo '+year+' da versare','',cd.qui.bollo,true):''}
+    <div class="row tot"><div></div><div><div class="title">${cd.netto<-0.005?'Devi più di quanto ti devono':'Ti devono, al netto di quello che devi'}</div></div><div class="value">${fmtEUR(Math.abs(cd.netto))}</div></div></div>`;
+  const mesi=annualMonthData(year).filter(m=>m.compensi||m.costi||m.rimborsiFattura).map(m=>`<div class="row" onclick="openMonthExpenses(${year},${m.month})"><div class="date">${m.label}</div><div><div class="title">${monthNames[m.month-1]}</div><div class="desc">Compensi ${fmtEUR(m.compensi)}${m.rimborsiFattura?` · Rimborsi in fattura ${fmtEUR(m.rimborsiFattura)}`:''} · Costi ${fmtEUR(m.costi)}</div></div><div class="value">${fmtEUR(margineMensile(m))}</div></div>`).join('');
+  return appShell(`<h1>Bilancio ${year}</h1><p class="sub">Quanto rende il lavoro del ${year}, tasse comprese, e cosa resta da incassare e da versare. Stima gestionale: non sostituisce il commercialista.</p>
+<div class="card"><div class="kpiGrid three bilKpi"><div><span>Ricavi</span><strong>${tondo(oggi.ricaviTot)}</strong></div><div><span>Costi e tasse</span><strong>${tondo(oggi.costiTot+oggi.oneri)}</strong></div><div class="${perdita?'perdita':'utile'}"><span>${perdita?'Perdita':'Utile netto'}</span><strong>${tondo(oggi.utile)}</strong>${pct(oggi.utile,oggi.ricaviTot)?`<small>${pct(oggi.utile,oggi.ricaviTot)} dei ricavi</small>`:''}</div></div>${due?`<div class="metricLine" style="margin-top:12px">A fine anno, con il pianificato: ${perdita&&fine.utile<0?'perdita':'utile'} <b>${fmtEUR(fine.utile)}</b></div>`:''}</div>
+<div class="card"><b>Conto economico ${year}</b><div class="desc" style="margin-top:2px">Il lavoro dell’anno, fatturato o no. Le tasse sono quelle che questo lavoro genera; quando si pagano lo vedi in Tassazione › Tasse future.</div>${ce}
+<div class="small" style="margin-top:10px">Non ci sono la marca da bollo addebitata al cliente, che incassi e versi uguale, né i rimborsi a piè di lista, che anticipi e ti vengono restituiti.</div></div>
+<div class="card"><b>Cosa ti devono e cosa devi</b><div class="desc" style="margin-top:2px">A oggi, ${fmtDMY(todayISO())}. Il saldo del conto e i beni (computer, auto…) l’app non li conosce: per questo non è uno stato patrimoniale completo. Sui soldi ancora da incassare pagherai le tasse quando arrivano.</div>${sp}</div>
+<details class="card moreFields"><summary>Mese per mese</summary><div class="desc" style="margin-top:2px">Compensi e rimborsi in fattura meno le spese a tuo carico, prima delle tasse. Tocca un mese per le spese.</div><div class="list" style="box-shadow:none;margin:12px 0 0">${mesi||`<div class="empty">Nessun dato nel ${year}.</div>`}</div></details>`)}
 function openMonthExpenses(year,month){state.month=`${year}-${String(month).padStart(2,'0')}`;navigateTo('expenses')}
 function expenseTypeTag(e){const t=expType(e);const cls=t==='own'?'orange':t==='invoice'?'blue':'green';return `<span class="tag ${cls}">${reimbLabel(t)}</span>`}
 // ─── Pagina Spese: due viste ────────────────────────────────────────
@@ -7201,7 +7325,6 @@ Object.assign(window,{
   dayShift,
   newEntryForDay,
   goForDay,
-  toggleBalFull,
   goToday,
   systemTheme,
   toggleDashFull,apriMeseMargine,
