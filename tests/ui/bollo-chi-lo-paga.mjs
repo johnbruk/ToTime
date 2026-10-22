@@ -193,7 +193,7 @@ console.log('\n=== IL BOLLO CHE PAGHI TU È UN TUO COSTO ===');
   await pg.evaluate(()=>window.go('balance'));
   await pg.waitForTimeout(800);
   const t=await testo(pg);
-  ok(/Costi/.test(t),'la pagina del bilancio si apre sui costi');
+  ok(/costi/i.test(t)&&/Marca da bollo a tuo carico/.test(t),'nel bilancio, fra i costi, c’è la marca da bollo a tuo carico');
   ok(/2,00 €|2 €/.test(t),'e i 2 € del bollo ci stanno dentro',
      (t.match(/[^·]{0,50}2,00 €/)||[''])[0]||'non si leggono');
   await pg.close();
