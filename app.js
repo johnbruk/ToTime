@@ -4295,6 +4295,47 @@ function bolloCalc(year=currentYear()){
   const aCarico=Math.max(0,dovuto-addebitato);
   return {unit,soglia:BOLLO_SOGLIA,modo,nFatture,dovuto,addebitato,aCarico,perTrim,perMese,rows:rows.length};
 }
+// IL BOLLO DELLE FATTURE CHE ANCORA NON CI SONO
+//
+// bolloCalc conta le fatture emesse. Il prospetto B immagina pero'
+// l'anno chiuso, e i mesi ancora da fatturare porteranno ognuno la sua
+// fattura: una per cliente e mese, se supera la soglia. Prima il B
+// aveva il bollo delle sole fatture emesse, e ottobre e novembre non
+// costavano niente.
+function bolliDaEmettere(year=currentYear()){
+  const ts=currentTaxSetting(year);const unit=Number(ts.stamp_duty_amount??2)||2;
+  const perTrim=[0,0,0,0];let n=0;
+  if(!bolloDovuto(bolloModo(ts)))return {n,perTrim,unit};
+  const chiuso=new Set(),scheda={};
+  data.billingHeaders.filter(h=>Number(h.year)===Number(year)).forEach(h=>{
+    const k=h.client_id+'|'+(Number(h.month||1)-1);scheda[k]=h;
+    if(['invoice_issued','collected','excluded'].includes(h.status))chiuso.add(k)});
+  const base={};const somma=(c,i,v)=>{const k=c+'|'+i;if(!chiuso.has(k))base[k]=(base[k]||0)+v};
+  rowsForYear(year).forEach(e=>somma(e.client_id,monthIndexFromDate(e.entry_date),dailyAmount(e)));
+  monthlyRowsForYear(year).forEach(e=>somma(e.client_id,Number(e.month||1)-1,Number(e.amount||0)));
+  manualRowsForYear(year).forEach(e=>somma(e.client_id,monthIndexFromDate(e.entry_date),Number(e.amount||0)));
+  expenseRowsForYear(year).filter(e=>expType(e)==='invoice').forEach(e=>somma(e.client_id,monthIndexFromDate(e.expense_date),Number(e.amount||0)));
+  Object.entries(base).forEach(([k,v])=>{
+    const h=scheda[k]||{};
+    const riv=(h.inps_recharge_enabled??ts.inps_recharge_enabled??true)?Number(h.inps_recharge_rate??ts.inps_recharge_rate??4)/100:0;
+    if(v*(1+riv)>BOLLO_SOGLIA){n++;perTrim[Math.min(3,Math.floor(Number(k.split('|')[1])/3))]+=unit}});
+  return {n,perTrim,unit};
+}
+// Il bollo di un anno che non e' ancora cominciato: una fattura al mese
+// per ogni cliente che ha lavoro negli ultimi tre mesi. Prima si
+// copiava il bollo dell'anno in corso, che per chi ha aperto la partita
+// IVA a primavera valeva pochi mesi.
+function bolloAnnoSimulato(year=currentYear()){
+  const ts=currentTaxSetting(year);const unit=Number(ts.stamp_duty_amount??2)||2;
+  if(!bolloDovuto(bolloModo(ts)))return {clienti:0,perTrim:[0,0,0,0],unit};
+  const oggi=todayISO();const da=new Date(oggi+'T00:00:00');da.setMonth(da.getMonth()-3);
+  const inizio=da.toISOString().slice(0,10);
+  const clienti=new Set();
+  (data.entries||[]).forEach(e=>{const d=String(e.entry_date||'');if(d>=inizio&&d<=oggi&&Number(e.hours||0)>0)clienti.add(e.client_id)});
+  (data.manualEntries||[]).forEach(e=>{const d=String(e.entry_date||'');if(d>=inizio&&d<=oggi&&Number(e.amount||0)>0)clienti.add(e.client_id)});
+  const q=clienti.size*3*unit;
+  return {clienti:clienti.size,perTrim:[q,q,q,q],unit};
+}
 function billingExtras(year=currentYear()){let rivalsa=0,bollo=0;data.billingHeaders.filter(h=>Number(h.year)===Number(year)&&['invoice_issued','collected'].includes(h.status)).forEach(h=>{rivalsa+=Number(h.inps_recharge_amount||0);bollo+=Number(h.stamp_duty_amount||0)});return {rivalsa,bollo}}
 function costsByCategoryData(year){const m={};expenseRowsForYear(year).filter(expIsOwn).forEach(e=>{const n=expenseCategoryName(e.expense_category_id);m[n]=(m[n]||0)+Number(e.amount||0)});return Object.entries(m).map(([name,amount])=>({name,amount})).sort((a,b)=>b.amount-a.amount)}
 const ACCONTO_MIN_IMPOSTA=51.65,ACCONTO_UNICA_SOGLIA=257.52;
@@ -4380,9 +4421,16 @@ function taxScheduleSimulato(year){
     else{items.push({date:M+'-06-30',label:'Primo acconto imposta sostitutiva (40%)',ref:M,amount:imposta*0.4,kind:'imposta'});
       items.push({date:M+'-11-30',label:'Secondo acconto imposta sostitutiva (60%)',ref:M,amount:imposta*0.6,kind:'imposta'});}}
   vociCredito(items,M+'-06-30',N,accontiInpsN-inps,accontiImpostaN-imposta);
+  // Il bollo dell'anno simulato, stimato come quello dell'anno in corso.
+  // Prima la quota da accantonare lo contava e «Da versare» no, e i due
+  // numeri del simulatore differivano di quei pochi euro.
+  const bo=bolloAnnoSimulato(year);const trim=['I','II','III','IV'];
+  const bolloDate=[N+'-05-31',N+'-09-30',N+'-11-30',M+'-02-28'];
+  const stima=bo.clienti===1?'una fattura al mese':bo.clienti+' fatture al mese';
+  bo.perTrim.forEach((v,i)=>{if(v>0)items.push({date:bolloDate[i],label:'Imposta di bollo fatture elettroniche · '+trim[i]+' trimestre (stima: '+stima+')',ref:N,amount:v,kind:'bollo'})});
   items.sort((a,b)=>a.date.localeCompare(b.date)||a.label.localeCompare(b.label));
   const parts=[['Incassi '+N+' simulati',r.valore],['INPS versato nel '+N,inpsVersatiN]];
-  return {items,total:items.reduce((t,i)=>t+i.amount,0),bolloTot:0,simulato:r,
+  return {items,total:items.reduce((t,i)=>t+i.amount,0),bolloTot:bo.perTrim.reduce((t,v)=>t+v,0),simulato:r,
     due:{ts,base:r.valore,parts,coeff,gsRate,taxRate,forfait,inps,imposta,paidContrib:inpsVersatiN,accontiInpsN,accontiImpostaN}};
 }
 function taxScheduleItems(year,mode){
@@ -4390,8 +4438,10 @@ function taxScheduleItems(year,mode){
   const d=taxDueFor(year,mode);const N=year+1;const items=[];
   const bo=bolloCalc(year);const trimLabel=['I','II','III','IV'];
   const bolloDue=[[year+'-05-31','I'],[year+'-09-30','II'],[year+'-11-30','III'],[N+'-02-28','IV']];
-  const bolloTot=bo.perTrim.reduce((s,v)=>s+v,0);
-  if(bolloTot>0){bo.perTrim.forEach((v,i)=>{if(v>0)items.push({date:bolloDue[i][0],label:'Imposta di bollo fatture elettroniche · '+trimLabel[i]+' trimestre',ref:year,amount:v,kind:'bollo'});});}
+  const nuove=mode==='cassa'?{perTrim:[0,0,0,0]}:bolliDaEmettere(year);
+  const perTrim=bo.perTrim.map((v,i)=>v+nuove.perTrim[i]);
+  const bolloTot=perTrim.reduce((s,v)=>s+v,0);
+  if(bolloTot>0){perTrim.forEach((v,i)=>{if(v>0)items.push({date:bolloDue[i][0],label:'Imposta di bollo fatture elettroniche · '+trimLabel[i]+' trimestre'+(nuove.perTrim[i]>0?' (con le fatture da emettere)':''),ref:year,amount:v,kind:'bollo'});});}
   // Il saldo e' il dovuto meno gli acconti gia' versati per l'anno. Il
   // saldo stesso, una volta pagato, non lo azzera: resta in elenco come
   // pagato, come le altre scadenze.
@@ -4726,7 +4776,7 @@ function giorniA(iso,oggi){
 // stimato uguale a quello di quest'anno.
 function accantonaAnno(year,mode,r){
   const anno=mode==='simulato'?Number(year)+1:Number(year);
-  const bollo=mode==='simulato'?bolloCalc(year).dovuto:r.items.filter(i=>i.kind==='bollo').reduce((t,i)=>t+i.amount,0);
+  const bollo=r.items.filter(i=>i.kind==='bollo').reduce((t,i)=>t+i.amount,0);
   const dopo=String(anno+1);
   const altre=r.items.filter(i=>i.kind!=='bollo');
   const somma=f=>altre.filter(f).reduce((t,i)=>t+i.amount,0);
@@ -4740,7 +4790,28 @@ function accantonaBlocco(year,mode,r){
   if(a.totale<=0)return '';
   return `<div class="salvadanaio mediaTasse"><div class="salvaCifra">${fmtEUR(a.mese)}<span>al mese</span></div>
     <div class="salvaTesto">da mettere da parte da gennaio a dicembre ${a.anno}: <b>${fmtEUR(a.totale)}</b> diviso 12, per arrivare pronto alle scadenze del ${a.anno+1}.
-    <div class="small" style="margin-top:4px">30/06/${a.anno+1} ${fmtEUR(a.giugno)} <span class="dot">·</span> 30/11/${a.anno+1} ${fmtEUR(a.novembre)} <span class="dot">·</span> bollo ${fmtEUR(a.bollo)}${mode==='simulato'?' (stimato come quest’anno)':''}</div></div></div>`;
+    <div class="small" style="margin-top:4px">30/06/${a.anno+1} ${fmtEUR(a.giugno)} <span class="dot">·</span> 30/11/${a.anno+1} ${fmtEUR(a.novembre)} <span class="dot">·</span> bollo ${fmtEUR(a.bollo)}${mode==='simulato'?' (stimato)':''}</div></div></div>`;
+}
+// LE TASSE DELL'ANNO E GLI ACCONTI, SEPARATI
+//
+// «Se le tasse si calcolano sull'imponibile, o e' sbagliato l'imponibile
+// o sono sbagliate le tasse.» Il riquadro mostrava Base, Imponibile e
+// Da versare, e Da versare sommava tre cose diverse: le tasse dell'anno,
+// gli acconti dell'anno dopo e il bollo. Il 57% dell'imponibile, quando
+// le tasse vere ne sono il 31%: i conti erano giusti, ma non si vedeva
+// perche'. Adesso le tasse dell'anno e gli acconti stanno in due
+// caselle, e una riga dice come si arriva a Da versare.
+function riepilogoTasse(year,mode,r){
+  const d=r.due;const Y=mode==='simulato'?Number(year)+1:Number(year);
+  const tasse=d.inps+d.imposta;
+  const somma=f=>r.items.filter(f).reduce((t,i)=>t+i.amount,0);
+  const acconti=somma(i=>(i.kind==='inps'||i.kind==='imposta')&&Number(i.ref)===Y+1);
+  // Saldi e crediti dell'anno: le tasse meno gli acconti gia' versati.
+  const saldi=somma(i=>(i.kind==='inps'||i.kind==='imposta'||i.kind==='credito')&&Number(i.ref)===Y);
+  const bollo=somma(i=>i.kind==='bollo');
+  const pagato=r.items.filter(scadenzaPagata).reduce((t,i)=>t+i.amount,0);
+  return {Y,tasse,acconti,giaVersati:tasse-saldi,bollo,pagato,daVersare:r.total-pagato,
+    baseImposta:Math.max(0,d.forfait-d.paidContrib)};
 }
 function taxScheduleCard(year,mode,title,desc){
   const r=taxScheduleItems(year,mode);const d=r.due;
@@ -4752,15 +4823,21 @@ function taxScheduleCard(year,mode,title,desc){
       <div class="field"><label>Quanto pensi di incassare nel ${year+1}</label>
       <input name="ricavi" type="number" step="100" min="0" inputmode="decimal" value="${Math.round(r.simulato.valore)}" onchange="cambiaRicaviSimulati(${year},this.value)"></div>
       <div class="small">${r.simulato.scelto?'La cifra l’hai scritta tu. Svuota il campo per tornare alla proposta dell’app.':'Proposta dell’app: il ritmo mensile del '+year+' per 12 mesi.'} Rivalsa INPS compresa, bollo escluso.</div></form>
-      <div class="metricLine" style="margin-top:10px">Dovuti per il ${year+1}: INPS ${fmtEUR(d.inps)} <span class="dot">·</span> imposta ${fmtEUR(d.imposta)}</div>
-      <div class="metricLine">Acconti ${year+1} versati nel ${year+1}: INPS ${fmtEUR(d.accontiInpsN)} <span class="dot">·</span> imposta ${fmtEUR(d.accontiImpostaN)}</div>`:'';
+      <div class="metricLine" style="margin-top:10px">Acconti ${year+1} versati nel ${year+1}: INPS ${fmtEUR(d.accontiInpsN)} <span class="dot">·</span> imposta ${fmtEUR(d.accontiImpostaN)}</div>`:'';
+  const t=riepilogoTasse(year,mode,r);
+  const pct=n=>fmtNum(n*100,2).replace(/,00$/,'')+'%';
+  const conto=[`tasse ${t.Y} ${fmtEUR(t.tasse)}`];
+  if(t.giaVersati>0.005)conto.push(`− acconti ${t.Y} già versati ${fmtEUR(t.giaVersati)}`);
+  if(t.acconti>0.005)conto.push(`+ acconti ${t.Y+1} ${fmtEUR(t.acconti)}`);
+  if(t.bollo>0.005)conto.push(`+ bollo ${fmtEUR(t.bollo)}`);
+  if(t.pagato>0.005)conto.push(`− già pagato ${fmtEUR(t.pagato)}`);
   const vista=vistaTasse();
   // «Da versare» e' quello che resta davvero da versare: cio' che hai
   // gia' segnato pagato non e' piu' un debito, e il pagato dell'anno si
   // dice a parte, se no il totale sembra sbagliato
   const pagate=r.items.filter(scadenzaPagata);
-  const somPagate=pagate.reduce((s,i)=>s+i.amount,0);
-  const daVersare=r.total-somPagate;
+  const somPagate=t.pagato;
+  const daVersare=t.daVersare;
   const corpo=!r.items.length?'<div class="empty">Nessuna scadenza prevista.</div>'
     :vista==='riferimento'?tassePerRiferimento(r.items,oggi)
     :vista==='tempo'?tasseLineaDelTempo(r.items,oggi)
@@ -4768,11 +4845,12 @@ function taxScheduleCard(year,mode,title,desc){
   const scadute=r.items.filter(i=>String(i.date)<oggi&&!scadenzaPagata(i));
   const prossima=r.items.find(i=>String(i.date)>=oggi&&!scadenzaPagata(i));
   return `<div class="card"><b>${title}</b><div class="desc" style="margin-top:2px">${desc}</div>${sim}
-    <div class="kpiGrid three" style="margin-top:14px"><div><span>Base</span><strong>${tondo(d.base)}</strong></div><div><span>Imponibile</span><strong>${tondo(d.forfait)}</strong></div><div><span>Da versare</span><strong>${tondo(daVersare)}</strong></div></div>
-    <div class="metricLine" style="margin-top:8px">${d.parts.map(p=>esc(p[0])+' '+fmtEUR(p[1])).join(' <span class="dot">·</span> ')}</div>
+    <div class="kpiGrid four" style="margin-top:14px"><div><span>Imponibile</span><strong>${tondo(d.forfait)}</strong></div><div><span>Tasse ${t.Y}</span><strong>${tondo(t.tasse)}</strong></div><div><span>Acconti ${t.Y+1}</span><strong>${tondo(t.acconti)}</strong></div><div><span>Da versare</span><strong>${tondo(daVersare)}</strong></div></div>
+    <div class="metricLine" style="margin-top:8px">${d.parts.filter(p=>!/^INPS versato/.test(p[0])).map(p=>esc(p[0])+' '+fmtEUR(p[1])).join(' <span class="dot">·</span> ')}${d.parts.length>1&&mode!=='simulato'?' <span class="dot">·</span> base '+fmtEUR(d.base):''} <span class="dot">·</span> imponibile ${pct(d.coeff)} ${fmtEUR(d.forfait)}</div>
+    <div class="small" style="margin-top:6px">Tasse ${t.Y}: INPS ${pct(d.gsRate)} sull'imponibile = ${fmtEUR(d.inps)} <span class="dot">·</span> imposta ${pct(d.taxRate)} su ${fmtEUR(t.baseImposta)}${d.paidContrib>0.005?' (imponibile − INPS versato nel '+t.Y+' '+fmtEUR(d.paidContrib)+')':''} = ${fmtEUR(d.imposta)}.${t.acconti>0.005?' Gli acconti '+(t.Y+1)+' sono un anticipo sulle tasse '+(t.Y+1)+': si scalano dal saldo dell\'anno dopo.':''}<br>Da versare: ${conto.join(' ')}.</div>
     ${prossima?`<div class="metricLine" style="margin-top:10px"><span class="tag orange">Prossima</span> ${dataEstesa(prossima.date)} <span class="dot">·</span> ${giorniA(prossima.date,oggi)} <span class="dot">·</span> <b>${fmtEUR(r.items.filter(i=>i.date===prossima.date&&!scadenzaPagata(i)).reduce((s,i)=>s+i.amount,0))}</b></div>`:''}
     ${pagate.length?`<div class="metricLine" style="margin-top:6px"><span class="tag verde">Già pagate</span> ${pagate.length===1?'1 voce':pagate.length+' voci'} <span class="dot">·</span> ${fmtEUR(somPagate)}</div>`:''}
-    ${(()=>{const b=r.items.filter(i=>i.kind==='bollo');if(!b.length)return '';
+    ${(()=>{const b=r.items.filter(i=>i.kind==='bollo');if(!b.length||mode==='simulato')return '';
       const versato=versatoBollo(year);const dovuto=b.reduce((s,i)=>s+i.amount,0);
       const resta=Math.max(0,dovuto-versato);
       return `<div class="calc" style="margin-top:12px">
@@ -7486,6 +7564,9 @@ Object.assign(window,{
   taxDueFor,
   taxScheduleItems,
   accantonaAnno,
+  riepilogoTasse,
+  bolliDaEmettere,
+  bolloAnnoSimulato,
   cambiaRicaviSimulati,
   leggiFatturaXML,confrontaFattura,clientePerPiva,giorniConsuntivati,
   fatturaCarica,fatturaFileScelto,registraFattura,scaricaFatturaConservata,apriChiudiFattura,

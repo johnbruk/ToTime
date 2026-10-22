@@ -199,7 +199,7 @@ const pg3=await apri(1280);
 const errs3=[];pg3.on('pageerror',e=>errs3.push(e.message));
 await cambia(pg3,'Linea del tempo');
 const prima=await scheda(pg3);
-const daVersarePrima=await pg3.evaluate(()=>document.querySelectorAll('#app .card .kpiGrid strong')[2].textContent.trim());
+const daVersarePrima=await pg3.evaluate(()=>document.querySelectorAll('#app .card .kpiGrid strong')[3].textContent.trim());
 await apriTappa(pg3,0);
 const vociPrima=await pg3.evaluate(()=>[...document.querySelectorAll('#app .card .tappaVoci li')]
   .map(x=>({testo:x.textContent.replace(/\s+/g,' ').trim(),pagata:x.classList.contains('vocePagata')})));
@@ -225,7 +225,7 @@ ok(reg.length===1&&/scadenza \d{2}\/\d{2}\/\d{4}/.test(reg[0].note||''),
    'con scritto di che scadenza si tratta',reg[0]&&reg[0].note);
 
 // e smette di pesare sui conti
-const daVersareDopo=await pg3.evaluate(()=>document.querySelectorAll('#app .card .kpiGrid strong')[2].textContent.trim());
+const daVersareDopo=await pg3.evaluate(()=>document.querySelectorAll('#app .card .kpiGrid strong')[3].textContent.trim());
 const num=t=>Number(String(t).replace(/[^0-9,]/g,'').replace(',','.'));
 ok(num(daVersareDopo)<num(daVersarePrima),'«da versare» scende di quello che hai pagato',
    daVersarePrima+' → '+daVersareDopo);
@@ -299,7 +299,7 @@ await pg3.waitForTimeout(1200);
 ok((await pg3.evaluate(()=>(window.__stores.tax_payments||[]).length))===0,
    'e si può tornare indietro: il versamento viene tolto',
    String(await pg3.evaluate(()=>(window.__stores.tax_payments||[]).length)));
-const tornato=await pg3.evaluate(()=>document.querySelectorAll('#app .card .kpiGrid strong')[2].textContent.trim());
+const tornato=await pg3.evaluate(()=>document.querySelectorAll('#app .card .kpiGrid strong')[3].textContent.trim());
 ok(tornato===daVersarePrima,'e «da versare» torna com\'era',daVersarePrima+' → '+tornato);
 
 console.log('\n=== L. Il tipo «Bollo» c\'è anche a mano ===');

@@ -85,7 +85,8 @@ console.log('\n=== E. Il simulatore dell\'anno dopo ===');
 await carica([scheda(3,20800,'collected','2026-04-10')]);
 let sim=await pg.evaluate(()=>{const b=window.taxScheduleItems(2026,'previsione');const s=window.taxScheduleItems(2026,'simulato');return {b:b.items,s}});
 const sommaB=(k,ref)=>sim.b.filter(i=>i.kind===k&&i.ref===ref).reduce((t,i)=>t+i.amount,0);
-ok(sim.s.items.every(i=>i.date.startsWith('2028-')),'Le scadenze simulate sono tutte nel 2028');
+ok(sim.s.items.filter(i=>i.kind!=='bollo').every(i=>i.date.startsWith('2028-')),'Le scadenze simulate sono tutte nel 2028, a parte il bollo dell\'anno');
+ok(sim.s.items.filter(i=>i.kind==='bollo').every(i=>Number(i.ref)===2027),'Il bollo stimato è quello del 2027');
 ok(vicino(sim.s.due.paidContrib,sommaB('inps',2026)+sommaB('inps',2027)),'Si deduce l\'INPS che si versa nel 2027',sim.s.due.paidContrib);
 const v=sim.s.due.base;
 ok(vicino(sim.s.due.imposta,Math.max(0,v*0.67-sim.s.due.paidContrib)*0.05),'Imposta 2027 al netto dei contributi',sim.s.due.imposta);
@@ -111,13 +112,30 @@ ok(!sim.simulato.scelto,'Svuotando il campo torna la proposta dell\'app');
 console.log('\n=== F. Quanto accantonare al mese, da gennaio a dicembre ===');
 await carica([scheda(3,20800,'collected','2026-04-10')]);
 const acc=await pg.evaluate(()=>['cassa','previsione','simulato'].map(m=>{const r=window.taxScheduleItems(2026,m);return {m,a:window.accantonaAnno(2026,m,r),tot:r.total,bo:window.bolloCalc?null:null}}));
-acc.slice(0,2).forEach(x=>ok(vicino(x.a.totale,x.tot)&&vicino(x.a.mese,x.tot/12),'Prospetto '+x.m+': tutto il prospetto diviso 12',x.a.mese));
+acc.forEach(x=>ok(vicino(x.a.totale,x.tot)&&vicino(x.a.mese,x.tot/12),'Prospetto '+x.m+': tutto il prospetto diviso 12',x.a.mese));
 acc.forEach(x=>ok(vicino(x.a.giugno+x.a.novembre+x.a.bollo,x.a.totale),'Prospetto '+x.m+': giugno + novembre + bollo fanno il totale'));
 ok(acc[0].a.anno===2026&&acc[2].a.anno===2027,'Il simulatore accantona nel 2027');
 await pg.evaluate(()=>window.go('tasseFuture'));await pg.waitForTimeout(500);
 const blocchi=await pg.evaluate(()=>[...document.querySelectorAll('#app .mediaTasse')].map(x=>x.innerText.replace(/\s+/g,' ')));
 ok(blocchi.length===3&&blocchi.every(t=>/al mese/i.test(t)&&/da gennaio a dicembre 20\d\d/.test(t)),'Un riquadro per prospetto',blocchi.length);
 ok(await pg.evaluate(()=>document.querySelectorAll('#app .salvadanaio').length)===3,'E niente secondo riquadro che confonde');
+
+console.log('\n=== G. Tasse dell\'anno e acconti separati: il conto torna ===');
+// «Se le tasse si calcolano sull'imponibile, o e' sbagliato l'imponibile
+// o sono sbagliate le tasse.» Da versare sommava tasse, acconti e bollo
+// senza dirlo. Ora le tasse sono il 31,07% dell'imponibile, a parte.
+await carica([scheda(3,21096.40,'collected','2026-06-18')]);
+const rt=await pg.evaluate(()=>['cassa','previsione','simulato'].map(m=>{const r=window.taxScheduleItems(2026,m);return {m,t:window.riepilogoTasse(2026,m,r),d:r.due,tot:r.total}}));
+const A=rt[0];
+ok(vicino(A.t.tasse,A.d.forfait*(0.2607+0.05)),'Prospetto A: tasse 2026 = 31,07% dell\'imponibile',A.t.tasse);
+ok(vicino(A.t.acconti,A.d.inps*0.8+A.d.imposta),'Acconti 2027: 80% INPS + 100% imposta',A.t.acconti);
+rt.forEach(x=>ok(vicino(x.t.tasse-x.t.giaVersati+x.t.acconti+x.t.bollo-x.t.pagato,x.t.daVersare),'Prospetto '+x.m+': tasse − già versati + acconti + bollo − pagato = Da versare',x.t.daVersare));
+const S2=rt[2];
+ok(vicino(S2.t.giaVersati,S2.d.accontiInpsN+S2.d.accontiImpostaN)||S2.t.giaVersati<S2.d.accontiInpsN+S2.d.accontiImpostaN,'Simulatore: toglie gli acconti 2027 già versati',S2.t.giaVersati);
+await pg.evaluate(()=>window.go('tasseFuture'));await pg.waitForTimeout(500);
+const tg=await pg.evaluate(()=>document.getElementById('app').innerText);
+ok(/TASSE 2026/i.test(tg)&&/ACCONTI 2027/i.test(tg)&&/TASSE 2027/i.test(tg)&&/ACCONTI 2028/i.test(tg),'Le caselle Tasse e Acconti si vedono nei tre prospetti');
+ok(/Da versare: tasse 2026/.test(tg),'La riga del conto c\'è');
 
 ok(!errs.length,'Nessun errore in pagina',errs.join(' | '));
 await b.close();srv.close();
