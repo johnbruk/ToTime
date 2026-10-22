@@ -250,7 +250,10 @@ console.log('\n=== LA SOGLIA SI MISURA SUGLI IMPORTI ESENTI, RIVALSA COMPRESA ==
      total_amount:70,invoice_total_amount:72.80,stamp_duty_amount:0}];},{a:ANNO});
   await sotto.evaluate(()=>window.reload());await sotto.waitForTimeout(600);
   await sotto.evaluate(()=>window.go('tasseFuture'));await sotto.waitForTimeout(800);
-  const t2=await testo(sotto);
+  // Il prospetto A, quello delle sole fatture emesse: il B e il
+  // simulatore contano anche le fatture ancora da emettere per il
+  // lavoro del mese, e quelle il bollo lo avranno.
+  const t2=await sotto.evaluate(()=>document.querySelector('#app .card').innerText);
   ok(!/Imposta di bollo/.test(t2),'mentre 72,80 € restano sotto soglia, e non è dovuto',
      (t2.match(/Imposta di bollo[^·]{0,50}/)||[''])[0]||'nessuna scadenza');
   await sotto.close();
