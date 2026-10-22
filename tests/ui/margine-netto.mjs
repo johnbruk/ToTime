@@ -211,7 +211,7 @@ console.log('\n=== LA RIVALSA È QUELLA SALVATA SULLA SCHEDA DEL MESE ===');
 //            (ago. fattura) + 800 (ago. K2) + 2.300 (ott.) = 8.420
 //            rimborsi 200 + 100 = 300 · rivalsa 184 + 36,80 + 32 + 96 = 348,80
 //            totale 9.068,80 (il bollo addebitato non c'e')
-//   costi    cancelleria 50 + 30 = 80 · prima delle tasse 8.988,80
+//   costi    spese a carico (cancelleria) 50 + 30 = 80 · prima delle tasse 8.988,80
 //   tasse    reddito 78% = 7.073,664 · INPS 1.844,10 · imposta 353,68
 //   utile    6.791,01
 //   a fine anno + 460 di pianificato a ottobre, con la sua rivalsa
@@ -238,7 +238,8 @@ console.log('\n=== BILANCIO: UN CONTO ECONOMICO CHE ARRIVA ALL’UTILE ===');
   ok(vicino(voce(x,/^Rimborsi spese in fattura/).v,300),'rimborsi in fattura 300, fra i ricavi: sono compensi',voce(x,/^Rimborsi/).v);
   ok(vicino(voce(x,/^Rivalsa INPS/).v,348.8),'rivalsa 348,80: quella delle fatture più il 4% del da fatturare',voce(x,/^Rivalsa/).v);
   ok(vicino(voce(x,/^Totale ricavi/).v,9068.8),'totale ricavi 9.068,80, senza il bollo addebitato',voce(x,/^Totale ricavi/).v);
-  ok(vicino(voce(x,/^Cancelleria/).v,-80)||vicino(voce(x,/^Cancelleria/).v.replace('−',''),80),'fra i costi la cancelleria, 80',voce(x,/^Cancelleria/).v);
+  ok(vicino(voce(x,/^Spese a tuo carico/).v.replace('−',''),80),'fra i costi le spese a tuo carico in una riga: 80',voce(x,/^Spese a tuo carico/).v);
+  ok(/Cancelleria 80,00 €/.test(x.t)&&x.righe.filter(r=>/^Cancelleria/.test(r.t||'')).length===0,'la voce principale si legge nella descrizione, non in una riga a sé');
   ok(!x.righe.some(r=>/Spese anticipate|bollo addebitata|Marca da bollo pagata/i.test(r.t||'')),'niente righe di bollo che si annullano né rimborsi fra i costi');
   ok(vicino(voce(x,/^Risultato prima/).v,8988.8),'risultato prima delle tasse 8.988,80',voce(x,/^Risultato prima/).v);
   ok(vicino(voce(x,/^Contributi INPS/).v.replace('−',''),1844.10),'INPS 1.844,10',voce(x,/^Contributi INPS/).v);

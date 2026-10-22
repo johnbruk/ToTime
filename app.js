@@ -4885,7 +4885,12 @@ function balance(){
   const perdita=oggi.utile<-0.005;
   // In cima all'euro, come nelle Tasse future: sul telefono i centesimi tagliavano le cifre.
   const tondo=n=>eurMigliaia(Math.round(Number(n)||0)).replace(/,00(?=\u00a0€)/,'');
-  const voci=oggi.voci.map(v=>riga(esc(v.name),'',v.amount,(fine.voci.find(x=>x.name===v.name)||{amount:0}).amount,true)).join('');
+  // Le spese in una riga sola: il dettaglio per voce sta in Spese. Nella
+  // descrizione le tre voci piu' grandi, che dicono dove vanno i soldi.
+  const spese=oggi.voci.reduce((t,v)=>t+v.amount,0);
+  const prime=oggi.voci.slice(0,3).map(v=>esc(v.name)+' '+fmtEUR(v.amount));
+  const altre=oggi.voci.slice(3).reduce((t,v)=>t+v.amount,0);
+  const voci=spese>0.005?riga('Spese a tuo carico',prime.join(' · ')+(altre>0.005?' · altre '+fmtEUR(altre):''),spese,spese,true):'';
   const ce=`<table class="ceTab"><thead><tr><th></th><th>Ad oggi</th>${due?'<th>A fine anno</th>':''}</tr></thead><tbody>
     ${sez('Ricavi')}
     ${riga('Compensi','il lavoro fatto'+(due?'; a fine anno anche il pianificato':''),oggi.compensi,fine.compensi)}
