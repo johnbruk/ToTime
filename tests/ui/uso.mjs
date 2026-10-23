@@ -435,19 +435,22 @@ await pg7.evaluate(()=>{
   sel.value='cena'; sel.dispatchEvent(new Event('change',{bubbles:true}));
   const a=document.querySelector('#app [name=amount]');
   a.value='45'; a.dispatchEvent(new Event('input',{bubbles:true}));
+  const radio=(n,v)=>{const r=document.querySelector(`#app [name=${n}][value=${v}]`);r.checked=true;r.dispatchEvent(new Event('change',{bubbles:true}))};
+  radio('reimbursement_type','invoice');
+  radio('document_type','mia');
   const m=document.querySelector('#app [name=payment_method]');
   m.value='contanti'; m.dispatchEvent(new Event('change',{bubbles:true}));
 });
 await pg7.waitForTimeout(400);
-ok(await siLegge(pg7,'non tracciabile'),'e pagando in contanti lo dice: non tracciabile');
-ok(await siLegge(pg7,'concorrere al reddito'),'spiegando cosa comporta');
-ok(await siLegge(pg7,'estero'),'e ricorda l\'eccezione delle spese estere');
+ok(await siLegge(pg7,'da sistemare'),'e pagando in contanti lo dice: da sistemare');
+ok(await siLegge(pg7,'altrimenti è tassata'),'spiegando cosa comporta');
+ok(await siLegge(pg7,'in Italia'),'e ricorda che la regola vale per le spese in Italia');
 await pg7.evaluate(()=>document.querySelector('#app form.form').requestSubmit());
 await pg7.waitForTimeout(900);
 await tocca(pg7,'☰',{dove:'body'});
 await tocca(pg7,'Spese',{dove:'body'});
 await pg7.waitForTimeout(400);
-ok(await siLegge(pg7,'non tracciabile'),'e nell\'elenco la spesa resta segnalata, non si perde');
+ok(await siLegge(pg7,'da sistemare'),'e nell\'elenco la spesa resta segnalata, non si perde');
 
 console.log('\n=== Percorso: «porto le spese in fattura» ===');
 // Dalla Dashboard alla descrizione da copiare su Fiscozen: deve essere
@@ -496,16 +499,10 @@ await tocca(pg9,'Tassazione',{dove:'body'});
 ok(await tocca(pg9,'Configurazione fiscale',{dove:'body'}),'dal menu si arriva alla Configurazione fiscale');
 await pg9.waitForTimeout(400);
 ok(await siLegge(pg9,'Rimborsi spese e reddito'),'e c\'è il blocco sui rimborsi');
-ok(await siLegge(pg9,'Li conto come compensi'),'con le due strade a schermo');
-ok(await siLegge(pg9,'regola 2025'),'e l\'altra');
-ok(await siLegge(pg9,'commercialista'),'e l\'app dice che la scelta è mia, da fare col commercialista');
-// Quale è attiva: deve essere la prudente, che è quella di sempre
-const attiva=await pg9.evaluate(()=>{
-  const b=[...document.querySelectorAll('#app .themeChoice button.active')]
-    .map(x=>x.querySelector('b')?.textContent.trim());
-  return b.join(' | ');
-});
-ok(/compensi/i.test(attiva),'ed è attiva quella prudente, non quella nuova',attiva);
+ok(await siLegge(pg9,'Fattura intestata a te'),'con le spese non tassate spiegate a schermo');
+ok(await siLegge(pg9,'Fattura intestata al cliente'),'anche quella intestata al cliente');
+ok(await siLegge(pg9,'Rimborso spese analitico'),'con il nome della voce su Fiscozen');
+ok(await siLegge(pg9,'Rimborso km e forfettari'),'e i km restano tassati');
 
 console.log('\n=== Percorso: «fotografo la ricevuta» ===');
 // Dalla Dashboard: si registra una spesa, si riapre, e si allega la
@@ -531,7 +528,7 @@ for(let i=0;i<36;i++){
   await pgRic.waitForTimeout(120);
 }
 await pgRic.waitForTimeout(400);
-ok(await siLegge(pgRic,'senza ricevuta'),'l\'app fa notare che a quella spesa manca la ricevuta');
+ok(await siLegge(pgRic,'da sistemare'),'l\'app fa notare che a quella spesa manca qualcosa');
 ok(await tocca(pgRic,'Cena'),'e si apre la spesa toccandola');
 await pgRic.waitForTimeout(400);
 ok(await siLegge(pgRic,'Allega la foto della ricevuta'),'dentro c\'è il modo di allegarla');
@@ -543,10 +540,12 @@ ok(allegata===1,'il file si carica',String(allegata));
 ok(String((await pgRic.evaluate(()=>(window.__storage||[])[0]?.path))||'').startsWith('u1/'),
    'nella cartella dell\'utente, che è quella su cui le policy decidono',
    String(await pgRic.evaluate(()=>(window.__storage||[])[0]?.path)));
+await pgRic.evaluate(()=>{const r=document.querySelector('#app [name=document_type][value=mia]');r.checked=true;r.dispatchEvent(new Event('change',{bubbles:true}));document.querySelector('#app form.form').requestSubmit()});
+await pgRic.waitForTimeout(900);
 await tocca(pgRic,'☰',{dove:'body'});
 await tocca(pgRic,'Spese',{dove:'body'});
 await pgRic.waitForTimeout(400);
-ok(!(await siLegge(pgRic,'senza ricevuta')),'e la segnalazione sparisce dall\'elenco');
+ok(!(await siLegge(pgRic,'da sistemare')),'detto a chi è intestata la fattura, la segnalazione sparisce dall\'elenco');
 
 ok(errs.length===0&&errs2.length===0&&errs3.length===0&&errs4.length===0&&errs5.length===0&&errs6.length===0&&errs7.length===0&&errs8.length===0&&errs9.length===0&&errsRic.length===0,'nessun errore JS lungo i percorsi',
    errs.concat(errs2,errs3,errs4,errs5,errs6,errs7,errs8,errs9,errsRic).slice(0,2).join(' | ')||'nessuno');

@@ -1094,3 +1094,9 @@ table.griglia.numeriRiga td.riga .n{font-variant-numeric:tabular-nums}
 .kpiGrid.four span,.kpiGrid.four small{font-size:var(--t-xs)}
 .kpiGrid.four strong{font-size:var(--t-lg)}
 @media(max-width:560px){.kpiGrid.four{grid-template-columns:1fr 1fr;row-gap:14px}.kpiGrid.four>div:nth-child(2n){border-right:0}}
+/* Le due domande del modulo spesa: pulsanti a segmenti, uno scelto */
+.sceltaSeg{display:flex;flex-wrap:wrap;gap:4px;background:var(--surface);border:1px solid var(--line);padding:4px}
+.field .sceltaSeg label{flex:1 1 0;min-width:104px;margin:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:10px 8px;font-size:14px;font-weight:750;color:var(--muted);cursor:pointer;position:relative}
+.sceltaSeg input{position:absolute;opacity:0;pointer-events:none;width:1px;height:1px}
+.field .sceltaSeg label:has(input:checked){background:linear-gradient(135deg,#7C89A6,#62708F);color:#fff}
+.field .sceltaSeg label:has(input:focus-visible){outline:2px solid var(--primary);outline-offset:1px}

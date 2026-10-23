@@ -57,6 +57,9 @@ const testo=pg=>pg.evaluate(()=>document.getElementById('app').innerText.replace
 const campo=(pg,n)=>pg.evaluate(x=>{
   const el=document.querySelector(`#app [name="${x}"]`);
   if(!el)return null;
+  // Le domande a pulsanti sono radio: vale quello scelto.
+  if(el.type==='radio'){const c=document.querySelector(`#app [name="${x}"]:checked`);
+    return {val:c?c.value:'',readonly:false,hidden:!!el.closest('[hidden]'),tipo:'radio'};}
   return {val:el.value,readonly:!!el.readOnly,hidden:!!el.closest('[hidden]'),tipo:el.type||el.tagName.toLowerCase()};
 },n);
 const scrivi=async(pg,n,v)=>{

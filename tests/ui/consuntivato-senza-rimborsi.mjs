@@ -134,7 +134,7 @@ console.log('\n=== LA SPESA A MIO CARICO NON ENTRA NÉ NELL’UNO NÉ NELL’ALT
   await pg.close();
 }
 
-console.log('\n=== UN RIMBORSO IN FATTURA È UN COMPENSO: RESTA, MENO LE IMPOSTE ===');
+console.log('\n=== UN RIMBORSO SENZA FATTURA È UN COMPENSO: RESTA, MENO LE IMPOSTE ===');
 {
   // La regola e' dell'utente: «le spese a mio carico sono a mio carico,
   // quelle per cui chiedo rimborso tramite fattura no». Un rimborso in
@@ -162,7 +162,7 @@ console.log('\n=== UN RIMBORSO IN FATTURA È UN COMPENSO: RESTA, MENO LE IMPOSTE
        `${senza.ricavi} → ${con.ricavi}`);
     const guadagno=con.utileNetto-senza.utileNetto;
     const tasseInPiu=con.oneri-senza.oneri;
-    ok(tasseInPiu>0,'con la scelta prudente, quella di default, sui 250 si pagano le tasse',`imposte +${tasseInPiu.toFixed(2)}`);
+    ok(tasseInPiu>0,'senza dire a chi è intestata la fattura, sui 250 si pagano le tasse',`imposte +${tasseInPiu.toFixed(2)}`);
     ok(Math.abs(guadagno-(250-tasseInPiu))<0.005,
        'e l\u2019utile sale di 250 meno quelle imposte: il rimborso resta a te',
        `utile +${guadagno.toFixed(2)} \u00b7 250 \u2212 ${tasseInPiu.toFixed(2)}`);
@@ -174,33 +174,29 @@ console.log('\n=== UN RIMBORSO IN FATTURA È UN COMPENSO: RESTA, MENO LE IMPOSTE
   await pg.close();
 }
 
-console.log('\n=== CON LA REGOLA 2025 NON COSTA NEMMENO LE IMPOSTE ===');
+console.log('\n=== CON LA FATTURA INTESTATA A ME NON COSTA NEMMENO LE IMPOSTE ===');
 {
-  // L'altra meta' della correzione: la previsione deve seguire la stessa
-  // scelta fiscale del cruscotto imposte. Prima non la guardava, quindi
-  // l'app diceva due cose diverse sullo stesso anno.
-  //
-  // Serve un rimborso che regga davvero i requisiti: analitico (non
-  // chilometrico), con ricevuta, pagato in modo tracciabile, e di un
-  // mese gia' incassato.
+  // La previsione segue la stessa regola del cruscotto imposte: un
+  // rimborso analitico (fattura intestata a me, pagato con carta) non
+  // e' reddito. Dal 23/10/2026 non c'e' piu' una scelta da accendere.
   const pg=await apri();
   const r=await pg.evaluate(()=>{
     const S=window.__stores;
-    S.app_settings=[...(S.app_settings||[]).filter(x=>x.setting_key!=='rimborsi_fuori_reddito'),
-                    {id:'rfr',setting_key:'rimborsi_fuori_reddito',setting_value:'si'}];
     S.travel_expenses=[{id:'s1',expense_date:'2026-10-06',client_id:'k2',project_id:'omni',
       expense_category_id:'volo',work_city:'Catania',amount:250,reimbursement_type:'invoice',
-      payment_method:'carta',receipt_kept:true}];
+      payment_method:'carta',document_type:'mia'}];
     S.billing_headers=[{id:'b1',year:2026,month:10,client_id:'k2',status:'collected',
       total_amount:1250,invoice_total_amount:1250,collected_amount:1250}];
     return window.reload().then(()=>({f:window.forecastCalc(),sc:window.scomposizioneRimborsi(2026)}));
   });
   await pg.waitForTimeout(400);
   ok(Math.abs(r.sc.analitici-250)<0.005,
-     'i 250 reggono i requisiti: analitici, con ricevuta, tracciabili, incassati',String(r.sc.analitici));
+     'i 250 sono un rimborso analitico: fattura intestata a me, pagata con carta',String(r.sc.analitici));
   ok(Math.abs(r.f.fuoriReddito-250)<0.005,
      'e la previsione li toglie dalla base imponibile',String(r.f.fuoriReddito));
-  // Piu' la rivalsa INPS, che e' compenso e sta in fattura.
+  // Piu' la rivalsa INPS, che e' compenso e sta in fattura: sui 1.000
+  // di lavoro, non sui 250 di rimborso.
+  ok(Math.abs(r.f.rivalsa-40)<0.005,'la rivalsa è il 4% del lavoro, non del rimborso: 40',String(r.f.rivalsa));
   ok(Math.abs(r.f.baseImponibile-(r.f.ricavi+r.f.rivalsa-250))<0.005,
      'la base imponibile e’ i ricavi, più la rivalsa, meno i 250',`${r.f.ricavi} + ${r.f.rivalsa} − 250 = ${r.f.baseImponibile}`);
   // fuori reddito sono soldi anticipati e ripresi: una partita di giro,
@@ -294,13 +290,12 @@ console.log('\n=== E IL GRAFICO DEL MESE DICE LO STESSO NUMERO DEL RIEPILOGO ===
 console.log('\n=== LA REGOLA 2025 NON VALE PER IL 2024 ===');
 {
   // La norma parte dal 1 gennaio 2025. Senza guardia sull'anno,
-  // attivando la scelta si toglievano dall'imponibile anche i rimborsi
+  // si toglievano dall'imponibile anche i rimborsi
   // del 2024 — un anno in cui erano compenso e basta — e le imposte di
   // quell'anno si sarebbero stimate per difetto.
   const pg=await apri();
   const r=await pg.evaluate(()=>{
     const S=window.__stores;
-    S.app_settings=[{id:'rfr',setting_key:'rimborsi_fuori_reddito',setting_value:'si'}];
     S.timesheet_entries=[];
     S.monthly_compensations=[
       {id:'m24',year:2024,month:10,client_id:'k2',amount:1000},
@@ -309,10 +304,10 @@ console.log('\n=== LA REGOLA 2025 NON VALE PER IL 2024 ===');
     S.travel_expenses=[
       {id:'r24',expense_date:'2024-10-06',client_id:'k2',project_id:'omni',
        expense_category_id:'volo',work_city:'Catania',amount:250,
-       reimbursement_type:'invoice',payment_method:'carta',receipt_kept:true},
+       reimbursement_type:'invoice',payment_method:'carta',document_type:'mia'},
       {id:'r25',expense_date:'2025-10-06',client_id:'k2',project_id:'omni',
        expense_category_id:'volo',work_city:'Catania',amount:250,
-       reimbursement_type:'invoice',payment_method:'carta',receipt_kept:true}];
+       reimbursement_type:'invoice',payment_method:'carta',document_type:'mia'}];
     S.billing_headers=[
       {id:'b24',year:2024,month:10,client_id:'k2',status:'collected',
        total_amount:1250,invoice_total_amount:1250,collected_amount:1250},
