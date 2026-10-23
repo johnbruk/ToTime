@@ -100,7 +100,7 @@ console.log('\n=== LA RIGA NON È PIÙ «DA SISTEMARE» ===');
 {
   const pg=await apri();
   await allaSpesa(pg);
-  // prima: carta ma senza ricevuta -> segnalata
+  // prima: carta ma senza dire a chi e' intestata la fattura -> segnalata
   await pg.evaluate(()=>window.go('expenses'));
   await pg.waitForTimeout(350);
   await pg.evaluate(()=>{for(let i=0;i<48;i++){
@@ -108,14 +108,22 @@ console.log('\n=== LA RIGA NON È PIÙ «DA SISTEMARE» ===');
     window.changeMonth(-1)}});
   await pg.waitForTimeout(450);
   const prima=await pg.evaluate(()=>document.querySelectorAll('#app .tagManca').length);
-  ok(prima===1,'senza ricevuta la spesa è segnalata',String(prima));
+  ok(prima===1,'senza il documento la spesa è segnalata',String(prima));
   await allaSpesa(pg);
   await pg.setInputFiles('#app input[type=file][name=receipt_file]',FOTO);
   await pg.waitForTimeout(1200);
   await pg.evaluate(()=>window.go('expenses'));
   await pg.waitForTimeout(500);
+  // La foto archivia il documento, ma non dice a chi e' intestato: e'
+  // quella risposta che decide se il rimborso e' tassato.
   const dopo=await pg.evaluate(()=>document.querySelectorAll('#app .tagManca').length);
-  ok(dopo===0,'con la ricevuta caricata la segnalazione sparisce',String(dopo));
+  ok(dopo===1,'la sola foto non basta: la segnalazione resta finché non si dice a chi è intestata',String(dopo));
+  await pg.evaluate(()=>{window.__stores.travel_expenses.find(x=>x.id==='sp1').document_type='mia';return window.reload()});
+  await pg.waitForTimeout(600);
+  await pg.evaluate(()=>window.go('expenses'));
+  await pg.waitForTimeout(400);
+  const poi=await pg.evaluate(()=>document.querySelectorAll('#app .tagManca').length);
+  ok(poi===0,'detto «intestata a me», la segnalazione sparisce',String(poi));
   await pg.close();
 }
 
@@ -190,8 +198,8 @@ console.log('\n=== CARICARE NON DEVE PORTARE VIA QUELLO CHE HAI SCRITTO ===');
   // ...e la ricevuta risulta comunque allegata
   ok((await testo(pg)).toLowerCase().includes('ricevuta allegata'),
      'e la ricevuta risulta allegata senza ridisegnare il modulo');
-  ok((await pg.evaluate(()=>document.querySelector('#app [name=receipt_kept]')?.checked))===true,
-     'con la spunta messa da s\u00e9');
+  ok((await pg.evaluate(()=>window.__stores.travel_expenses.find(x=>x.id==='sp1').receipt_kept))===true,
+     'e segnata come conservata da s\u00e9');
   await pg.close();
 }
 
@@ -221,7 +229,7 @@ console.log('\n=== TOGLIENDO IL FILE CADE ANCHE LA SPUNTA ===');
     window.changeMonth(-1)}});
   await pg.waitForTimeout(450);
   const segnalate=await pg.evaluate(()=>document.querySelectorAll('#app .tagManca').length);
-  ok(segnalate===1,'e l\u2019elenco torna a segnalarla come «senza ricevuta»',String(segnalate));
+  ok(segnalate===1,'e l\u2019elenco continua a segnalarla come da sistemare',String(segnalate));
   await pg.close();
 }
 

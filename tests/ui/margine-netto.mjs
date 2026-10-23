@@ -9,10 +9,9 @@
 //
 // E la regola dei rimborsi, detta dall'utente: «le spese a mio carico
 // sono a mio carico, quelle per cui chiedo rimborso tramite fattura
-// no» — sono compensi, ci si pagano le tasse e restano. Il Bilancio li
-// toglieva come costo, come una partita di giro: l'utile risultava più
-// basso del vero di tutti i rimborsi. Restano partita di giro solo i
-// rimborsi fuori reddito, se si è scelta la regola 2025.
+// no». Quelli tassati (km, spese senza fattura) sono compensi: ci si
+// pagano le tasse e restano. Quelli non tassati (fattura intestata a me
+// o al cliente) sono una partita di giro: né ricavo né costo.
 //
 // I numeri si fanno a mano: coefficiente 78%, INPS 26,07% sul reddito
 // forfettario, imposta 5% sul reddito meno i contributi VERSATI nell'anno
@@ -236,7 +235,7 @@ console.log('\n=== BILANCIO: UN CONTO ECONOMICO CHE ARRIVA ALL’UTILE ===');
   const x=await leggiBilancio(pg);
   ok(pg.errs.length===0,'nessun errore JS',pg.errs.slice(0,2).join(' | ')||'nessuno');
   ok(vicino(voce(x,/^Compensi/).v,8420),'compensi 8.420: dove c’è la fattura valgono i suoi numeri',voce(x,/^Compensi/).v);
-  ok(vicino(voce(x,/^Rimborsi spese in fattura/).v,300),'rimborsi in fattura 300, fra i ricavi: sono compensi',voce(x,/^Rimborsi/).v);
+  ok(vicino(voce(x,/^Rimborsi tassati/).v,300),'rimborsi tassati 300 (km e treno senza fattura), fra i ricavi: sono compensi',voce(x,/^Rimborsi/).v);
   ok(vicino(voce(x,/^Rivalsa INPS/).v,348.8),'rivalsa 348,80: quella delle fatture più il 4% del da fatturare',voce(x,/^Rivalsa/).v);
   ok(vicino(voce(x,/^Totale ricavi/).v,9068.8),'totale ricavi 9.068,80, senza il bollo addebitato',voce(x,/^Totale ricavi/).v);
   ok(vicino(voce(x,/^Spese a tuo carico/).v.replace('−',''),80),'fra i costi le spese a tuo carico in una riga: 80',voce(x,/^Spese a tuo carico/).v);
@@ -268,19 +267,18 @@ console.log('\n=== BILANCIO: UN CONTO ECONOMICO CHE ARRIVA ALL’UTILE ===');
   ok(Math.abs(eur(voce(pc,/^Utile netto/).v)-eur(voce(pa,/^Utile netto/).v)-atteso)<0.015,'un rimborso in fattura di 250 € alza l’utile: resta a te, tolte le tasse',`+${(eur(voce(pc,/^Utile netto/).v)-eur(voce(pa,/^Utile netto/).v)).toFixed(2)} atteso ${atteso.toFixed(2)}`);
 }
 
-console.log('\n=== CON LA REGOLA 2025 IL RIMBORSO FUORI REDDITO RESTA FUORI ===');
+console.log('\n=== CON LA FATTURA INTESTATA A ME IL RIMBORSO RESTA FUORI ===');
 {
-  // treno di settembre pagato con carta e con la ricevuta: regge i
-  // requisiti, e con la scelta attiva esce dal reddito. Non e' un
-  // ricavo ne' un costo: l'utile e' quello di chi non l'avesse avuto.
+  // treno di settembre pagato con carta, fattura intestata a me: e' un
+  // rimborso analitico e non e' reddito. Non e' un ricavo ne' un costo:
+  // l'utile e' quello di chi non l'avesse avuto.
   const base=SEMI+`
-    S.app_settings.push({id:'f',setting_key:'rimborsi_fuori_reddito',setting_value:'si'});
     const h=S.billing_headers.find(x=>x.id==='h9');h.status='collected';h.collected_amount=4786;h.collection_date='2026-10-05';
-    const t=S.travel_expenses.find(x=>x.id==='r2');t.payment_method='carta';t.receipt_kept=true;`;
+    const t=S.travel_expenses.find(x=>x.id==='r2');t.payment_method='carta';t.document_type='mia';`;
   const c=await bilancio(base),pc=await leggiBilancio(c);await c.close();
-  const r=voce(pc,/^Rimborsi spese in fattura/);
+  const r=voce(pc,/^Rimborsi tassati/);
   ok(vicino(r.v,100),'fra i ricavi restano solo i 100 di km',r.v);
-  ok(/esclusi 200,00 € fuori reddito/.test(pc.t),'e la riga dice che 200 sono esclusi, partita di giro');
+  ok(/Rimborsi spese non tassati: 200,00 €/.test(pc.t)&&/partita di giro/.test(pc.t),'e sotto il conto si legge che 200 non sono tassati, partita di giro');
   ok(vicino(voce(pc,/^Totale ricavi/).v,8868.8),'totale ricavi 8.868,80: 200 in meno',voce(pc,/^Totale ricavi/).v);
 }
 

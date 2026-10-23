@@ -136,6 +136,22 @@ timesheet, eliminali, e rigenera l'incarico dopo la migrazione.
 
 La verifica deve dire: `colonna tm_batch_id esiste`.
 
+## 7. `migrations/2026-10-23_rimborsi-non-tassati.sql`
+
+Aggiunge alle spese `document_type` (a chi è intestata la fattura) e
+alle voci `invoiceable` (la voce si può fatturare?). Taxi, metro/ATM,
+pedaggi e rimborso km partono su «basta la ricevuta», le altre su «serve
+la fattura». Le spese a piè di lista diventano rimborsi in fattura.
+
+Serve per: i rimborsi non tassati (analitici ed ex art. 15), che escono
+da ricavi, tasse e limite degli 85.000 € e non portano la rivalsa.
+
+Senza di lei: la domanda «a chi è intestata la fattura?» non si salva,
+e l'app lo dice. Ogni rimborso resta tassato, come prima.
+
+La verifica deve dire: `colonne aggiunte 2 su 2` · `spese a piè di lista
+rimaste 0` · `importi cambiati 0`.
+
 ---
 
 ## Dopo
