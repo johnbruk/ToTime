@@ -152,6 +152,18 @@ e l'app lo dice. Ogni rimborso resta tassato, come prima.
 La verifica deve dire: `colonne aggiunte 2 su 2` · `spese a piè di lista
 rimaste 0` · `importi cambiati 0`.
 
+## 8. `migrations/2026-10-23_spese-estero.sql`
+
+Aggiunge alle spese `expense_country` (Italia, Svizzera, altro estero).
+Serve perché carta o bonifico sono obbligatori solo per vitto, alloggio
+e taxi pagati in Italia: all'estero il rimborso resta non tassato anche
+in contanti. Vuota, il paese lo dice la trasferta.
+
+Senza di lei: la domanda «dove l'hai spesa?» non si salva, e l'app lo
+dice. Vale il paese della trasferta, come prima.
+
+La verifica deve dire: `1 su 1`.
+
 ---
 
 ## Dopo

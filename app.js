@@ -330,6 +330,7 @@ const MIGRAZIONE_DI={
   receipt_kept:'2026-10-06_tracciabilita.sql',
   receipt_path:'2026-10-06_ricevute-storage.sql',
   document_type:'2026-10-23_rimborsi-non-tassati.sql',
+  expense_country:'2026-10-23_spese-estero.sql',
   invoiceable:'2026-10-23_rimborsi-non-tassati.sql',
   tm_batch_id:'2026-10-13_incarichi-continuativi.sql'
 };
@@ -340,7 +341,7 @@ const NOME_COLONNA={
   vat_number:'la partita IVA del cliente',
   stamp_duty_mode:'chi paga la marca da bollo',
   receipt_path:'la ricevuta allegata',wbs_id:'la commessa',
-  document_type:'a chi è intestata la fattura',invoiceable:'se la voce si può fatturare',
+  document_type:'a chi è intestata la fattura',expense_country:'dove l’hai spesa',invoiceable:'se la voce si può fatturare',
   is_mileage:'il rimborso chilometrico',
   activity_id:'il tipo di attività',project_id:'il progetto',client_id:'il cliente',
   tm_batch_id:'il codice dell\u2019incarico continuativo'
@@ -1668,8 +1669,8 @@ function currentTaxSetting(year=currentYear()){return data.taxSettings.find(t=>N
 // risponde a «a chi e' intestata la fattura?» e il tipo lo deduce l'app.
 //   analitico   fattura intestata a me, riaddebitata voce per voce.
 //               Se la voce non si puo' fatturare (taxi, metro,
-//               pedaggio) basta la ricevuta. Pagata con carta o
-//               bonifico, salvo all'estero.
+//               pedaggio) basta la ricevuta. Vitto, alloggio e taxi
+//               in Italia vanno pagati con carta o bonifico.
 //   art15       fattura intestata al cliente, pagata da me:
 //               anticipazione per suo conto (art. 15 DPR 633/72),
 //               come il bollo.
@@ -1687,6 +1688,12 @@ const VOCE_FISCOZEN={analitico:'Rimborso spese analitico',art15:'Rimborso ex art
 // Senza la colonna, ogni voce si considera fatturabile: chiedere la
 // fattura dove basterebbe lo scontrino e' l'errore prudente.
 function voceFatturabile(cat){return !cat||cat.invoiceable!==false}
+// Carta o bonifico servono solo per vitto, alloggio e taxi/NCC, e solo
+// in Italia (art. 54 c. 2-bis TUIR, L. 207/2024 e D.L. 84/2025). Treni,
+// aerei, bus e metro, pedaggi, parcheggi e carburante no. La voce lo
+// dice dal nome.
+const VOCI_TRACCIATE=/hotel|albergo|alloggi|pernott|b&b|airbnb|pranz|cena|cene|colazion|ristor|vitto|pasto|pasti|\bbar\b|taxi|\bncc\b/i;
+function voceDaTracciare(cat){return !cat||VOCI_TRACCIATE.test(String(cat.name||''))}
 function naturaRimborsoDa(tipo,cat,documento,metodo,estero,anno){
   if(tipo!=='invoice')return tipo||'own';
   if(Number(anno)&&Number(anno)<2025)return 'generico';  // prima la regola non c'era
@@ -1694,7 +1701,7 @@ function naturaRimborsoDa(tipo,cat,documento,metodo,estero,anno){
   if(documento==='cliente')return 'art15';
   const documentoValido=documento==='mia'||(documento==='scontrino'&&!voceFatturabile(cat));
   if(!documentoValido)return 'da_sistemare';
-  if(!estero&&!metodoTracciabile(metodo))return 'da_sistemare';
+  if(!estero&&voceDaTracciare(cat)&&!metodoTracciabile(metodo))return 'da_sistemare';
   return 'analitico';
 }
 function naturaRimborso(e){
@@ -1705,9 +1712,9 @@ function naturaRimborso(e){
 // Perche' un rimborso non regge, in una frase che dice cosa fare.
 function motivoDaSistemareDa(cat,documento,metodo,estero){
   if(!documento)return 'Dimmi a chi è intestata la fattura.';
-  if(documento==='scontrino')return 'Per «'+((cat&&cat.name)||'questa voce')+'» serve la fattura intestata a te: chiedila al fornitore, altrimenti è tassata.';
-  if(!estero&&!metodo)return 'Dimmi come l’hai pagata: serve carta o bonifico.';
-  return 'Pagata in contanti: in Italia serve carta o bonifico, altrimenti è tassata.';
+  if(documento==='scontrino'&&voceFatturabile(cat))return 'Per «'+((cat&&cat.name)||'questa voce')+'» serve la fattura intestata a te: chiedila al fornitore, altrimenti è tassata.';
+  if(!estero&&!metodo)return 'Dimmi come l’hai pagata: per vitto, alloggio e taxi serve carta o bonifico.';
+  return 'Pagata in contanti: in Italia vitto, alloggio e taxi vanno pagati con carta o bonifico, altrimenti è tassata.';
 }
 function motivoDaSistemare(e){
   return motivoDaSistemareDa(expenseCategoryById(e&&e.expense_category_id),e&&e.document_type||'',e&&e.payment_method||'',spesaAllEstero(e));
@@ -1716,12 +1723,21 @@ function rimborsoNonTassato(e){return NATURE_NON_TASSATE.includes(naturaRimborso
 // Il nome che resta per chi lo chiamava cosi'.
 function spesaFuoriReddito(e){return rimborsoNonTassato(e)}
 // L'obbligo di tracciabilita' riguarda le spese sostenute IN ITALIA:
-// quelle all'estero ne sono fuori. Il paese lo dice la trasferta.
-function spesaAllEstero(e){
-  const t=e&&e.trip_id?tripById(e.trip_id):null;
-  const paese=norm(t&&t.destination_country).toUpperCase();
-  return !!paese&&paese!=='IT'&&paese!=='ITA';
+// quelle all'estero ne sono fuori (D.L. 84/2025). Il paese lo dice la
+// spesa; se non lo dice, la trasferta; se manca anche quella, Italia.
+const PAESI_SPESA=[['IT','Italia'],['CH','Svizzera'],['ESTERO','Altro estero']];
+function paeseDaCodice(c){
+  c=norm(c).toUpperCase();
+  if(!c||c==='IT'||c==='ITA')return 'IT';
+  if(c==='CH'||c==='CHE')return 'CH';
+  return 'ESTERO';
 }
+function paeseSpesa(e){
+  if(e&&e.expense_country)return paeseDaCodice(e.expense_country);
+  const t=e&&e.trip_id?tripById(e.trip_id):null;
+  return paeseDaCodice(t&&t.destination_country);
+}
+function spesaAllEstero(e){return paeseSpesa(e)!=='IT'}
 // I rimborsi non tassati di una scheda di fatturazione: le spese del
 // cliente in quel mese. Mai piu' della base della fattura.
 function nonTassatiDellaScheda(h){
@@ -2819,6 +2835,10 @@ function trasfertaCambiata(form){
     if(ok)form.project_id.value=t.project_id;
   }
   if(t.destination_city&&form.work_city&&!norm(form.work_city.value))form.work_city.value=t.destination_city;
+  if(t.destination_country){
+    const r=form.querySelector(`[name=expense_country][value=${paeseDaCodice(t.destination_country)}]`);
+    if(r){r.checked=true;aggiornaTracciabilita(form)}
+  }
   if(form.expense_date&&t.start_date){
     const d=form.expense_date.value;
     if(!d||d<tripDa(t)||d>tripA(t))form.expense_date.value=tripDa(t);
@@ -3036,16 +3056,16 @@ function metodoOptions(selected=''){
 // e' pagata in contanti. Oggi e' tassata.
 function spesaDaSistemare(e){return !!e&&expIsInvoice(e)&&naturaRimborso(e)==='da_sistemare'}
 // Il semaforo sotto le domande: una riga sola, che dice cosa succede.
-function notaTracciabilita(clientId,categoryId,tipo,metodo,documento,tripId){
+function notaTracciabilita(clientId,categoryId,tipo,metodo,documento,paese){
   if(!tipo||tipo!=='invoice')return '';
   const cat=expenseCategoryById(categoryId);
-  const estero=spesaAllEstero({trip_id:tripId||null});
+  const estero=paeseDaCodice(paese)!=='IT';
   const n=naturaRimborsoDa('invoice',cat,documento||'',metodo||'',estero);
   if(n==='generico')
     return `<div class="notaTraccia"><span class="tag gray">tassata</span><div class="desc">Il rimborso chilometrico è forfettario: è un compenso, si tassa e conta per gli 85.000 €. Su Fiscozen: ${VOCE_FISCOZEN.generico}.</div></div>`;
   if(n==='da_sistemare')
     return `<div class="notaTraccia"><span class="tag orange">da sistemare</span><div class="desc">${esc(motivoDaSistemareDa(cat,documento||'',metodo||'',estero))}</div></div>`;
-  return `<div class="notaTraccia"><span class="tag verde">non tassata</span><div class="desc">Non conta per gli 85.000 € e non porta la rivalsa del 4%. Su Fiscozen: <b>${VOCE_FISCOZEN[n]}</b>.</div></div>`;
+  return `<div class="notaTraccia"><span class="tag verde">non tassata</span><div class="desc">Non conta per gli 85.000 € e non porta la rivalsa del 4%.${estero?' All’estero vanno bene anche i contanti.':''} Su Fiscozen: <b>${VOCE_FISCOZEN[n]}</b>.</div></div>`;
 }
 function aggiornaTracciabilita(form){
   if(!form)return;
@@ -3053,6 +3073,8 @@ function aggiornaTracciabilita(form){
   const cat=expenseCategoryById(form.expense_category_id?form.expense_category_id.value:'');
   const doc=document.getElementById('documentoField');
   if(doc)doc.hidden=!(tipo==='invoice'&&!eVoceChilometrica(cat));
+  const dove=document.getElementById('paeseField');
+  if(dove)dove.hidden=!(tipo==='invoice'&&!eVoceChilometrica(cat));
   const box=document.getElementById('tracciaBox');
   if(!box)return;
   box.innerHTML=notaTracciabilita(
@@ -3061,7 +3083,7 @@ function aggiornaTracciabilita(form){
     tipo,
     form.payment_method?form.payment_method.value:'',
     form.document_type?form.document_type.value:'',
-    form.trip_id?form.trip_id.value:'');
+    form.expense_country?form.expense_country.value:'IT');
 }
 function policyRiga(clientId,categoryId){
   const c=clientById(clientId);
@@ -3275,8 +3297,9 @@ function campiComeLaTratto(v={},nuova=false){
     `<div class="field"><label>Chi la paga alla fine?</label>${sceltaSegmenti('reimbursement_type',[['own','Io'],['invoice','La riaddebito al cliente']],tipo,'aggiornaTracciabilita(this.form)')}</div>`
     +`<div id="policyBox">${avvisoPolicy(v.client_id||activeClients()[0]?.id||'',v.expense_category_id||'',Number(v.amount||0),Number(v.quantity||0))}</div>`
     +`<div class="field" id="documentoField"${tipo==='invoice'&&!eVoceChilometrica(expenseCategoryById(v.expense_category_id))?'':' hidden'}><label>A chi è intestata la fattura?</label>${sceltaSegmenti('document_type',DOCUMENTI_SPESA,v.document_type||'','aggiornaTracciabilita(this.form)')}</div>`
+    +`<div class="field" id="paeseField"${tipo==='invoice'&&!eVoceChilometrica(expenseCategoryById(v.expense_category_id))?'':' hidden'}><label>Dove l’hai spesa?</label>${sceltaSegmenti('expense_country',PAESI_SPESA,paeseSpesa(v),'aggiornaTracciabilita(this.form)')}</div>`
     +`<div class="field"><label>Come l\u2019hai pagata</label><select name="payment_method" onchange="aggiornaTracciabilita(this.form)">${metodoOptions(metodo)}</select></div>`
-    +`<div id="tracciaBox">${notaTracciabilita(v.client_id||activeClients()[0]?.id||'',v.expense_category_id||'',tipo,metodo,v.document_type||'',v.trip_id||'')}</div>`
+    +`<div id="tracciaBox">${notaTracciabilita(v.client_id||activeClients()[0]?.id||'',v.expense_category_id||'',tipo,metodo,v.document_type||'',paeseSpesa(v))}</div>`
     +`<div id="ricevutaCampo">${campoRicevuta(v,nuova)}</div>`
     +`<div class="field"><label>Note</label><textarea name="notes">${esc(v.notes||'')}</textarea></div>`);
 }
@@ -3466,7 +3489,7 @@ function aggiornaCalcoloEAvviso(form,proposeType,proposeRate){
 // Salvare puo' scrivere DUE righe: fino al limite col tipo della
 // policy, l'eccedenza a mio carico. Lo si fa solo se chi inserisce lo
 // ha spuntato: l'avviso informa, non decide.
-const DROP_SPESA=['reimbursement_type','trip_id','wbs_id','vehicle_id','from_place','to_place','round_trip','payment_method','receipt_kept','document_type'];
+const DROP_SPESA=['reimbursement_type','trip_id','wbs_id','vehicle_id','from_place','to_place','round_trip','payment_method','receipt_kept','document_type','expense_country'];
 function payloadSpesa(f){
   const rt=f.reimbursement_type||'own';
   const lin=f.wbs_id?wbsLineage(f.wbs_id):null;
@@ -3481,7 +3504,9 @@ function payloadSpesa(f){
     round_trip:f.round_trip==='on'||f.round_trip===true,
     payment_method:f.payment_method||null,
     // a chi e' intestata la fattura: serve solo se la si riaddebita
-    document_type:rt==='invoice'?(f.document_type||null):null};
+    document_type:rt==='invoice'?(f.document_type||null):null,
+    // dove e' stata spesa: all'estero carta o bonifico non servono
+    expense_country:rt==='invoice'?(f.expense_country||null):null};
 }
 async function saveExpense(ev){
   ev.preventDefault();
@@ -3495,7 +3520,7 @@ async function saveExpense(ev){
       description:payload.description||voce,
       notes:[payload.notes,'Entro il limite '+clientName(f.client_id)+' di '+fmtEUR(sf.massimo)].filter(Boolean).join(' \u00b7 ')};
     const fuori={...payload,amount:Number(sf.eccedenza.toFixed(2)),
-      reimbursement_type:'own',reimbursable:false,document_type:null,
+      reimbursement_type:'own',reimbursable:false,document_type:null,expense_country:null,
       quantity:null,unit_rate:null,
       description:(payload.description||voce)+' \u2014 eccedenza oltre il limite',
       notes:[payload.notes,'Eccedenza oltre il limite '+clientName(f.client_id)+' di '+fmtEUR(sf.massimo)].filter(Boolean).join(' \u00b7 ')};
@@ -3524,7 +3549,7 @@ async function saveExpenseEdit(ev){
   const avviso=avvisoScartate(res);
   if(avviso)setMsg(avviso,12000);
 }
-async function duplicateExpense(idv){const e=data.travelExpenses.find(x=>x.id===idv);if(!e)return;const copy={expense_date:new Date().toISOString().slice(0,10),client_id:e.client_id,project_id:e.project_id,wbs_id:e.wbs_id||null,trip_id:e.trip_id||null,vehicle_id:e.vehicle_id||null,payment_method:e.payment_method||null,document_type:e.document_type||null,receipt_kept:!!e.receipt_kept,receipt_path:null,from_place:e.from_place||null,to_place:e.to_place||null,round_trip:!!e.round_trip,expense_category_id:e.expense_category_id,work_site:e.work_site,work_city:e.work_city,description:e.description,quantity:e.quantity,unit_rate:e.unit_rate,amount:e.amount,reimbursement_type:expType(e),reimbursable:expType(e)!=='own',notes:e.notes};const {error}=await insertResilient('travel_expenses',copy,DROP_SPESA);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='expenses';render()}
+async function duplicateExpense(idv){const e=data.travelExpenses.find(x=>x.id===idv);if(!e)return;const copy={expense_date:new Date().toISOString().slice(0,10),client_id:e.client_id,project_id:e.project_id,wbs_id:e.wbs_id||null,trip_id:e.trip_id||null,vehicle_id:e.vehicle_id||null,payment_method:e.payment_method||null,document_type:e.document_type||null,expense_country:e.expense_country||null,receipt_kept:!!e.receipt_kept,receipt_path:null,from_place:e.from_place||null,to_place:e.to_place||null,round_trip:!!e.round_trip,expense_category_id:e.expense_category_id,work_site:e.work_site,work_city:e.work_city,description:e.description,quantity:e.quantity,unit_rate:e.unit_rate,amount:e.amount,reimbursement_type:expType(e),reimbursable:expType(e)!=='own',notes:e.notes};const {error}=await insertResilient('travel_expenses',copy,DROP_SPESA);if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='expenses';render()}
 // Eliminare la spesa deve portarsi via anche la ricevuta: un
 // documento fiscale irraggiungibile nel bucket non e' «cancellato», e
 // chi elimina la spesa si aspetta che se ne vada tutto.
@@ -4395,7 +4420,7 @@ function projectionCalc(year=currentYear()){
 function projectionCard(){const p=projectionCalc(currentYear());return `<div class="card projectionCard"><b>Proiezione anno ${p.year}</b><div class="desc">Basata sull’imponibile mensile reale — lavoro, rimborsi che restano tassabili e rivalsa INPS: media ponderata 50% ultimi 3 mesi chiusi · 30% media anno · 20% mese corrente (dato reale, senza estrapolazioni). Imponibile reale ad oggi: ${fmtEUR(p.actualToDate)}. Data avvio attività: ${dateIT(p.startDate)}.${p.excludedMonths.length?' Mesi esclusi: '+p.excludedMonths.join(', ')+'.':''}</div><div class="kpiGrid three" style="margin-top:14px"><div><span>Prudente</span><strong>${fmtEUR(p.prudent)}</strong><small>fattore ${fmtNum(p.prudentFactor*100,0)}%</small></div><div><span>Base</span><strong>${fmtEUR(p.base)}</strong><small>media ponderata</small></div><div><span>Ottimistico</span><strong>${fmtEUR(p.optimistic)}</strong><small>fattore ${fmtNum(p.optimisticFactor*100,0)}%</small></div></div><div class="riskBox"><div><span>Rischio limite forfettario</span><strong class="risk risk-${p.risk.toLowerCase()}">${p.risk}</strong></div><div class="desc">Utilizzo previsto ${fmtNum(p.ratio*100,1)}% su limite ${fmtEUR(p.limit)}, calcolato sui consuntivi reali inseriti.</div></div></div>`}
 
 function tax(){const year=currentYear();const c=annualTaxCalc(year);const ts=c.settings;return appShell(`<div class="screenTitle">Fiscalità</div><p class="sub">Stima regime forfettario per l'anno ${year}. Valori configurabili, da verificare con il consulente fiscale.</p>${projectionCard()}${previsioneTasseCard()}<div class="card"><b>Stima tasse forfettario</b><div class="list" style="box-shadow:none;margin-bottom:0"><div class="row"><div></div><div><div class="title">ATECO ${esc(ts.ateco_code||'')}</div><div class="desc">${esc(ts.ateco_description||'')}</div></div><div></div></div><div class="row"><div></div><div><div class="title">Incassato anno</div><div class="desc">entrato sul conto nel ${year}, per data d'incasso${c.bolloEscluso>0?' · senza '+fmtEUR(c.bolloEscluso)+' di bollo':''}${c.rimborsiFuori>0?' · senza '+fmtEUR(c.rimborsiFuori)+' di rimborsi fuori reddito':''}</div></div><div class="value">${fmtEUR(c.revenue)}</div></div><div class="row"><div></div><div><div class="title">Reddito forfettario lordo</div><div class="desc">coefficiente ${fmtNum(ts.profitability_coefficient,2)}%</div></div><div class="value">${fmtEUR(c.forfaitIncome)}</div></div><div class="row" onclick="go('taxPayments')"><div></div><div><div class="title">Contributi INPS versati nel ${year}</div><div class="desc">si deducono nell'anno in cui li versi · tocca per gestirli</div></div><div class="value">${fmtEUR(c.paidContrib)}</div></div><div class="row"><div></div><div><div class="title">Imponibile fiscale stimato</div><div class="desc">reddito forfettario - contributi</div></div><div class="value">${fmtEUR(c.taxable)}</div></div><div class="row"><div></div><div><div class="title">Imposta sostitutiva stimata</div><div class="desc">aliquota ${fmtNum(ts.substitute_tax_rate,2)}%</div></div><div class="value">${fmtEUR(c.substituteTax)}</div></div><div class="row"><div></div><div><div class="title">Netto stimato dopo imposta</div><div class="desc">incassato − contributi INPS che matura − imposta</div></div><div class="value">${fmtEUR(c.net)}</div></div></div></div><button class="secondary" style="margin-bottom:12px" onclick="go('tasseFuture')">◷ Tasse future · scadenze previste ›</button><div class="grid"><button class="secondary" onclick="go('taxPayments')">Pagamenti fiscali (INPS) ›</button><button class="secondary" onclick="go('taxSettings')">Configurazione fiscale ›</button></div>`)}
-function taxSettings(){const year=currentYear();const c=annualTaxCalc(year);const ts=c.settings;return appShell(`<div class="screenTitle">Configurazione fiscale</div><p class="sub">ATECO, regime, aliquote e parametri della stima. Il cruscotto imposte è nella voce Tassazione.</p><form class="form" onsubmit="saveTaxSettings(event)"><h2>ATECO, regime e tasse</h2><p class="sub">Determinano il calcolo delle tasse sul tuo codice ATECO.</p><div class="field"><label>Anno fiscale</label><input name="fiscal_year" type="number" value="${year}"></div><div class="field"><label>Regime fiscale</label><select name="regime"><option value="forfettario" ${ts.regime==='forfettario'?'selected':''}>Forfettario</option><option value="ordinario" ${ts.regime==='ordinario'?'selected':''}>Ordinario</option><option value="semplificato" ${ts.regime==='semplificato'?'selected':''}>Semplificato</option></select></div><div class="field"><label>Codice ATECO</label><input name="ateco_code" value="${esc(ts.ateco_code||'')}"></div><div class="field"><label>Descrizione ATECO</label><input name="ateco_description" value="${esc(ts.ateco_description||'')}"></div><div class="field"><label>Coefficiente redditività %</label><input name="profitability_coefficient" type="number" step="0.01" value="${Number(ts.profitability_coefficient||67)}"></div><div class="field"><label>Aliquota imposta sostitutiva %</label><input name="substitute_tax_rate" type="number" step="0.01" value="${Number(ts.substitute_tax_rate||5)}"></div><div class="field"><label>Limite ricavi annuo forfettario</label><input name="annual_revenue_limit" type="number" step="0.01" value="${Number(ts.annual_revenue_limit||85000)}"></div><div class="field"><label>Data avvio attività</label><input name="activity_start_date" type="date" value="${esc(ts.activity_start_date||DEFAULT_DEFAULT_ACTIVITY_START_DATE)}"></div><h2>Rimborsi spese e reddito</h2><p class="sub">I rimborsi spese documentati e riaddebitati voce per voce <b>non sono tassati</b>: niente imposta, niente INPS, niente rivalsa del 4%, e non contano per gli 85.000 €. Dal 2025 è la regola (D.Lgs. 192/2024), e un interpello dell’Agenzia delle Entrate l’ha riconosciuta anche ai forfettari.</p><div class="card"><div class="list" style="box-shadow:none;margin:0"><div class="row"><div><span class="tag verde">non tassata</span></div><div><div class="title">Fattura intestata a te</div><div class="desc">Hotel, volo, ristorante che riaddebiti al cliente. Pagata con carta o bonifico. Su Fiscozen: ${VOCE_FISCOZEN.analitico}.</div></div><div></div></div><div class="row"><div><span class="tag verde">non tassata</span></div><div><div class="title">Fattura intestata al cliente</div><div class="desc">L’hai solo pagata tu per suo conto. Su Fiscozen: ${VOCE_FISCOZEN.art15}.</div></div><div></div></div><div class="row"><div><span class="tag gray">tassata</span></div><div><div class="title">Rimborso km e forfettari</div><div class="desc">Sono compensi: contano per gli 85.000 € e portano la rivalsa.</div></div><div></div></div></div><div class="desc" style="margin-top:10px">Se la spesa si può fatturare serve la fattura: con il solo scontrino il rimborso è tassato.</div>${(()=>{const sc=scomposizioneRimborsi(year);if(!sc.totale)return '';return `<div class="metricLine" style="margin-top:14px">Rimborsi in fattura ${year}: <b>${fmtEUR(sc.totale)}</b></div><div class="desc" style="margin-top:6px"><b>${fmtEUR(sc.nonTassati)}</b> non tassati${sc.chilometrici?` · <b>${fmtEUR(sc.chilometrici)}</b> km, tassati`:''}${sc.daSistemare?` · <b>${fmtEUR(sc.daSistemare)}</b> da sistemare, oggi tassati (manca la fattura o sono in contanti)`:''}.</div>`})()}</div><h2>Rivalsa INPS e marca da bollo</h2><p class="sub">Voci aggiuntive da esporre in fattura oltre al compenso.</p><div class="field"><label>Gestione previdenziale</label><input name="inps_management" value="${esc(ts.inps_management||'gestione_separata')}"></div><div class="field"><label>Aliquota INPS Gestione Separata %</label><input name="inps_gs_rate" type="number" step="0.01" value="${Number(ts.inps_gs_rate??26.07)}"></div><div class="field"><label>Rivalsa INPS</label><select name="inps_recharge_enabled"><option value="true" ${ts.inps_recharge_enabled?'selected':''}>Sì</option><option value="false" ${!ts.inps_recharge_enabled?'selected':''}>No</option></select></div><div class="field"><label>Percentuale rivalsa INPS</label><input name="inps_recharge_rate" type="number" step="0.01" value="${Number(ts.inps_recharge_rate||4)}"></div><div class="field"><label>Marca da bollo</label><select name="stamp_duty_mode">${['','charged','mine','none'].map(k=>`<option value="${k}" ${bolloModo(ts)===(k||null)?'selected':''}>${k?BOLLO_MODI[k]:'— da scegliere —'}</option>`).join('')}</select>
+function taxSettings(){const year=currentYear();const c=annualTaxCalc(year);const ts=c.settings;return appShell(`<div class="screenTitle">Configurazione fiscale</div><p class="sub">ATECO, regime, aliquote e parametri della stima. Il cruscotto imposte è nella voce Tassazione.</p><form class="form" onsubmit="saveTaxSettings(event)"><h2>ATECO, regime e tasse</h2><p class="sub">Determinano il calcolo delle tasse sul tuo codice ATECO.</p><div class="field"><label>Anno fiscale</label><input name="fiscal_year" type="number" value="${year}"></div><div class="field"><label>Regime fiscale</label><select name="regime"><option value="forfettario" ${ts.regime==='forfettario'?'selected':''}>Forfettario</option><option value="ordinario" ${ts.regime==='ordinario'?'selected':''}>Ordinario</option><option value="semplificato" ${ts.regime==='semplificato'?'selected':''}>Semplificato</option></select></div><div class="field"><label>Codice ATECO</label><input name="ateco_code" value="${esc(ts.ateco_code||'')}"></div><div class="field"><label>Descrizione ATECO</label><input name="ateco_description" value="${esc(ts.ateco_description||'')}"></div><div class="field"><label>Coefficiente redditività %</label><input name="profitability_coefficient" type="number" step="0.01" value="${Number(ts.profitability_coefficient||67)}"></div><div class="field"><label>Aliquota imposta sostitutiva %</label><input name="substitute_tax_rate" type="number" step="0.01" value="${Number(ts.substitute_tax_rate||5)}"></div><div class="field"><label>Limite ricavi annuo forfettario</label><input name="annual_revenue_limit" type="number" step="0.01" value="${Number(ts.annual_revenue_limit||85000)}"></div><div class="field"><label>Data avvio attività</label><input name="activity_start_date" type="date" value="${esc(ts.activity_start_date||DEFAULT_DEFAULT_ACTIVITY_START_DATE)}"></div><h2>Rimborsi spese e reddito</h2><p class="sub">I rimborsi spese documentati e riaddebitati voce per voce <b>non sono tassati</b>: niente imposta, niente INPS, niente rivalsa del 4%, e non contano per gli 85.000 €. Dal 2025 è la regola (D.Lgs. 192/2024), e un interpello dell’Agenzia delle Entrate l’ha riconosciuta anche ai forfettari.</p><div class="card"><div class="list" style="box-shadow:none;margin:0"><div class="row"><div><span class="tag verde">non tassata</span></div><div><div class="title">Fattura intestata a te</div><div class="desc">Hotel, volo, ristorante che riaddebiti al cliente. In Italia vitto, alloggio e taxi vanno pagati con carta o bonifico; all’estero vanno bene anche i contanti. Treni, aerei, metro, pedaggi e parcheggi si possono pagare come vuoi. Su Fiscozen: ${VOCE_FISCOZEN.analitico}.</div></div><div></div></div><div class="row"><div><span class="tag verde">non tassata</span></div><div><div class="title">Fattura intestata al cliente</div><div class="desc">L’hai solo pagata tu per suo conto. Su Fiscozen: ${VOCE_FISCOZEN.art15}.</div></div><div></div></div><div class="row"><div><span class="tag gray">tassata</span></div><div><div class="title">Rimborso km e forfettari</div><div class="desc">Sono compensi: contano per gli 85.000 € e portano la rivalsa.</div></div><div></div></div></div><div class="desc" style="margin-top:10px">Se la spesa si può fatturare serve la fattura: con il solo scontrino il rimborso è tassato.</div>${(()=>{const sc=scomposizioneRimborsi(year);if(!sc.totale)return '';return `<div class="metricLine" style="margin-top:14px">Rimborsi in fattura ${year}: <b>${fmtEUR(sc.totale)}</b></div><div class="desc" style="margin-top:6px"><b>${fmtEUR(sc.nonTassati)}</b> non tassati${sc.chilometrici?` · <b>${fmtEUR(sc.chilometrici)}</b> km, tassati`:''}${sc.daSistemare?` · <b>${fmtEUR(sc.daSistemare)}</b> da sistemare, oggi tassati (manca la fattura o sono in contanti)`:''}.</div>`})()}</div><h2>Rivalsa INPS e marca da bollo</h2><p class="sub">Voci aggiuntive da esporre in fattura oltre al compenso.</p><div class="field"><label>Gestione previdenziale</label><input name="inps_management" value="${esc(ts.inps_management||'gestione_separata')}"></div><div class="field"><label>Aliquota INPS Gestione Separata %</label><input name="inps_gs_rate" type="number" step="0.01" value="${Number(ts.inps_gs_rate??26.07)}"></div><div class="field"><label>Rivalsa INPS</label><select name="inps_recharge_enabled"><option value="true" ${ts.inps_recharge_enabled?'selected':''}>Sì</option><option value="false" ${!ts.inps_recharge_enabled?'selected':''}>No</option></select></div><div class="field"><label>Percentuale rivalsa INPS</label><input name="inps_recharge_rate" type="number" step="0.01" value="${Number(ts.inps_recharge_rate||4)}"></div><div class="field"><label>Marca da bollo</label><select name="stamp_duty_mode">${['','charged','mine','none'].map(k=>`<option value="${k}" ${bolloModo(ts)===(k||null)?'selected':''}>${k?BOLLO_MODI[k]:'— da scegliere —'}</option>`).join('')}</select>
       <div class="small">Sopra ${fmtEUR(BOLLO_SOGLIA)} di importi esenti il bollo è <b>dovuto</b>: qui scegli <b>chi lo paga</b>. Addebitandolo al cliente si aggiunge alla fattura ed entra nel totale. Pagandolo tu non lo aggiungi fra le voci e non lo addebiti: il totale non lo comprende, e i ${fmtEUR(Number(ts.stamp_duty_amount??2)||2)} restano un tuo costo da versare all'Agenzia delle Entrate alle scadenze trimestrali — le trovi in Tasse future. La fattura elettronica lo dichiara comunque, come bollo virtuale: Fiscozen lo segna da sé nei dati del file, senza addebitarlo, e caricando l’XML l’app controlla che ci sia.</div></div><div class="field"><label>Importo marca da bollo</label><input name="stamp_duty_amount" type="number" step="0.01" value="${Number(ts.stamp_duty_amount||2)}"></div><details class="moreFields"><summary>Proiezione annua (avanzato)</summary><p class="sub">Parametri opzionali per affinare la stima "Prudente / Base / Ottimistico".</p><div class="field"><label>Includi mese corrente nella proiezione</label><select name="projection_include_current_month"><option value="true" ${ts.projection_include_current_month!==false?'selected':''}>Sì</option><option value="false" ${ts.projection_include_current_month===false?'selected':''}>No</option></select></div><div class="field"><label>Mesi esclusi dalla proiezione</label><input name="projection_excluded_months" placeholder="es. 1,8" value="${esc(parseExcludedMonths(ts.projection_excluded_months).join(','))}"></div><div class="field"><label>Fattore scenario prudente</label><input name="projection_prudent_factor" type="number" step="0.01" value="${Number(ts.projection_prudent_factor??0.85)}"></div><div class="field"><label>Fattore scenario ottimistico</label><input name="projection_optimistic_factor" type="number" step="0.01" value="${Number(ts.projection_optimistic_factor??1.10)}"></div><div class="field"><label>Soglia rischio basso %</label><input name="risk_low_threshold" type="number" step="0.01" value="${Number(ts.risk_low_threshold??70)}"></div><div class="field"><label>Soglia rischio medio %</label><input name="risk_medium_threshold" type="number" step="0.01" value="${Number(ts.risk_medium_threshold??90)}"></div><div class="field"><label>Soglia rischio alto %</label><input name="risk_high_threshold" type="number" step="0.01" value="${Number(ts.risk_high_threshold??100)}"></div></details><div class="field"><label>Note</label><textarea name="notes">${esc(ts.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva configurazione fiscale</button><button type="button" class="secondary" onclick="go('settings')">Indietro</button></div></form>`)}
 async function saveTaxSettings(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const year=Number(f.fiscal_year||currentYear());const payload={fiscal_year:year,regime:f.regime,ateco_code:norm(f.ateco_code)||null,ateco_description:norm(f.ateco_description)||null,profitability_coefficient:Number(f.profitability_coefficient||0),substitute_tax_rate:Number(f.substitute_tax_rate||0),inps_management:norm(f.inps_management)||null,inps_gs_rate:Number(f.inps_gs_rate||26.07),inps_recharge_enabled:f.inps_recharge_enabled==='true',inps_recharge_rate:Number(f.inps_recharge_rate||0),stamp_duty_mode:norm(f.stamp_duty_mode)||null,stamp_duty_enabled:f.stamp_duty_mode==='charged',stamp_duty_amount:Number(f.stamp_duty_amount||0),annual_revenue_limit:Number(f.annual_revenue_limit||0),activity_start_date:f.activity_start_date||null,projection_method:'weighted_average',projection_include_current_month:f.projection_include_current_month==='true',projection_excluded_months:parseExcludedMonths(f.projection_excluded_months),projection_prudent_factor:Number(f.projection_prudent_factor||0.85),projection_optimistic_factor:Number(f.projection_optimistic_factor||1.10),risk_low_threshold:Number(f.risk_low_threshold||70),risk_medium_threshold:Number(f.risk_medium_threshold||90),risk_high_threshold:Number(f.risk_high_threshold||100),notes:f.notes||null};const existing=data.taxSettings.find(t=>Number(t.fiscal_year)===year);let res;if(existing)res=await updateResilient('tax_settings',payload,existing.id);else res=await insertResilient('tax_settings',payload);if(res.error)return setMsg(motivoLeggibile(res.error),7000);await reload();state.view='tax';setMsg('Configurazione fiscale aggiornata.',4000)}
 
@@ -7797,6 +7822,7 @@ Object.assign(window,{
   aggiornaCalcoloEAvviso,
   aggiornaAvvisoPolicy,
   aggiornaTracciabilita,
+  paeseSpesa,
   setMsgLeggero,
   spesaAllEstero,
   avvisoScartate,

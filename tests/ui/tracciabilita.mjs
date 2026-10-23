@@ -54,6 +54,9 @@ const SEMI=`
   S.expense_categories=[
     {id:'cena',name:'Cena',active:true,reimbursable:true,calculation_type:'manual_amount',is_mileage:false},
     {id:'taxi',name:'Taxi',active:true,reimbursable:true,calculation_type:'manual_amount',is_mileage:false,invoiceable:false},
+    {id:'volo',name:'Volo',active:true,reimbursable:true,calculation_type:'manual_amount',is_mileage:false},
+    {id:'metro',name:'ATM',active:true,reimbursable:true,calculation_type:'manual_amount',is_mileage:false,invoiceable:false},
+    {id:'hotel',name:'Hotel',active:true,reimbursable:true,calculation_type:'manual_amount',is_mileage:false},
     {id:'km',name:'Rimborso KM',active:true,reimbursable:true,calculation_type:'quantity_rate',unit_label:'km',default_unit_rate:0.45,is_mileage:true}];
   S.travel_expenses=[];S.trips=[];S.vehicles=[];
 `;
@@ -147,6 +150,54 @@ console.log('\n=== DOVE BASTA LO SCONTRINO, E I KM ===');
   await scrivi(pg,'reimbursement_type','own');
   t=(await pg.evaluate(()=>document.getElementById('tracciaBox')?.innerText||'')).toLowerCase();
   ok(!t.trim(),'su una spesa a mio carico il semaforo non c’è',t);
+  await pg.close();
+}
+
+console.log('\n=== CARTA O BONIFICO: SOLO VITTO, ALLOGGIO E TAXI IN ITALIA ===');
+{
+  // Art. 54 c. 2-bis TUIR (L. 207/2024, D.L. 84/2025): l'obbligo vale
+  // per vitto, alloggio e taxi/NCC pagati in Italia, non per treni,
+  // aerei, metro, pedaggi. All'estero non vale per nessuna spesa.
+  const pg=await apri();
+  await alModulo(pg);
+  const nota=()=>pg.evaluate(()=>(document.getElementById('tracciaBox')?.innerText||'').replace(/\s+/g,' ').toLowerCase());
+  await scrivi(pg,'reimbursement_type','invoice');
+  ok((await campo(pg,'expense_country')).val==='IT','una spesa nuova parte da «Italia»',String((await campo(pg,'expense_country')).val));
+  await scrivi(pg,'expense_category_id','volo');
+  await scrivi(pg,'document_type','mia');
+  await scrivi(pg,'payment_method','contanti');
+  let t=await nota();
+  ok(/non tassata/.test(t),'volo in contanti con fattura a me: non tassata, l’aereo non ha obbligo',t);
+  await scrivi(pg,'expense_category_id','metro');
+  await scrivi(pg,'document_type','scontrino');
+  t=await nota();
+  ok(/non tassata/.test(t),'metro in contanti con lo scontrino: non tassata',t);
+  await scrivi(pg,'expense_category_id','taxi');
+  t=await nota();
+  ok(/da sistemare/.test(t)&&/vitto, alloggio e taxi/.test(t),'taxi in contanti in Italia: da sistemare, e dice perché',t);
+  await scrivi(pg,'expense_category_id','hotel');
+  await scrivi(pg,'document_type','mia');
+  t=await nota();
+  ok(/da sistemare/.test(t),'hotel in contanti in Italia: da sistemare',t);
+  await scrivi(pg,'expense_country','CH');
+  t=await nota();
+  ok(/non tassata/.test(t)&&/contanti/.test(t),'lo stesso hotel in Svizzera: non tassata, e dice che i contanti vanno bene',t);
+  await scrivi(pg,'amount','180');
+  await pg.evaluate(()=>document.querySelector('#app form.form').requestSubmit());
+  await pg.waitForTimeout(800);
+  const e=await pg.evaluate(()=>(window.__stores.travel_expenses||[]).slice(-1)[0]||null);
+  ok(e&&e.expense_country==='CH','il paese si salva',String(e&&e.expense_country));
+  ok(await pg.evaluate(()=>window.naturaRimborso(window.__stores.travel_expenses.slice(-1)[0])==='analitico'),'e l’app la conta come rimborso analitico');
+  await pg.evaluate(()=>window.editEntry(window.__stores.travel_expenses.slice(-1)[0].id,'expense'));
+  await pg.waitForTimeout(500);
+  ok((await campo(pg,'expense_country')).val==='CH','rileggendola c’è «Svizzera»',String((await campo(pg,'expense_country')).val));
+  // Senza paese sulla spesa vale quello della trasferta
+  const viaTrasferta=await pg.evaluate(()=>{
+    window.__stores.trips=[{id:'gin',client_id:'k2',destination_city:'Ginevra',destination_country:'CH',start_date:'2026-07-01',end_date:'2026-07-03'}];
+    return window.reload().then(()=>window.paeseSpesa({trip_id:'gin'}));
+  });
+  ok(viaTrasferta==='CH','una spesa della trasferta a Ginevra senza paese vale come Svizzera',String(viaTrasferta));
+  ok(await pg.evaluate(()=>window.paeseSpesa({})==='IT'),'senza paese né trasferta: Italia, la scelta prudente');
   await pg.close();
 }
 
