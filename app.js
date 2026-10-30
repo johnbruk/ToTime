@@ -2731,20 +2731,27 @@ function tmBatches(){const map={};(data.entries||[]).filter(isTM).forEach(e=>{co
 function tmManage(){const batches=tmBatches();return appShell(`<h1>Incarichi continuativi</h1><p class="sub">Un incarico genera in un colpo solo i consuntivi dei giorni lavorativi di un periodo. Da qui li crei, e puoi eliminare un intero periodo senza toccare i singoli giorni.</p>${batches.length?`<div class="list">${batches.map((b,i)=>`<div class="row"><div></div><div><div class="title">${esc(clientName(b.client_id))}${b.project_id?' / '+esc(projectName(b.project_id)):''}${b.planned?' <span class="tag blue">'+b.planned+' pianif.</span>':''}</div><div class="desc">${esc([nomeAttivita(b),b.desc].filter(Boolean).join(' · '))}</div><div class="desc">Dal ${fmtDMY(b.start)} al ${fmtDMY(b.end)} · ${b.days} giorni · ${fmtNum(b.hoursSum,1)} h totali · ${fmtNum(b.hours,2)} h/giorno</div><button class="secondary danger" style="margin-top:10px" onclick="deleteTMBatch(${i})">Elimina intero periodo</button></div><div class="value"></div></div>`).join('')}</div>`:emptyState('Nessun incarico continuativo generato.','+ Crea un incarico continuativo',"go('tmForm')")}<div class="actions"><button class="primary" onclick="go('tmForm')">+ Nuovo incarico continuativo</button><button type="button" class="secondary" onclick="go('timesheet')">Torna al timesheet</button></div>`);}
 async function deleteTMBatch(i){const b=tmBatches()[i];if(!b)return;if(!confirm('Eliminare l\'intero periodo Time & Material?\n'+b.days+' consuntivi dal '+fmtDMY(b.start)+' al '+fmtDMY(b.end)+'.'))return;const {error}=await sb.from('timesheet_entries').delete().in('id',b.ids);if(error)return setMsg(motivoLeggibile(error),7000);await reload();setMsg(b.days+' consuntivi Time & Material eliminati.',4000);state.view='tmManage';render();}
 /* ---------- Salvare e passare al giorno dopo ----------
-   Compilare una settimana significa ripetere lo stesso consuntivo su
-   cinque giorni. Senza questo si torna all'elenco, si cerca il giorno
-   dopo e si riscelgono cliente, progetto e commessa ogni volta. */
-function giornoSpostato(iso,passo){
-  const d=new Date(iso+'T00:00:00Z');
-  return new Date(d.getTime()+passo*86400000).toISOString().slice(0,10);
-}
+   Serve a ripassare i consuntivi gia' inseriti uno dopo l'altro: si
+   salva e si apre il giorno consuntivato successivo (o precedente),
+   saltando i giorni vuoti. Non crea mai consuntivi nuovi: prima si
+   apriva il modulo vuoto del giorno accanto e, salvando per arrivare
+   al giorno dopo, nascevano voci che nessuno voleva. */
 function salvaEVai(btn,passo){
   const f=btn.form;if(!f)return;
   state.dopoSalva=passo;
   if(typeof f.requestSubmit==='function')f.requestSubmit();else f.submit();
 }
-// Dopo il salvataggio: o si torna all'elenco, o si scivola al giorno
-// accanto portandosi dietro la riga appena compilata.
+// Il primo giorno con un consuntivo dopo (passo 1) o prima (passo -1)
+// di iso; null se in quella direzione non c'e' piu' niente.
+function giornoConsuntivatoAccanto(iso,passo){
+  let trovato=null;
+  (data.entries||[]).forEach(e=>{const d=String(e.entry_date||'').slice(0,10);
+    if(!d||(passo>0?d<=iso:d>=iso))return;
+    if(!trovato||(passo>0?d<trovato:d>trovato))trovato=d;});
+  return trovato;
+}
+// Dopo il salvataggio: o si torna all'elenco, o si apre il giorno
+// consuntivato accanto.
 async function dopoIlSalvataggio(f){
   const passo=state.dopoSalva;state.dopoSalva=null;
   // Il mese a schermo segue la riga appena scritta: salvando un 19
@@ -2752,23 +2759,22 @@ async function dopoIlSalvataggio(f){
   // salvataggio non fosse avvenuto.
   vaiAlMeseDi(f&&f.entry_date);
   if(!passo){state.view='timesheet';render();return}
-  const iso=giornoSpostato(f.entry_date,passo);
-  state.month=iso.slice(0,7);
-  // se in quel giorno c'e' gia' la stessa voce, la si apre invece di
-  // aggiungerne una seconda uguale
-  const esistente=(data.entries||[]).find(e=>e.entry_date===iso && (f.wbs_id
-    ? e.wbs_id===f.wbs_id
-    : e.client_id===f.client_id && String(e.project_id||'')===String(f.project_id||'')));
-  if(esistente){
-    navigateTo('dailyEdit',{edit:esistente.id});
-    setMsg('Salvato. '+fmtDMY(iso)+' era già consuntivato: eccolo.',4500);
+  const iso=giornoConsuntivatoAccanto(String(f.entry_date||''),passo);
+  if(!iso){
+    state.view='timesheet';render();
+    setMsg('Salvato. Non ci sono altri consuntivi '+(passo>0?'dopo il ':'prima del ')+fmtDMY(f.entry_date)+'.',5000);
     return;
   }
-  navigateTo('dailyForm',{editType:iso,prefill:{
-    client_id:f.client_id,wbs_id:f.wbs_id||'',project_id:f.project_id||'',
-    activity_id:f.activity_id||'',hours:f.hours,
-    work_site:f.work_site||'',work_city:f.work_city||'',description:f.description||''}});
-  setMsg('Salvato. Ora '+fmtDMY(iso)+'.',4000);
+  state.month=iso.slice(0,7);
+  // in quel giorno si apre, se c'e', la stessa voce appena salvata;
+  // altrimenti la prima del giorno
+  const delGiorno=(data.entries||[]).filter(e=>String(e.entry_date||'').slice(0,10)===iso);
+  const stessa=delGiorno.find(e=>f.wbs_id
+    ? e.wbs_id===f.wbs_id
+    : e.client_id===f.client_id && String(e.project_id||'')===String(f.project_id||''));
+  const voce=stessa||delGiorno[0];
+  navigateTo('dailyEdit',{edit:voce.id});
+  setMsg('Salvato. Ora '+fmtDMY(iso)+(delGiorno.length>1?' ('+delGiorno.length+' voci quel giorno)':'')+'.',4000);
 }
 function prefillDate(){const v=state.editType;return (typeof v==='string'&&v.length===10&&v.charAt(4)==='-')?v:new Date().toISOString().slice(0,10)}
 function dailyForm(){const clients=dailyClients();const pre=state.prefill||{};const selected=(pre.client_id&&clients.some(c=>c.id===pre.client_id))?pre.client_id:'';return appShell(`<h1>Consuntivo giornaliero</h1><p class="sub">Ore effettivamente lavorate, valorizzate secondo tariffa (tariffa oraria = tariffa giornaliera / 8h).</p>${clients.length?`<form class="form" onsubmit="saveDaily(event)"><div class="field"><label>Data</label><input name="entry_date" type="date" required value="${pre.dataVuota?'':prefillDate()}">${pre.dataVuota?'<div class="small">Copia di un consuntivo esistente: scegli la data.</div>':''}</div><div class="field"><label>Cliente</label><select name="client_id" onchange="refreshProjectsForForm(this.form)"><option value=""${selected?'':' selected'}>\u2014 scegli il cliente \u2014</option>${clients.map(c=>`<option value="${c.id}"${c.id===selected?' selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div id="hierBlock">${hierAvailable(selected)?hierFields(selected,pre.wbs_id||'')+'<input type="hidden" name="project_id" value="'+esc(pre.project_id||'')+'">':campiSenzaGerarchia(selected,pre.project_id||'',pre.activity_id||'')}</div><div class="field"><label>Sede</label><select name="work_site">${sediOptions(pre.work_site||SEDE_DEFAULT)}</select></div><div class="field"><label>Luogo/Città</label><input name="work_city" value="${esc(pre.work_city||'')}" placeholder="Es. Verona, Milano, Canicattì"></div><div class="field"><label>Descrizione</label><textarea name="description">${esc(pre.description||'')}</textarea></div><div class="field"><label>Ore consuntivate</label><input name="hours" type="number" step="0.25" value="${pre.hours!=null?esc(String(pre.hours)):'8'}"></div><div class="field"><label>Note</label><textarea name="notes" placeholder="Note interne opzionali"></textarea></div><div class="actions"><button class="primary" data-busy="Salvataggio…">Salva</button><button type="button" class="secondary" onclick="salvaEVai(this,1)">Salva e vai al giorno dopo ›</button><button type="button" class="secondary" onclick="go('home')">Annulla</button></div></form>
