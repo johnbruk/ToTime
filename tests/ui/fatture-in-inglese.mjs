@@ -113,6 +113,35 @@ console.log('\n=== LA LINGUA SI SCEGLIE NELLA SCHEDA CLIENTE ===');
   await pg.close();
 }
 
+console.log('\n=== IL SERVIZIO DEL CONTRATTO, IL CLIENTE FINALE E IL RIFERIMENTO ===');
+{
+  const pg=await apri('en');
+  await pg.evaluate(()=>window.editClient('ch'));
+  await pg.waitForTimeout(500);
+  const visibili=await pg.evaluate(()=>!document.getElementById('campiInglese').hidden);
+  ok(visibili,'con «English» si vedono i tre campi');
+  await pg.fill('input[name=invoice_service_en]','SAP and Omnichannel Project Manager');
+  await pg.fill('input[name=invoice_end_client]','Acme Group');
+  await pg.fill('input[name=invoice_reference]','SOA 123');
+  await pg.evaluate(()=>document.querySelector('#app form').requestSubmit());
+  await pg.waitForTimeout(900);
+  await apriFattura(pg);
+  const d=await descrizioni(pg);
+  const lav=d.find(x=>/Project Manager/.test(x))||'';
+  ok(lav==='SAP and Omnichannel Project Manager - '+MESE_EN+' - End client: Acme Group | Days: 9.50 | Ref. SOA 123',
+     'la riga usa le parole del contratto',lav||d.join(' | '));
+  ok(d.some(x=>/^Reimbursement of travel expenses · Accommodation/.test(x)),'le spese restano com’erano');
+  const f=await pg.evaluate(x=>window.leggiFatturaXML(x),
+    XML.replace('Consulenza - Marzo 2026 | Giorni: 5,5','SAP and Omnichannel Project Manager - March 2026 - End client: Acme Group | Days: 5.5 | Ref. SOA 123'));
+  ok(f.righe[1].mese==='2026-03'&&f.righe[1].giorni===5.5,'e la riga si rilegge',f.righe[1].mese+' · '+f.righe[1].giorni);
+  await pg.evaluate(()=>window.editClient('ch'));
+  await pg.waitForTimeout(500);
+  await pg.click('input[name=invoice_language][value=it]',{force:true});
+  const nascosti=await pg.evaluate(()=>document.getElementById('campiInglese').hidden);
+  ok(nascosti,'con «Italiano» i campi si nascondono');
+  await pg.close();
+}
+
 console.log('\n=== LA FATTURA IN INGLESE SI RILEGGE ===');
 {
   const pg=await apri('en');
