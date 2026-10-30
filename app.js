@@ -332,7 +332,11 @@ const MIGRAZIONE_DI={
   document_type:'2026-10-23_rimborsi-non-tassati.sql',
   expense_country:'2026-10-23_spese-estero.sql',
   invoiceable:'2026-10-23_rimborsi-non-tassati.sql',
-  tm_batch_id:'2026-10-13_incarichi-continuativi.sql'
+  tm_batch_id:'2026-10-13_incarichi-continuativi.sql',
+  invoice_language:'2026-10-30_fatture-in-inglese.sql',
+  invoice_subject:'2026-10-30_fatture-in-inglese.sql',
+  invoice_end_client:'2026-10-30_fatture-in-inglese.sql',
+  invoice_reference:'2026-10-30_fatture-in-inglese.sql'
 };
 const NOME_COLONNA={
   trip_id:'la trasferta',vehicle_id:'il veicolo',from_place:'la partenza',
@@ -344,7 +348,11 @@ const NOME_COLONNA={
   document_type:'a chi è intestata la fattura',expense_country:'dove l’hai spesa',invoiceable:'se la voce si può fatturare',
   is_mileage:'il rimborso chilometrico',
   activity_id:'il tipo di attività',project_id:'il progetto',client_id:'il cliente',
-  tm_batch_id:'il codice dell\u2019incarico continuativo'
+  tm_batch_id:'il codice dell\u2019incarico continuativo',
+  invoice_language:'la lingua delle fatture',
+  invoice_subject:'l’oggetto del contratto',
+  invoice_end_client:'il cliente finale',
+  invoice_reference:'il riferimento del contratto'
 };
 // Il messaggio da dire quando una scrittura ha dovuto lasciare fuori
 // dei campi: cosa non e' stato salvato, e quale migrazione lo sistema.
@@ -650,10 +658,13 @@ function meseDaDescrizione(d){
   const t=String(d||'');
   const mm=i=>String(i+1).padStart(2,'0');
   const nomi=[];
-  const re=new RegExp('\\b('+monthNames.join('|')+')\\b','gi');
+  // Anche in inglese, «March 2026», per le fatture ai clienti esteri.
+  // I nomi inglesi solo con la maiuscola: «may» minuscolo e' un verbo.
+  const re=new RegExp('\\b('+monthNames.concat(monthNamesEN).join('|')+')\\b','gi');
   let x;
   while((x=re.exec(t))){
-    const i=monthNames.findIndex(n=>n.toLowerCase()===x[1].toLowerCase());
+    let i=monthNames.findIndex(n=>n.toLowerCase()===x[1].toLowerCase());
+    if(i<0){i=monthNamesEN.indexOf(x[1]);if(i<0)continue;}
     const prima=t.slice(Math.max(0,x.index-6),x.index);
     const dopo=t.slice(x.index+x[1].length).match(/^\s*(20\d{2})\b/);
     nomi.push({i,anno:dopo?dopo[1]:null,conGiorno:/\b\d{1,2}\s*[°º]?\s+$/.test(prima)});
@@ -668,9 +679,9 @@ function meseDaDescrizione(d){
   if(nomi.length&&anno)return anno+'-'+mm(nomi[0].i);
   return null;
 }
-// E i giorni, quando ci sono: «| Giorni: 5,5».
+// E i giorni, quando ci sono: «| Giorni: 5,5», o «| Days: 5.5».
 function giorniDaDescrizione(d){
-  const m=String(d||'').match(/Giorni:\s*([0-9]+(?:[.,][0-9]+)?)/i);
+  const m=String(d||'').match(/(?:Giorni|Days):\s*([0-9]+(?:[.,][0-9]+)?)/i);
   return m?Number(m[1].replace(',','.')):null;
 }
 function leggiFatturaXML(testo){
@@ -1592,7 +1603,51 @@ function fatturaFileScelto(input){
   reader.onerror=()=>setMsgLeggero('Non si è potuto aprire il file.',7000);
   reader.readAsArrayBuffer(file);
 }
+// ─── Fatture in inglese ─────────────────────────────────────────────
+// Per un cliente estero la fattura si scrive in inglese: la lingua sta
+// nella scheda cliente (clients.invoice_language, 'it' o 'en'). Cambia
+// solo il testo da incollare su Fiscozen, non un importo.
+const monthNamesEN=['January','February','March','April','May','June','July','August','September','October','November','December'];
+function linguaFattura(clientId){return clientById(clientId)?.invoice_language==='en'?'en':'it'}
+function monthLabelEN(m){const [y,mo]=m.split('-').map(Number);return `${monthNamesEN[mo-1]} ${y}`}
+const fmtNumEN=(n,d=1)=>new Intl.NumberFormat('en-GB',{minimumFractionDigits:d,maximumFractionDigits:d}).format(Number(n||0));
+const fmtEUREN=n=>new Intl.NumberFormat('en-GB',{style:'currency',currency:'EUR'}).format(Number(n||0));
+function fmtDMYEN(s){const p=String(s||'').split('-');return p.length===3?p[2]+'/'+p[1]+'/'+p[0]:String(s||'')}
+// Le voci di spesa sono nomi scelti dall'utente: si traducono quelle
+// comuni, le altre restano come sono scritte.
+const VOCI_SPESA_EN=[[/^(vitto|pasti?|ristorante)$/i,'Meals'],[/^pranzo$/i,'Lunch'],[/^cena$/i,'Dinner'],[/^colazione$/i,'Breakfast'],
+  [/^(alloggio|hotel|albergo|pernottamento)$/i,'Accommodation'],[/^treno$/i,'Train'],[/^(aereo|volo|voli)$/i,'Flight'],
+  [/^taxi$/i,'Taxi'],[/^(taxi\s*\/\s*ncc|ncc)$/i,'Taxi / car service'],[/^parcheggio$/i,'Parking'],[/^pedagg(i|io)( autostradal[ei])?$/i,'Motorway tolls'],
+  [/^carburante$/i,'Fuel'],[/^(rimborso\s*km|rimborso chilometrico|chilometrica|km)$/i,'Mileage allowance'],
+  [/^(mezzi pubblici|trasporti|trasporto)$/i,'Public transport'],[/^noleggio auto$/i,'Car rental'],[/^(spesa|altro|altre spese)$/i,'Other expenses']];
+function voceSpesaEN(nome){const n=norm(nome);const t=VOCI_SPESA_EN.find(([re])=>re.test(n));return t?t[1]:n}
+const TESTI_FATTURA_EN={manual_entry:'Professional services - [Mese Anno] - Client/Project: [Progetto]',travel_expenses:'Travel expenses - [Mese Anno] - Client/Project: [Progetto]'};
+// La riga del lavoro dice, in quest'ordine: per quale posizione si
+// fattura (l'oggetto del contratto), per quale cliente finale, il mese
+// di competenza e le giornate. «Consulenza SAP - Cliente finale:
+// Richemont - Ottobre 2026 - Giorni: 22,00». L'oggetto, il cliente
+// finale e il riferimento del contratto stanno nella scheda cliente;
+// senza, valgono «Consulenza» e il nome del progetto.
+function rigaLavoro(row,en){
+  const c=clientById(row.client_id)||{};
+  const oggetto=norm(c.invoice_subject)||(en?'Consulting services':'Consulenza');
+  const finale=norm(c.invoice_end_client)||projectName(row.project_id)||clientName(row.client_id)||'';
+  const rif=norm(c.invoice_reference);
+  return oggetto+(finale?(en?' - End client: ':' - Cliente finale: ')+finale:'')
+    +' - '+(en?monthLabelEN(state.month):monthLabel(state.month))
+    +(row.type==='daily_rate_8h'?(en?' - Days: '+fmtNumEN(Number(row.hours||0)/8,2):' - Giorni: '+fmtDays(row.hours)):'')
+    +(rif?(en?' - Ref. ':' - Rif. ')+rif:'');
+}
 function renderTemplate(tpl,row){
+  const en=linguaFattura(row.client_id)==='en';
+  // Un template salvato a mano vale ancora per un cliente italiano che
+  // non ha l'oggetto del contratto: e' una scelta di chi l'ha scritto.
+  if((row.type==='daily_rate_8h'||row.type==='monthly_flat')&&(en||!tpl||norm(clientById(row.client_id)?.invoice_subject)))
+    return rigaLavoro(row,en);
+  if(en){
+    const project=projectName(row.project_id)||clientName(row.client_id)||'';
+    return (TESTI_FATTURA_EN[row.type]||'[Mese Anno] - [Progetto]').replaceAll('[Mese Anno]',monthLabelEN(state.month)).replaceAll('[Progetto]',project).replaceAll('[Giorni]',fmtNumEN(Number(row.hours||0)/8,2));
+  }
   const fallback={daily_rate_8h:'Consulenza - [Mese Anno] - Cliente/Progetto: [Progetto] | Giorni: [Giorni]',monthly_flat:'Consulenza - [Mese Anno] - Cliente/Progetto: [Progetto]',manual_entry:'Prestazione professionale - [Mese Anno] - Cliente/Progetto: [Progetto]',travel_expenses:'Spese di trasferta - [Mese Anno] - Cliente/Progetto: [Progetto]'}[row.type]||'[Mese Anno] - [Progetto]';
   const text=(tpl?.template_text||fallback);
   const project=projectName(row.project_id)||clientName(row.client_id)||'';
@@ -4340,6 +4395,7 @@ function openBillingClient(clientId){navigateTo('billingDetail',{edit:clientId})
 // un generico «rimborso trasferta: 500 euro» in fattura non qualifica
 // il rimborso come analitico.
 function expenseFiscoText(e){
+  if(linguaFattura(e.client_id)==='en')return expenseFiscoTextEN(e);
   // L'anticipazione per conto del cliente lo dice in fattura: e' la
   // dicitura che la rende tale.
   const pezzi=[naturaRimborso(e)==='art15'?'Anticipazione ex art. 15 DPR 633/1972':'Rimborso spese di trasferta'];
@@ -4356,6 +4412,26 @@ function expenseFiscoText(e){
   pezzi.push(fmtEUR(e.amount||0));
   return pezzi.filter(Boolean).join(' \u00b7 ');
 }
+// La stessa riga per un cliente in inglese: stessi pezzi, stesso
+// ordine, e l'importo resta scritto (l'addebito analitico lo vuole).
+function expenseFiscoTextEN(e){
+  const pezzi=[naturaRimborso(e)==='art15'?'Expenses advanced on behalf of the client (art. 15 DPR 633/1972)':'Reimbursement of travel expenses'];
+  pezzi.push(voceSpesaEN(expenseCategoryName(e.expense_category_id)));
+  if(e.expense_date)pezzi.push(fmtDMYEN(e.expense_date));
+  const da=norm(e.from_place),a=norm(e.to_place);
+  const km=Number(e.quantity||0),tar=Number(e.unit_rate||0);
+  if(da&&a)pezzi.push(da+' → '+a+(e.round_trip?' and return':''));
+  else if(da||a)pezzi.push(da||a);
+  if(km>0)pezzi.push(fmtNumEN(km,0)+' km'+(tar>0?' × '+fmtNumEN(tar,2)+' €/km':''));
+  if(!(da||a||km>0)&&norm(e.work_city))pezzi.push(norm(e.work_city));
+  const t=e.trip_id?tripById(e.trip_id):null;
+  if(t)pezzi.push('business trip '+tripTitolo(t)+' '+tripPeriodo(t));
+  const proj=projectName(e.project_id)||clientName(e.client_id)||'';
+  if(proj)pezzi.push(proj);
+  if(norm(e.description))pezzi.push(norm(e.description));
+  pezzi.push(fmtEUREN(e.amount||0));
+  return pezzi.filter(Boolean).join(' \u00b7 ');
+}
 function billingDetailView(){const clientId=state.edit;const group=billingGroupsByClient().find(g=>g.client_id===clientId);if(!group)return billing();const header=headerForClient(clientId)||{};const st=header.status||'to_invoice';const calc=billingCalc(group,header);const items=[];const piede=[];group.lines.forEach(l=>{
     if(l.type==='expense_report'){
       (l.items||[]).forEach(e=>piede.push({title:expenseCategoryName(e.expense_category_id),desc:(e.description?esc(e.description)+' · ':'')+dateIT(e.expense_date),metric:amountLine(expenseCategoryName(e.expense_category_id),Number(e.amount||0)),fisco:expenseFiscoText(e),amount:Number(e.amount||0)}));
@@ -4364,7 +4440,7 @@ function billingDetailView(){const clientId=state.edit;const group=billingGroups
     if(l.type==='travel_expenses'){(l.items||[]).forEach(e=>{const n=naturaRimborso(e);items.push({title:expenseCategoryName(e.expense_category_id),desc:(NATURE_NON_TASSATE.includes(n)?'Su Fiscozen: '+VOCE_FISCOZEN[n]:'Su Fiscozen: '+VOCE_FISCOZEN[n]+' (tassato)')+(e.work_city?' · '+e.work_city:''),fisco:expenseFiscoText(e),importo:Number(e.amount||0),quantita:1,
       nota:NATURE_NON_TASSATE.includes(n)?'Non tassato: su questa riga non spuntare «Applica contributo GS INPS 4,00%».':(n==='da_sistemare'?motivoDaSistemare(e):'')})})}
     else{items.push({title:projectName(l.project_id)||'Senza progetto',desc:l.label,fisco:fiscoText(l),...campiFiscozen(l)})}});
-  const piedeTot=piede.reduce((s,x)=>s+x.amount,0);return appShell(`<h1>${esc(clientName(clientId))}</h1><p class="sub">Fattura ${monthLabel(state.month)}</p><div class="card"><b>Totale cliente</b><div class="amount" style="margin-top:8px">${fmtEUR(calc.total)}</div><div class="metricLine">Base ${fmtEUR(calc.subtotal)} <span class="dot">·</span> Rivalsa ${fmtEUR(calc.inpsAmount)}${calc.stampAmount>0?' <span class="dot">·</span> Bollo '+fmtEUR(calc.stampAmount):''}</div>${calc.stampDue>0&&calc.stampAmount===0?`<div class="metricLine"><span class="tag gray">A tuo carico</span> ${fmtEUR(calc.stampDue)} di bollo, fuori dal totale</div>`:''}${group.pAmount>0?`<div class="metricLine" style="margin-top:6px"><span class="tag blue">Pianificato</span> ${fmtEUR(group.pAmount)} dei ${fmtEUR(calc.subtotal)} di base${group.pHours>0?` <span class="dot">·</span> ${fmtNum(group.pHours/8,2)} gg/u`:''}</div>`:''}<span class="tag ${statusClass(st)}">${statusLabel(st)}</span></div>${cardFatturaConservata(clientId,header)}<h2>Da incollare su Fiscozen</h2><p class="sub">Una riga per prestazione, coi campi nell'ordine in cui li chiede «Aggiungi prestazione».${calc.expenses>0?` <a href="#" onclick="apriRicevuteMese('${clientId}');return false">Scarica le ricevute delle spese</a>, da mandare con la fattura.`:''}</p><div class="list">${items.map((it,i)=>`<div class="row"><div>${i+1}</div><div><div class="title">${esc(it.title)}</div><div class="desc">${esc(it.desc)}</div><div class="fzCampi"><div><span>Descrizione</span><div class="copybox" id="copy-${i}">${esc(it.fisco)}</div><button class="secondary" onclick="copyText('${esc(it.fisco).replace(/'/g,'&#39;')}')">Copia descrizione</button></div><div><span>Importo</span><b>${fmtEUR(it.importo)}</b></div><div><span>Quantità</span><b>${fmtNum(it.quantita,2)}</b></div></div>${it.nota?`<div class="small">${esc(it.nota)}</div>`:''}</div><div></div></div>`).join('')}</div>${(calc.inpsEnabled&&calc.inpsAmount>0)||bolloDovuto(calc.stampMode)?`<h2>Questo non si incolla</h2><p class="sub">Fiscozen ci pensa da sé, o in fattura non ci va affatto. Sta qui per saperlo, non per copiarlo.</p><div class="list">${calc.inpsEnabled&&calc.inpsAmount>0?`<div class="row"><div>☑</div><div><div class="title">Rivalsa INPS ${fmtNum(calc.inpsRate,2)}%</div><div class="metricLine">${fmtEUR(calc.inpsAmount)}</div><div class="desc">${Math.abs(Number(calc.inpsRate)-4)<0.005?'La calcola Fiscozen: spunta «Applica contributo GS INPS 4,00%» dentro ogni prestazione. Incollandola anche come voce verrebbe contata due volte.':'Attenzione: la spunta di Fiscozen, «Applica contributo GS INPS 4,00%», applica il 4%, mentre qui l’aliquota è del '+fmtNum(calc.inpsRate,2)+'%. Con la spunta il totale su Fiscozen non tornerebbe con questo: la rivalsa per la gestione separata è del 4%, controlla l’aliquota in Configurazione fiscale.'}</div></div><div></div></div>`:''}${bolloDovuto(calc.stampMode)?`<div class="row"><div>·</div><div><div class="title">Marca da bollo</div><div class="metricLine">${calc.stampDue>0?fmtEUR(calc.stampDue)+(calc.stampAmount>0?'':' <span class="tag gray">a tuo carico</span>'):'Qui non è dovuta'}</div><div class="desc">${calc.stampDue>0?'Non è una prestazione e non si aggiunge fra le voci. '+esc(bolloFrase(calc.stampMode)):'Gli importi esenti non superano '+fmtEUR(BOLLO_SOGLIA)+', quindi qui il bollo non è dovuto.'}</div></div><div></div></div>`:''}</div>`:''}${piede.length?`<h2>Spese a piè di lista</h2><p class="sub">Anticipate da te e <b>da chiedere a parte</b>: non entrano nel totale della fattura, che e' e resta ${fmtEUR(calc.total)}. Sono una partita di giro, quindi la descrizione analitica serve comunque.</p><div class="card"><b>Da farsi rimborsare</b><div class="amount" style="margin-top:8px">${fmtEUR(piedeTot)}</div><small class="desc">${piede.length} ${piede.length===1?'spesa':'spese'}</small></div><div class="list">${piede.map((it,i)=>`<div class="row"><div>·</div><div><div class="title">${esc(it.title)}</div><div class="desc">${it.desc}</div><div class="metricLine">${it.metric}</div><div class="copybox" id="pie-${i}">${esc(it.fisco)}</div><button class="secondary" onclick="copyText('${esc(it.fisco).replace(/'/g,'&#39;')}')">Copia descrizione</button></div><div></div></div>`).join('')}</div>`:''}<h2>Dati fattura / incasso</h2><form class="form" onsubmit="saveBillingHeader(event)"><div class="field"><label>Stato</label><select name="status"><option value="to_invoice" ${st==='to_invoice'?'selected':''}>Da fatturare</option><option value="invoice_issued" ${st==='invoice_issued'?'selected':''}>Fattura emessa</option><option value="collected" ${st==='collected'?'selected':''}>Incassato</option><option value="excluded" ${st==='excluded'?'selected':''}>Escluso</option></select></div><div class="field"><label>Rivalsa INPS</label><select name="inps_recharge_enabled"><option value="true" ${calc.inpsEnabled?'selected':''}>Sì</option><option value="false" ${!calc.inpsEnabled?'selected':''}>No</option></select></div><div class="field"><label>Percentuale rivalsa INPS</label><input name="inps_recharge_rate" type="number" step="0.01" value="${Number(calc.inpsRate||4)}"></div><div class="field"><label>Numero fattura</label><input name="invoice_number" value="${esc(header.invoice_number||'')}"></div><div class="field"><label>Data fattura</label><input name="invoice_date" type="date" value="${esc(header.invoice_date||'')}"></div><div class="field"><label>Data incasso</label><input name="collection_date" type="date" value="${esc(header.collection_date||'')}"></div><div class="field"><label>Importo incassato</label><input name="collected_amount" type="number" step="0.01" value="${Number(header.collected_amount||0)}"></div><div class="field"><label>Note</label><textarea name="notes">${esc(header.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva stato fattura</button>${header.id?`<button type="button" class="secondary danger" onclick="eliminaFattura('${header.id}')">Elimina fattura</button>`:''}<button type="button" class="secondary" onclick="go('billing')">Indietro</button></div></form>`)}
+  const piedeTot=piede.reduce((s,x)=>s+x.amount,0);return appShell(`<h1>${esc(clientName(clientId))}</h1><p class="sub">Fattura ${monthLabel(state.month)}</p><div class="card"><b>Totale cliente</b><div class="amount" style="margin-top:8px">${fmtEUR(calc.total)}</div><div class="metricLine">Base ${fmtEUR(calc.subtotal)} <span class="dot">·</span> Rivalsa ${fmtEUR(calc.inpsAmount)}${calc.stampAmount>0?' <span class="dot">·</span> Bollo '+fmtEUR(calc.stampAmount):''}</div>${calc.stampDue>0&&calc.stampAmount===0?`<div class="metricLine"><span class="tag gray">A tuo carico</span> ${fmtEUR(calc.stampDue)} di bollo, fuori dal totale</div>`:''}${group.pAmount>0?`<div class="metricLine" style="margin-top:6px"><span class="tag blue">Pianificato</span> ${fmtEUR(group.pAmount)} dei ${fmtEUR(calc.subtotal)} di base${group.pHours>0?` <span class="dot">·</span> ${fmtNum(group.pHours/8,2)} gg/u`:''}</div>`:''}<span class="tag ${statusClass(st)}">${statusLabel(st)}</span></div>${cardFatturaConservata(clientId,header)}<h2>Da incollare su Fiscozen</h2><p class="sub">Una riga per prestazione, coi campi nell'ordine in cui li chiede «Aggiungi prestazione».${linguaFattura(clientId)==='en'?' <span class="tag blue">In inglese</span> come dice la scheda del cliente.':''}${calc.expenses>0?` <a href="#" onclick="apriRicevuteMese('${clientId}');return false">Scarica le ricevute delle spese</a>, da mandare con la fattura.`:''}</p><div class="list">${items.map((it,i)=>`<div class="row"><div>${i+1}</div><div><div class="title">${esc(it.title)}</div><div class="desc">${esc(it.desc)}</div><div class="fzCampi"><div><span>Descrizione</span><div class="copybox" id="copy-${i}">${esc(it.fisco)}</div><button class="secondary" onclick="copyText('${esc(it.fisco).replace(/'/g,'&#39;')}')">Copia descrizione</button></div><div><span>Importo</span><b>${fmtEUR(it.importo)}</b></div><div><span>Quantità</span><b>${fmtNum(it.quantita,2)}</b></div></div>${it.nota?`<div class="small">${esc(it.nota)}</div>`:''}</div><div></div></div>`).join('')}</div>${(calc.inpsEnabled&&calc.inpsAmount>0)||bolloDovuto(calc.stampMode)?`<h2>Questo non si incolla</h2><p class="sub">Fiscozen ci pensa da sé, o in fattura non ci va affatto. Sta qui per saperlo, non per copiarlo.</p><div class="list">${calc.inpsEnabled&&calc.inpsAmount>0?`<div class="row"><div>☑</div><div><div class="title">Rivalsa INPS ${fmtNum(calc.inpsRate,2)}%</div><div class="metricLine">${fmtEUR(calc.inpsAmount)}</div><div class="desc">${Math.abs(Number(calc.inpsRate)-4)<0.005?'La calcola Fiscozen: spunta «Applica contributo GS INPS 4,00%» dentro ogni prestazione. Incollandola anche come voce verrebbe contata due volte.':'Attenzione: la spunta di Fiscozen, «Applica contributo GS INPS 4,00%», applica il 4%, mentre qui l’aliquota è del '+fmtNum(calc.inpsRate,2)+'%. Con la spunta il totale su Fiscozen non tornerebbe con questo: la rivalsa per la gestione separata è del 4%, controlla l’aliquota in Configurazione fiscale.'}</div></div><div></div></div>`:''}${bolloDovuto(calc.stampMode)?`<div class="row"><div>·</div><div><div class="title">Marca da bollo</div><div class="metricLine">${calc.stampDue>0?fmtEUR(calc.stampDue)+(calc.stampAmount>0?'':' <span class="tag gray">a tuo carico</span>'):'Qui non è dovuta'}</div><div class="desc">${calc.stampDue>0?'Non è una prestazione e non si aggiunge fra le voci. '+esc(bolloFrase(calc.stampMode)):'Gli importi esenti non superano '+fmtEUR(BOLLO_SOGLIA)+', quindi qui il bollo non è dovuto.'}</div></div><div></div></div>`:''}</div>`:''}${piede.length?`<h2>Spese a piè di lista</h2><p class="sub">Anticipate da te e <b>da chiedere a parte</b>: non entrano nel totale della fattura, che e' e resta ${fmtEUR(calc.total)}. Sono una partita di giro, quindi la descrizione analitica serve comunque.</p><div class="card"><b>Da farsi rimborsare</b><div class="amount" style="margin-top:8px">${fmtEUR(piedeTot)}</div><small class="desc">${piede.length} ${piede.length===1?'spesa':'spese'}</small></div><div class="list">${piede.map((it,i)=>`<div class="row"><div>·</div><div><div class="title">${esc(it.title)}</div><div class="desc">${it.desc}</div><div class="metricLine">${it.metric}</div><div class="copybox" id="pie-${i}">${esc(it.fisco)}</div><button class="secondary" onclick="copyText('${esc(it.fisco).replace(/'/g,'&#39;')}')">Copia descrizione</button></div><div></div></div>`).join('')}</div>`:''}<h2>Dati fattura / incasso</h2><form class="form" onsubmit="saveBillingHeader(event)"><div class="field"><label>Stato</label><select name="status"><option value="to_invoice" ${st==='to_invoice'?'selected':''}>Da fatturare</option><option value="invoice_issued" ${st==='invoice_issued'?'selected':''}>Fattura emessa</option><option value="collected" ${st==='collected'?'selected':''}>Incassato</option><option value="excluded" ${st==='excluded'?'selected':''}>Escluso</option></select></div><div class="field"><label>Rivalsa INPS</label><select name="inps_recharge_enabled"><option value="true" ${calc.inpsEnabled?'selected':''}>Sì</option><option value="false" ${!calc.inpsEnabled?'selected':''}>No</option></select></div><div class="field"><label>Percentuale rivalsa INPS</label><input name="inps_recharge_rate" type="number" step="0.01" value="${Number(calc.inpsRate||4)}"></div><div class="field"><label>Numero fattura</label><input name="invoice_number" value="${esc(header.invoice_number||'')}"></div><div class="field"><label>Data fattura</label><input name="invoice_date" type="date" value="${esc(header.invoice_date||'')}"></div><div class="field"><label>Data incasso</label><input name="collection_date" type="date" value="${esc(header.collection_date||'')}"></div><div class="field"><label>Importo incassato</label><input name="collected_amount" type="number" step="0.01" value="${Number(header.collected_amount||0)}"></div><div class="field"><label>Note</label><textarea name="notes">${esc(header.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva stato fattura</button>${header.id?`<button type="button" class="secondary danger" onclick="eliminaFattura('${header.id}')">Elimina fattura</button>`:''}<button type="button" class="secondary" onclick="go('billing')">Indietro</button></div></form>`)}
 async function saveBillingHeader(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const clientId=state.edit;const group=billingGroupsByClient().find(g=>g.client_id===clientId);const {year,month}=periodParts();const tempCalc=billingCalc(group,{inps_recharge_enabled:f.inps_recharge_enabled==='true',inps_recharge_rate:Number(f.inps_recharge_rate||4)});const payload={year,month,client_id:clientId,total_amount:Number(tempCalc.subtotal||0),services_amount:tempCalc.services,expenses_amount:tempCalc.expenses,manual_amount:tempCalc.manual,taxable_base_amount:tempCalc.taxableBase,inps_recharge_enabled:tempCalc.inpsEnabled,inps_recharge_rate:tempCalc.inpsRate,inps_recharge_amount:tempCalc.inpsAmount,stamp_duty_enabled:tempCalc.stampEnabled,stamp_duty_amount:tempCalc.stampAmount,invoice_total_amount:tempCalc.total,status:f.status,invoice_number:norm(f.invoice_number)||null,invoice_date:f.invoice_date||null,collection_date:f.collection_date||null,collected_amount:Number(f.collected_amount||0)||null,notes:f.notes||null};const existing=headerForClient(clientId);let error;if(existing){({error}=await updateResilient('billing_headers',payload,existing.id));}else{({error}=await insertResilient('billing_headers',payload));}if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='billingDetail';state.edit=clientId;render()}
 function copyText(txt){const cleaned=document.createElement('textarea');cleaned.innerHTML=txt;const val=cleaned.value;navigator.clipboard?.writeText(val).then(()=>setMsg('Descrizione copiata.')).catch(()=>prompt('Copia descrizione:',val))}
 
@@ -5563,7 +5639,114 @@ async function savePolicy(ev){
   state.view='policyRimborsi';state.edit=id;render();
   setMsg('Policy di '+clientName(id)+' salvata.',4000);
 }
-function clientEdit(){const c=clientById(state.edit);if(!c)return clients();return appShell(`<h1>Modifica cliente</h1><form class="form" onsubmit="saveClient(event)"><div class="field"><label>Nome cliente</label><input name="name" value="${esc(c.name)}" required></div><div class="field"><label>Codice cliente</label><input name="code" maxlength="5" value="${esc(c.code||'')}" oninput="this.value=normCode(this.value)"${projectsOfClient(c.id).some(p=>p.code)?' readonly title="Ha gia\' dei progetti: il codice non si cambia"':''}><div class="small">${projectsOfClient(c.id).some(p=>p.code)?'Bloccato: da questo codice dipendono i codici dei progetti.':'Da 2 a 5 lettere o cifre.'}</div></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h" ${c.compensation_type==='daily_rate_8h'?'selected':''}>Tariffa giornaliera 8h</option><option value="monthly_flat" ${c.compensation_type==='monthly_flat'?'selected':''}>Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="${Number(c.daily_rate||0)}"></div><div class="field"><label>Ore standard giornata</label><input name="standard_hours" type="number" step="0.25" value="${Number(c.standard_hours||8)}"></div><div class="field"><label>Partita IVA</label><input name="vat_number" inputmode="numeric" value="${esc(c.vat_number||'')}" placeholder="Es. 11695380961"><div class="small">Serve a riconoscere il cliente quando carichi una fattura emessa: è l’unico abbinamento certo.</div></div><div class="field"><label>Sede operativa (base trasferte)</label><input name="base_city" value="${esc(c.base_city||'')}" placeholder="Es. Milano"></div><div class="field"><label>Attivo</label><select name="active"><option value="true" ${c.active?'selected':''}>Sì</option><option value="false" ${!c.active?'selected':''}>No</option></select></div><h2>Policy rimborsi spese</h2><p class="sub">Per ogni voce di spesa scegli come viene gestita con questo cliente. L'app la proporrà in automatico quando inserisci una spesa.</p><div class="card"><b>Policy rimborsi</b><div class="desc" style="margin-top:4px">Chi paga ogni voce di spesa e fino a quanto. Sta in una pagina sua, così c'è spazio per i limiti.</div><button type="button" class="secondary" style="margin-top:12px" onclick="apriPolicy('${c.id}')">Apri la policy di ${esc(c.name)}</button></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteClient('${c.id}')">Elimina cliente</button><button type="button" class="secondary" onclick="${wbsReady()?`openClient('${c.id}')`:`go('clients')`}">Annulla</button></div></form>`)}
+// ─── Il contratto, letto per la fatturazione ────────────────────────
+// Si carica il PDF del contratto (un SOA, un ordine) e l'app ne legge
+// il testo per proporre i dati della fattura mensile: oggetto, cliente
+// finale, riferimento, tariffa, ore, periodo, intestatario, contatti.
+// Il file non si conserva: si legge nel browser e si butta. Contiene
+// dati sensibili, e alla fattura serve solo quello che si salva.
+// La libreria si carica solo quando serve: pesa un mega e mezzo.
+async function caricaPdfJs(){
+  if(!window.pdfjsLib)await new Promise((ok,ko)=>{const t=document.createElement('script');t.src='./vendor/pdfjs.min.js';
+    t.onload=ok;t.onerror=()=>ko(new Error('la libreria PDF non si è caricata'));document.head.appendChild(t)});
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc='./vendor/pdfjs.worker.min.js';
+  return window.pdfjsLib;
+}
+// Il testo per righe: i pezzi alla stessa altezza stanno insieme. In
+// una tabella a due colonne l'etichetta e il valore finiscono sulla
+// stessa riga, «Client: Richemont», ed e' cosi' che si leggono.
+async function righePdf(buf){
+  const lib=await caricaPdfJs();
+  const doc=await lib.getDocument({data:new Uint8Array(buf)}).promise;
+  const righe=[];
+  for(let n=1;n<=doc.numPages;n++){
+    const pag=await doc.getPage(n);
+    const tc=await pag.getTextContent();
+    const gruppi=[];
+    tc.items.filter(x=>x.str&&x.str.trim()).forEach(x=>{
+      const y=x.transform[5],xx=x.transform[4];
+      let g=gruppi.find(g=>Math.abs(g.y-y)<=3);
+      if(!g){g={y,pezzi:[]};gruppi.push(g)}
+      g.pezzi.push({x:xx,w:x.width||0,t:x.str});
+    });
+    // Fra due colonne c'e' un vuoto largo: li' va un tab, cosi' un valore
+    // non si porta dietro la colonna accanto («SOA ID: X» e la data a
+    // fondo pagina stanno alla stessa altezza).
+    gruppi.sort((a,b)=>b.y-a.y).forEach(g=>{
+      let out='',fine=null;
+      g.pezzi.sort((a,b)=>a.x-b.x).forEach(p=>{
+        if(fine!=null)out+=(p.x-fine>12?'\t':' ');
+        out+=p.t.replace(/\s+/g,' ');fine=p.x+p.w;
+      });
+      righe.push(out.replace(/ *\t */g,'\t').replace(/ +/g,' ').trim());
+    });
+  }
+  return righe;
+}
+function numeroContratto(t){
+  let v=String(t||'').replace(/\s/g,'');
+  if(/,\d{1,2}$/.test(v))v=v.replace(/\./g,'').replace(',','.');else v=v.replace(/,/g,'');
+  const n=Number(v);return Number.isFinite(n)&&n>0?n:null;
+}
+function dataContratto(t){const m=String(t||'').match(/^(\d{1,2})[\/.](\d{1,2})[\/.](\d{4})$/);return m?m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0'):null}
+// Le etichette in inglese, francese e italiano: i contratti svizzeri le
+// hanno spesso in due lingue.
+function leggiContratto(righe){
+  const r={};
+  // Il valore e' il primo pezzo dopo l'etichetta, nella stessa colonna
+  // o in quella accanto; quello che c'e' oltre, separato da un tab, no.
+  const dopo=(re)=>{for(const l of righe){const m=l.match(re);const v=m&&norm(String(m[m.length-1]).replace(/^\t+/,'').split('\t')[0]);if(v)return v}return null};
+  r.oggetto=dopo(/^(?:Description of the Services(?:\s*\/\s*Project)?|Description des services|Oggetto(?: del contratto| dell[’']incarico| della prestazione)?|Descrizione (?:dei servizi|delle attività|della prestazione))\s*:?\s*(.*)$/i);
+  r.clienteFinale=dopo(/^(?:End client|Final client|Client final|Client|Cliente finale|Cliente)\s*:\s*(.*)$/i);
+  const soa=dopo(/SOA ID\s*:?\s*_?\s*(.*)$/i);
+  r.riferimento=soa?'SOA '+soa.replace(/^_\s*/,''):dopo(/(?:Contract|Contratto|Purchase Order|Ordine(?: d[’']acquisto)?|PO)\s*(?:n\.?|no\.?|number|nr\.?|ID)\s*:?\s*(\S.*)$/i);
+  for(const l of righe){
+    if(r.tariffa==null&&/(?:Fee Rate|Tarif|Tariffa|Daily rate|Day rate|Compenso giornaliero)/i.test(l)){
+      const m=l.match(/(?:EUR|€|CHF)\s*([\d.,']+)|([\d.,']+)\s*(?:EUR|€|CHF)/i);
+      if(m){r.tariffa=numeroContratto((m[1]||m[2]).replace(/'/g,''));r.valuta=/CHF/i.test(l)?'CHF':'EUR';r.tariffaGiornaliera=/dail|day|giorn|jour/i.test(l)}
+    }
+    if(r.ore==null){const m=l.match(/(\d+(?:[.,]\d+)?)\s*(?:Hours|ore|heures)\s*(?:per|al|par|\/)\s*(?:Day|giorno|jour)/i);if(m)r.ore=Number(m[1].replace(',','.'))}
+    if(!r.periodo&&/(?:Period|Dates|Periodo|Durata|duration|Durée)/i.test(l)){
+      const m=l.match(/(\d{1,2}[\/.]\d{1,2}[\/.]\d{4})\s*[-–]\s*(\d{1,2}[\/.]\d{1,2}[\/.]\d{4})/);
+      if(m)r.periodo={da:dataContratto(m[1]),a:dataContratto(m[2])};
+    }
+    if(!r.partitaIva){const m=l.match(/\b(CHE[-\s]?\d{3}[.\s]?\d{3}[.\s]?\d{3})\b|(?:P\.?\s?IVA|Partita IVA|VAT(?: number| no\.?)?|UID|IDE)\s*:?\s*((?:IT)?\s?\d{11})\b/i);if(m)r.partitaIva=norm(m[1]||m[2]).replace(/\s/g,'')}
+  }
+  const testo=righe.join('\n');
+  const soc=testo.match(/\b([A-Z][\w&.\-]*(?: [A-Z][\w&.\-]*){0,5} (?:SA|S\.A\.|AG|GmbH|Ltd|Limited|S\.r\.l\.|Srl|SRL|S\.p\.A\.|SpA|Inc\.?|LLC|BV|SAS|SARL|Sàrl))\b/);
+  if(soc)r.intestatario=soc[1];
+  const mail=[...new Set(testo.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g)||[])];
+  // Prima gli indirizzi delle fatture, poi gli altri
+  r.email=mail.sort((a,b)=>(/invoice|fattur|billing|factur|account/i.test(b)?1:0)-(/invoice|fattur|billing|factur|account/i.test(a)?1:0));
+  const parole=testo.toLowerCase();
+  r.lingua=(parole.match(/\b(the|and|of|shall)\b/g)||[]).length>(parole.match(/\b(il|della|del|che|per)\b/g)||[]).length?'en':'it';
+  return r;
+}
+async function estraiContratto(buf){return leggiContratto(await righePdf(buf))}
+function contrattoScelto(input){
+  const file=input&&input.files&&input.files[0];
+  const box=document.getElementById('contrattoEsito');
+  if(!file||!box)return;
+  box.innerHTML='<div class="small">Leggo il contratto…</div>';
+  const reader=new FileReader();
+  reader.onload=async()=>{
+    let r;
+    try{r=await estraiContratto(reader.result)}
+    catch(e){box.innerHTML='<div class="small">Non si è potuto leggere il PDF: '+esc(e&&e.message||String(e))+'. Se è una scansione, non ha testo da leggere.</div>';return}
+    finally{input.value=''}
+    const form=input.closest('form');
+    const metti=(nome,v)=>{const el=form&&form.querySelector(`[name=${nome}]`);if(el&&v!=null&&v!==''){el.value=v;el.classList.add('daContratto')}};
+    metti('invoice_subject',r.oggetto);metti('invoice_end_client',r.clienteFinale);metti('invoice_reference',r.riferimento);
+    if(r.tariffa&&r.tariffaGiornaliera!==false)metti('daily_rate',r.tariffa);
+    metti('standard_hours',r.ore);metti('vat_number',r.partitaIva);
+    const lin=form&&form.querySelector(`[name=invoice_language][value=${r.lingua}]`);if(lin)lin.checked=true;
+    const riga=(etichetta,v)=>`<div><span>${etichetta}</span><b>${v?esc(String(v)):'<i>non trovato</i>'}</b></div>`;
+    box.innerHTML=`<div class="contrattoLetto">${riga('Oggetto',r.oggetto)}${riga('Cliente finale',r.clienteFinale)}${riga('Riferimento',r.riferimento)}${riga('Tariffa',r.tariffa?(r.valuta==='CHF'?'CHF '+fmtNum(r.tariffa,2):fmtEUR(r.tariffa))+(r.tariffaGiornaliera?' al giorno':''):null)}${riga('Ore al giorno',r.ore)}${riga('Periodo',r.periodo?fmtDMY(r.periodo.da)+' – '+fmtDMY(r.periodo.a):null)}${riga('Intestatario fattura',r.intestatario)}${riga('Partita IVA / UID',r.partitaIva)}${riga('Lingua',r.lingua==='en'?'English':'Italiano')}</div>${r.email.length?`<div class="small" style="margin-top:8px">Contatti: ${r.email.map(esc).join(' · ')}</div>`:''}<div class="small" style="margin-top:8px">Ho compilato i campi qui sotto con quello che ho trovato: controllali e premi «Salva». Il PDF non è stato salvato.</div>`;
+  };
+  reader.onerror=()=>{box.innerHTML='<div class="small">Non si è potuto aprire il file.</div>'};
+  reader.readAsArrayBuffer(file);
+}
+function clientEdit(){const c=clientById(state.edit);if(!c)return clients();return appShell(`<h1>Modifica cliente</h1><form class="form" onsubmit="saveClient(event)"><div class="card"><b>Carica il contratto</b><div class="desc" style="margin-top:4px">Il PDF del contratto o del SOA: leggo oggetto, cliente finale, riferimento, tariffa e contatti per la fattura mensile. Il file non si conserva.</div><input type="file" accept="application/pdf,.pdf" style="margin-top:10px" onchange="contrattoScelto(this)"><div id="contrattoEsito" style="margin-top:10px"></div></div><div class="field"><label>Nome cliente</label><input name="name" value="${esc(c.name)}" required></div><div class="field"><label>Codice cliente</label><input name="code" maxlength="5" value="${esc(c.code||'')}" oninput="this.value=normCode(this.value)"${projectsOfClient(c.id).some(p=>p.code)?' readonly title="Ha gia\' dei progetti: il codice non si cambia"':''}><div class="small">${projectsOfClient(c.id).some(p=>p.code)?'Bloccato: da questo codice dipendono i codici dei progetti.':'Da 2 a 5 lettere o cifre.'}</div></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h" ${c.compensation_type==='daily_rate_8h'?'selected':''}>Tariffa giornaliera 8h</option><option value="monthly_flat" ${c.compensation_type==='monthly_flat'?'selected':''}>Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="${Number(c.daily_rate||0)}"></div><div class="field"><label>Ore standard giornata</label><input name="standard_hours" type="number" step="0.25" value="${Number(c.standard_hours||8)}"></div><div class="field"><label>Partita IVA</label><input name="vat_number" inputmode="numeric" value="${esc(c.vat_number||'')}" placeholder="Es. 11695380961"><div class="small">Serve a riconoscere il cliente quando carichi una fattura emessa: è l’unico abbinamento certo.</div></div><div class="field"><label>Lingua delle fatture</label>${sceltaSegmenti('invoice_language',[['it','Italiano'],['en','English']],c.invoice_language==='en'?'en':'it','')}<div class="small">Per un cliente estero: le descrizioni da incollare su Fiscozen escono in inglese.</div></div><div class="field"><label>Oggetto del contratto</label><input name="invoice_subject" value="${esc(c.invoice_subject||'')}" placeholder="Es. Consulenza SAP, Project Management"><div class="small">La posizione per cui fatturi, come la chiama il contratto. Apre la riga della fattura; vuoto: «Consulenza».</div></div><div class="field"><label>Cliente finale</label><input name="invoice_end_client" value="${esc(c.invoice_end_client||'')}" placeholder="Es. Richemont"><div class="small">Per chi lavori davvero. Vuoto: il nome del progetto.</div></div><div class="field"><label>Riferimento contratto</label><input name="invoice_reference" value="${esc(c.invoice_reference||'')}" placeholder="Es. SOA, ordine d’acquisto"><div class="small">Facoltativo: finisce in fondo alla riga, serve al cliente per abbinare la fattura.</div></div><div class="field"><label>Sede operativa (base trasferte)</label><input name="base_city" value="${esc(c.base_city||'')}" placeholder="Es. Milano"></div><div class="field"><label>Attivo</label><select name="active"><option value="true" ${c.active?'selected':''}>Sì</option><option value="false" ${!c.active?'selected':''}>No</option></select></div><h2>Policy rimborsi spese</h2><p class="sub">Per ogni voce di spesa scegli come viene gestita con questo cliente. L'app la proporrà in automatico quando inserisci una spesa.</p><div class="card"><b>Policy rimborsi</b><div class="desc" style="margin-top:4px">Chi paga ogni voce di spesa e fino a quanto. Sta in una pagina sua, così c'è spazio per i limiti.</div><button type="button" class="secondary" style="margin-top:12px" onclick="apriPolicy('${c.id}')">Apri la policy di ${esc(c.name)}</button></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteClient('${c.id}')">Elimina cliente</button><button type="button" class="secondary" onclick="${wbsReady()?`openClient('${c.id}')`:`go('clients')`}">Annulla</button></div></form>`)}
 async function addClient(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));
   // il codice cliente regge tutta la catena dei codici sotto: se non
   // lo si scrive, dal cliente non si riesce piu' a creare un progetto
@@ -5588,10 +5771,15 @@ function collectPolicyFromForm(f,esistente){
   return pol;
 }
 async function saveClient(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const policy=collectPolicyFromForm(f,parsePolicy(clientById(state.edit)));const payload={name:norm(f.name),compensation_type:f.compensation_type,daily_rate:Number(f.daily_rate||0),standard_hours:Number(f.standard_hours||8),active:f.active==='true',base_city:norm(f.base_city)||null,vat_number:norm(f.vat_number)||null,expense_policy:policy};
+  // La lingua si scrive se e' l'inglese o se il database ha gia' la
+  // colonna: senza migrazione, un cliente italiano non chiede niente.
+  if(f.invoice_language==='en'||clientById(state.edit)?.invoice_language!=null)payload.invoice_language=f.invoice_language==='en'?'en':'it';
+  const cl=clientById(state.edit)||{};
+  ['invoice_subject','invoice_end_client','invoice_reference'].forEach(k=>{if(norm(f[k])||cl[k]!=null)payload[k]=norm(f[k])||null});
   // il codice si scrive solo se il modulo lo ha lasciato modificabile:
   // dove ci sono gia' dei progetti e' bloccato, e non va sovrascritto
   if(f.code!==undefined&&normCode(f.code))payload.code=normCode(f.code);
-  const res=await updateResilient('clients',payload,state.edit,['base_city','expense_policy','code','vat_number']);if(res.error)return setMsg(motivoLeggibile(res.error),7000);await reload();state.view='clients';state.edit=null;render();
+  const res=await updateResilient('clients',payload,state.edit,['base_city','expense_policy','code','vat_number','invoice_language','invoice_subject','invoice_end_client','invoice_reference']);if(res.error)return setMsg(motivoLeggibile(res.error),7000);await reload();state.view='clients';state.edit=null;render();
   // Se il database non ha ancora la colonna, la scrittura passa senza
   // la partita IVA: dire «salvato» e basta farebbe credere che ci sia.
   const avviso=avvisoScartate(res);if(avviso)setMsg(avviso,12000)}
@@ -7884,6 +8072,8 @@ Object.assign(window,{
   exportTimesheet,
   clients,
   editClient,
+  contrattoScelto,
+  estraiContratto,
   clientEdit,
   addClient,
   saveClient,

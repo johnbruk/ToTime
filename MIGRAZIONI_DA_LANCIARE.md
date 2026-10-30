@@ -164,6 +164,21 @@ dice. Vale il paese della trasferta, come prima.
 
 La verifica deve dire: `1 su 1`.
 
+## 9. `migrations/2026-10-30_fatture-in-inglese.sql`
+
+Aggiunge ai clienti la lingua delle fatture (`invoice_language`, `it` o
+`en`, di partenza `it`) e, per la riga del lavoro in fattura, l'oggetto
+del contratto, il cliente finale e il riferimento del contratto.
+
+Serve per: scegliere «English» nella scheda di un cliente estero, e
+scrivere in fattura la posizione e il cliente finale giusti.
+
+Senza di lei: tutti i clienti restano in italiano, con «Consulenza» e il
+nome del progetto; se compili quei campi l'app salva il cliente e ti
+dice cosa non è stato scritto.
+
+La verifica deve dire: `4 su 4`.
+
 ---
 
 ## Dopo
