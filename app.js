@@ -334,7 +334,7 @@ const MIGRAZIONE_DI={
   invoiceable:'2026-10-23_rimborsi-non-tassati.sql',
   tm_batch_id:'2026-10-13_incarichi-continuativi.sql',
   invoice_language:'2026-10-30_fatture-in-inglese.sql',
-  invoice_service_en:'2026-10-30_fatture-in-inglese.sql',
+  invoice_subject:'2026-10-30_fatture-in-inglese.sql',
   invoice_end_client:'2026-10-30_fatture-in-inglese.sql',
   invoice_reference:'2026-10-30_fatture-in-inglese.sql'
 };
@@ -350,7 +350,7 @@ const NOME_COLONNA={
   activity_id:'il tipo di attività',project_id:'il progetto',client_id:'il cliente',
   tm_batch_id:'il codice dell\u2019incarico continuativo',
   invoice_language:'la lingua delle fatture',
-  invoice_service_en:'il servizio in inglese',
+  invoice_subject:'l’oggetto del contratto',
   invoice_end_client:'il cliente finale',
   invoice_reference:'il riferimento del contratto'
 };
@@ -1621,21 +1621,30 @@ const VOCI_SPESA_EN=[[/^(vitto|pasti?|ristorante)$/i,'Meals'],[/^pranzo$/i,'Lunc
   [/^carburante$/i,'Fuel'],[/^(rimborso\s*km|rimborso chilometrico|chilometrica|km)$/i,'Mileage allowance'],
   [/^(mezzi pubblici|trasporti|trasporto)$/i,'Public transport'],[/^noleggio auto$/i,'Car rental'],[/^(spesa|altro|altre spese)$/i,'Other expenses']];
 function voceSpesaEN(nome){const n=norm(nome);const t=VOCI_SPESA_EN.find(([re])=>re.test(n));return t?t[1]:n}
-const TESTI_FATTURA_EN={daily_rate_8h:'Consulting services - [Mese Anno] - Client/Project: [Progetto] | Days: [Giorni]',monthly_flat:'Consulting services - [Mese Anno] - Client/Project: [Progetto]',manual_entry:'Professional services - [Mese Anno] - Client/Project: [Progetto]',travel_expenses:'Travel expenses - [Mese Anno] - Client/Project: [Progetto]'};
+const TESTI_FATTURA_EN={manual_entry:'Professional services - [Mese Anno] - Client/Project: [Progetto]',travel_expenses:'Travel expenses - [Mese Anno] - Client/Project: [Progetto]'};
+// La riga del lavoro dice, in quest'ordine: per quale posizione si
+// fattura (l'oggetto del contratto), per quale cliente finale, il mese
+// di competenza e le giornate. «Consulenza SAP - Cliente finale:
+// Richemont - Ottobre 2026 - Giorni: 22,00». L'oggetto, il cliente
+// finale e il riferimento del contratto stanno nella scheda cliente;
+// senza, valgono «Consulenza» e il nome del progetto.
+function rigaLavoro(row,en){
+  const c=clientById(row.client_id)||{};
+  const oggetto=norm(c.invoice_subject)||(en?'Consulting services':'Consulenza');
+  const finale=norm(c.invoice_end_client)||projectName(row.project_id)||clientName(row.client_id)||'';
+  const rif=norm(c.invoice_reference);
+  return oggetto+(finale?(en?' - End client: ':' - Cliente finale: ')+finale:'')
+    +' - '+(en?monthLabelEN(state.month):monthLabel(state.month))
+    +(row.type==='daily_rate_8h'?(en?' - Days: '+fmtNumEN(Number(row.hours||0)/8,2):' - Giorni: '+fmtDays(row.hours)):'')
+    +(rif?(en?' - Ref. ':' - Rif. ')+rif:'');
+}
 function renderTemplate(tpl,row){
-  // I template salvati sono in italiano: per un cliente in inglese
-  // valgono i testi inglesi, con mese, giornate e importi all'inglese.
-  if(linguaFattura(row.client_id)==='en'){
-    // Col servizio del contratto, la riga lo nomina com'e' scritto lì:
-    // «SAP and Omnichannel Project Manager - October 2026 - End client:
-    // Richemont | Days: 9.50 | Ref. SOA …».
-    const c=clientById(row.client_id)||{};
-    const servizio=norm(c.invoice_service_en);
-    if(servizio&&(row.type==='daily_rate_8h'||row.type==='monthly_flat')){
-      const finale=norm(c.invoice_end_client),rif=norm(c.invoice_reference);
-      return servizio+' - '+monthLabelEN(state.month)+(finale?' - End client: '+finale:'')
-        +(row.type==='daily_rate_8h'?' | Days: '+fmtNumEN(Number(row.hours||0)/8,2):'')+(rif?' | Ref. '+rif:'');
-    }
+  const en=linguaFattura(row.client_id)==='en';
+  // Un template salvato a mano vale ancora per un cliente italiano che
+  // non ha l'oggetto del contratto: e' una scelta di chi l'ha scritto.
+  if((row.type==='daily_rate_8h'||row.type==='monthly_flat')&&(en||!tpl||norm(clientById(row.client_id)?.invoice_subject)))
+    return rigaLavoro(row,en);
+  if(en){
     const project=projectName(row.project_id)||clientName(row.client_id)||'';
     return (TESTI_FATTURA_EN[row.type]||'[Mese Anno] - [Progetto]').replaceAll('[Mese Anno]',monthLabelEN(state.month)).replaceAll('[Progetto]',project).replaceAll('[Giorni]',fmtNumEN(Number(row.hours||0)/8,2));
   }
@@ -5624,7 +5633,7 @@ async function savePolicy(ev){
   state.view='policyRimborsi';state.edit=id;render();
   setMsg('Policy di '+clientName(id)+' salvata.',4000);
 }
-function clientEdit(){const c=clientById(state.edit);if(!c)return clients();return appShell(`<h1>Modifica cliente</h1><form class="form" onsubmit="saveClient(event)"><div class="field"><label>Nome cliente</label><input name="name" value="${esc(c.name)}" required></div><div class="field"><label>Codice cliente</label><input name="code" maxlength="5" value="${esc(c.code||'')}" oninput="this.value=normCode(this.value)"${projectsOfClient(c.id).some(p=>p.code)?' readonly title="Ha gia\' dei progetti: il codice non si cambia"':''}><div class="small">${projectsOfClient(c.id).some(p=>p.code)?'Bloccato: da questo codice dipendono i codici dei progetti.':'Da 2 a 5 lettere o cifre.'}</div></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h" ${c.compensation_type==='daily_rate_8h'?'selected':''}>Tariffa giornaliera 8h</option><option value="monthly_flat" ${c.compensation_type==='monthly_flat'?'selected':''}>Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="${Number(c.daily_rate||0)}"></div><div class="field"><label>Ore standard giornata</label><input name="standard_hours" type="number" step="0.25" value="${Number(c.standard_hours||8)}"></div><div class="field"><label>Partita IVA</label><input name="vat_number" inputmode="numeric" value="${esc(c.vat_number||'')}" placeholder="Es. 11695380961"><div class="small">Serve a riconoscere il cliente quando carichi una fattura emessa: è l’unico abbinamento certo.</div></div><div class="field"><label>Lingua delle fatture</label>${sceltaSegmenti('invoice_language',[['it','Italiano'],['en','English']],c.invoice_language==='en'?'en':'it',"document.getElementById('campiInglese').hidden=this.value!=='en'")}<div class="small">Per un cliente estero: le descrizioni da incollare su Fiscozen escono in inglese.</div></div><div id="campiInglese"${c.invoice_language==='en'?'':' hidden'}><div class="field"><label>Servizio venduto (in inglese)</label><input name="invoice_service_en" value="${esc(c.invoice_service_en||'')}" placeholder="Es. SAP and Omnichannel Project Manager"><div class="small">Come lo chiama il contratto. Vuoto: «Consulting services».</div></div><div class="field"><label>Cliente finale</label><input name="invoice_end_client" value="${esc(c.invoice_end_client||'')}" placeholder="Es. Richemont"></div><div class="field"><label>Riferimento contratto</label><input name="invoice_reference" value="${esc(c.invoice_reference||'')}" placeholder="Es. SOA K2 Geneve_…"><div class="small">Finisce in fondo alla riga: serve al cliente per abbinare la fattura.</div></div></div><div class="field"><label>Sede operativa (base trasferte)</label><input name="base_city" value="${esc(c.base_city||'')}" placeholder="Es. Milano"></div><div class="field"><label>Attivo</label><select name="active"><option value="true" ${c.active?'selected':''}>Sì</option><option value="false" ${!c.active?'selected':''}>No</option></select></div><h2>Policy rimborsi spese</h2><p class="sub">Per ogni voce di spesa scegli come viene gestita con questo cliente. L'app la proporrà in automatico quando inserisci una spesa.</p><div class="card"><b>Policy rimborsi</b><div class="desc" style="margin-top:4px">Chi paga ogni voce di spesa e fino a quanto. Sta in una pagina sua, così c'è spazio per i limiti.</div><button type="button" class="secondary" style="margin-top:12px" onclick="apriPolicy('${c.id}')">Apri la policy di ${esc(c.name)}</button></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteClient('${c.id}')">Elimina cliente</button><button type="button" class="secondary" onclick="${wbsReady()?`openClient('${c.id}')`:`go('clients')`}">Annulla</button></div></form>`)}
+function clientEdit(){const c=clientById(state.edit);if(!c)return clients();return appShell(`<h1>Modifica cliente</h1><form class="form" onsubmit="saveClient(event)"><div class="field"><label>Nome cliente</label><input name="name" value="${esc(c.name)}" required></div><div class="field"><label>Codice cliente</label><input name="code" maxlength="5" value="${esc(c.code||'')}" oninput="this.value=normCode(this.value)"${projectsOfClient(c.id).some(p=>p.code)?' readonly title="Ha gia\' dei progetti: il codice non si cambia"':''}><div class="small">${projectsOfClient(c.id).some(p=>p.code)?'Bloccato: da questo codice dipendono i codici dei progetti.':'Da 2 a 5 lettere o cifre.'}</div></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h" ${c.compensation_type==='daily_rate_8h'?'selected':''}>Tariffa giornaliera 8h</option><option value="monthly_flat" ${c.compensation_type==='monthly_flat'?'selected':''}>Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="${Number(c.daily_rate||0)}"></div><div class="field"><label>Ore standard giornata</label><input name="standard_hours" type="number" step="0.25" value="${Number(c.standard_hours||8)}"></div><div class="field"><label>Partita IVA</label><input name="vat_number" inputmode="numeric" value="${esc(c.vat_number||'')}" placeholder="Es. 11695380961"><div class="small">Serve a riconoscere il cliente quando carichi una fattura emessa: è l’unico abbinamento certo.</div></div><div class="field"><label>Lingua delle fatture</label>${sceltaSegmenti('invoice_language',[['it','Italiano'],['en','English']],c.invoice_language==='en'?'en':'it','')}<div class="small">Per un cliente estero: le descrizioni da incollare su Fiscozen escono in inglese.</div></div><div class="field"><label>Oggetto del contratto</label><input name="invoice_subject" value="${esc(c.invoice_subject||'')}" placeholder="Es. Consulenza SAP, Project Management"><div class="small">La posizione per cui fatturi, come la chiama il contratto. Apre la riga della fattura; vuoto: «Consulenza».</div></div><div class="field"><label>Cliente finale</label><input name="invoice_end_client" value="${esc(c.invoice_end_client||'')}" placeholder="Es. Richemont"><div class="small">Per chi lavori davvero. Vuoto: il nome del progetto.</div></div><div class="field"><label>Riferimento contratto</label><input name="invoice_reference" value="${esc(c.invoice_reference||'')}" placeholder="Es. SOA, ordine d’acquisto"><div class="small">Facoltativo: finisce in fondo alla riga, serve al cliente per abbinare la fattura.</div></div><div class="field"><label>Sede operativa (base trasferte)</label><input name="base_city" value="${esc(c.base_city||'')}" placeholder="Es. Milano"></div><div class="field"><label>Attivo</label><select name="active"><option value="true" ${c.active?'selected':''}>Sì</option><option value="false" ${!c.active?'selected':''}>No</option></select></div><h2>Policy rimborsi spese</h2><p class="sub">Per ogni voce di spesa scegli come viene gestita con questo cliente. L'app la proporrà in automatico quando inserisci una spesa.</p><div class="card"><b>Policy rimborsi</b><div class="desc" style="margin-top:4px">Chi paga ogni voce di spesa e fino a quanto. Sta in una pagina sua, così c'è spazio per i limiti.</div><button type="button" class="secondary" style="margin-top:12px" onclick="apriPolicy('${c.id}')">Apri la policy di ${esc(c.name)}</button></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteClient('${c.id}')">Elimina cliente</button><button type="button" class="secondary" onclick="${wbsReady()?`openClient('${c.id}')`:`go('clients')`}">Annulla</button></div></form>`)}
 async function addClient(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));
   // il codice cliente regge tutta la catena dei codici sotto: se non
   // lo si scrive, dal cliente non si riesce piu' a creare un progetto
@@ -5653,11 +5662,11 @@ async function saveClient(ev){ev.preventDefault();const f=Object.fromEntries(new
   // colonna: senza migrazione, un cliente italiano non chiede niente.
   if(f.invoice_language==='en'||clientById(state.edit)?.invoice_language!=null)payload.invoice_language=f.invoice_language==='en'?'en':'it';
   const cl=clientById(state.edit)||{};
-  ['invoice_service_en','invoice_end_client','invoice_reference'].forEach(k=>{if(norm(f[k])||cl[k]!=null)payload[k]=norm(f[k])||null});
+  ['invoice_subject','invoice_end_client','invoice_reference'].forEach(k=>{if(norm(f[k])||cl[k]!=null)payload[k]=norm(f[k])||null});
   // il codice si scrive solo se il modulo lo ha lasciato modificabile:
   // dove ci sono gia' dei progetti e' bloccato, e non va sovrascritto
   if(f.code!==undefined&&normCode(f.code))payload.code=normCode(f.code);
-  const res=await updateResilient('clients',payload,state.edit,['base_city','expense_policy','code','vat_number','invoice_language','invoice_service_en','invoice_end_client','invoice_reference']);if(res.error)return setMsg(motivoLeggibile(res.error),7000);await reload();state.view='clients';state.edit=null;render();
+  const res=await updateResilient('clients',payload,state.edit,['base_city','expense_policy','code','vat_number','invoice_language','invoice_subject','invoice_end_client','invoice_reference']);if(res.error)return setMsg(motivoLeggibile(res.error),7000);await reload();state.view='clients';state.edit=null;render();
   // Se il database non ha ancora la colonna, la scrittura passa senza
   // la partita IVA: dire «salvato» e basta farebbe credere che ci sia.
   const avviso=avvisoScartate(res);if(avviso)setMsg(avviso,12000)}

@@ -167,14 +167,15 @@ La verifica deve dire: `1 su 1`.
 ## 9. `migrations/2026-10-30_fatture-in-inglese.sql`
 
 Aggiunge ai clienti la lingua delle fatture (`invoice_language`, `it` o
-`en`, di partenza `it`) e, per la riga in inglese, il servizio venduto,
-il cliente finale e il riferimento del contratto.
+`en`, di partenza `it`) e, per la riga del lavoro in fattura, l'oggetto
+del contratto, il cliente finale e il riferimento del contratto.
 
-Serve per: scegliere «English» nella scheda di un cliente estero, così
-le descrizioni da incollare su Fiscozen escono in inglese.
+Serve per: scegliere «English» nella scheda di un cliente estero, e
+scrivere in fattura la posizione e il cliente finale giusti.
 
-Senza di lei: tutti i clienti restano in italiano; se scegli «English»
-l'app salva il cliente e ti dice che la lingua non è stata scritta.
+Senza di lei: tutti i clienti restano in italiano, con «Consulenza» e il
+nome del progetto; se compili quei campi l'app salva il cliente e ti
+dice cosa non è stato scritto.
 
 La verifica deve dire: `4 su 4`.
 
