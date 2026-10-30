@@ -5633,7 +5633,114 @@ async function savePolicy(ev){
   state.view='policyRimborsi';state.edit=id;render();
   setMsg('Policy di '+clientName(id)+' salvata.',4000);
 }
-function clientEdit(){const c=clientById(state.edit);if(!c)return clients();return appShell(`<h1>Modifica cliente</h1><form class="form" onsubmit="saveClient(event)"><div class="field"><label>Nome cliente</label><input name="name" value="${esc(c.name)}" required></div><div class="field"><label>Codice cliente</label><input name="code" maxlength="5" value="${esc(c.code||'')}" oninput="this.value=normCode(this.value)"${projectsOfClient(c.id).some(p=>p.code)?' readonly title="Ha gia\' dei progetti: il codice non si cambia"':''}><div class="small">${projectsOfClient(c.id).some(p=>p.code)?'Bloccato: da questo codice dipendono i codici dei progetti.':'Da 2 a 5 lettere o cifre.'}</div></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h" ${c.compensation_type==='daily_rate_8h'?'selected':''}>Tariffa giornaliera 8h</option><option value="monthly_flat" ${c.compensation_type==='monthly_flat'?'selected':''}>Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="${Number(c.daily_rate||0)}"></div><div class="field"><label>Ore standard giornata</label><input name="standard_hours" type="number" step="0.25" value="${Number(c.standard_hours||8)}"></div><div class="field"><label>Partita IVA</label><input name="vat_number" inputmode="numeric" value="${esc(c.vat_number||'')}" placeholder="Es. 11695380961"><div class="small">Serve a riconoscere il cliente quando carichi una fattura emessa: è l’unico abbinamento certo.</div></div><div class="field"><label>Lingua delle fatture</label>${sceltaSegmenti('invoice_language',[['it','Italiano'],['en','English']],c.invoice_language==='en'?'en':'it','')}<div class="small">Per un cliente estero: le descrizioni da incollare su Fiscozen escono in inglese.</div></div><div class="field"><label>Oggetto del contratto</label><input name="invoice_subject" value="${esc(c.invoice_subject||'')}" placeholder="Es. Consulenza SAP, Project Management"><div class="small">La posizione per cui fatturi, come la chiama il contratto. Apre la riga della fattura; vuoto: «Consulenza».</div></div><div class="field"><label>Cliente finale</label><input name="invoice_end_client" value="${esc(c.invoice_end_client||'')}" placeholder="Es. Richemont"><div class="small">Per chi lavori davvero. Vuoto: il nome del progetto.</div></div><div class="field"><label>Riferimento contratto</label><input name="invoice_reference" value="${esc(c.invoice_reference||'')}" placeholder="Es. SOA, ordine d’acquisto"><div class="small">Facoltativo: finisce in fondo alla riga, serve al cliente per abbinare la fattura.</div></div><div class="field"><label>Sede operativa (base trasferte)</label><input name="base_city" value="${esc(c.base_city||'')}" placeholder="Es. Milano"></div><div class="field"><label>Attivo</label><select name="active"><option value="true" ${c.active?'selected':''}>Sì</option><option value="false" ${!c.active?'selected':''}>No</option></select></div><h2>Policy rimborsi spese</h2><p class="sub">Per ogni voce di spesa scegli come viene gestita con questo cliente. L'app la proporrà in automatico quando inserisci una spesa.</p><div class="card"><b>Policy rimborsi</b><div class="desc" style="margin-top:4px">Chi paga ogni voce di spesa e fino a quanto. Sta in una pagina sua, così c'è spazio per i limiti.</div><button type="button" class="secondary" style="margin-top:12px" onclick="apriPolicy('${c.id}')">Apri la policy di ${esc(c.name)}</button></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteClient('${c.id}')">Elimina cliente</button><button type="button" class="secondary" onclick="${wbsReady()?`openClient('${c.id}')`:`go('clients')`}">Annulla</button></div></form>`)}
+// ─── Il contratto, letto per la fatturazione ────────────────────────
+// Si carica il PDF del contratto (un SOA, un ordine) e l'app ne legge
+// il testo per proporre i dati della fattura mensile: oggetto, cliente
+// finale, riferimento, tariffa, ore, periodo, intestatario, contatti.
+// Il file non si conserva: si legge nel browser e si butta. Contiene
+// dati sensibili, e alla fattura serve solo quello che si salva.
+// La libreria si carica solo quando serve: pesa un mega e mezzo.
+async function caricaPdfJs(){
+  if(!window.pdfjsLib)await new Promise((ok,ko)=>{const t=document.createElement('script');t.src='./vendor/pdfjs.min.js';
+    t.onload=ok;t.onerror=()=>ko(new Error('la libreria PDF non si è caricata'));document.head.appendChild(t)});
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc='./vendor/pdfjs.worker.min.js';
+  return window.pdfjsLib;
+}
+// Il testo per righe: i pezzi alla stessa altezza stanno insieme. In
+// una tabella a due colonne l'etichetta e il valore finiscono sulla
+// stessa riga, «Client: Richemont», ed e' cosi' che si leggono.
+async function righePdf(buf){
+  const lib=await caricaPdfJs();
+  const doc=await lib.getDocument({data:new Uint8Array(buf)}).promise;
+  const righe=[];
+  for(let n=1;n<=doc.numPages;n++){
+    const pag=await doc.getPage(n);
+    const tc=await pag.getTextContent();
+    const gruppi=[];
+    tc.items.filter(x=>x.str&&x.str.trim()).forEach(x=>{
+      const y=x.transform[5],xx=x.transform[4];
+      let g=gruppi.find(g=>Math.abs(g.y-y)<=3);
+      if(!g){g={y,pezzi:[]};gruppi.push(g)}
+      g.pezzi.push({x:xx,w:x.width||0,t:x.str});
+    });
+    // Fra due colonne c'e' un vuoto largo: li' va un tab, cosi' un valore
+    // non si porta dietro la colonna accanto («SOA ID: X» e la data a
+    // fondo pagina stanno alla stessa altezza).
+    gruppi.sort((a,b)=>b.y-a.y).forEach(g=>{
+      let out='',fine=null;
+      g.pezzi.sort((a,b)=>a.x-b.x).forEach(p=>{
+        if(fine!=null)out+=(p.x-fine>12?'\t':' ');
+        out+=p.t.replace(/\s+/g,' ');fine=p.x+p.w;
+      });
+      righe.push(out.replace(/ *\t */g,'\t').replace(/ +/g,' ').trim());
+    });
+  }
+  return righe;
+}
+function numeroContratto(t){
+  let v=String(t||'').replace(/\s/g,'');
+  if(/,\d{1,2}$/.test(v))v=v.replace(/\./g,'').replace(',','.');else v=v.replace(/,/g,'');
+  const n=Number(v);return Number.isFinite(n)&&n>0?n:null;
+}
+function dataContratto(t){const m=String(t||'').match(/^(\d{1,2})[\/.](\d{1,2})[\/.](\d{4})$/);return m?m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0'):null}
+// Le etichette in inglese, francese e italiano: i contratti svizzeri le
+// hanno spesso in due lingue.
+function leggiContratto(righe){
+  const r={};
+  // Il valore e' il primo pezzo dopo l'etichetta, nella stessa colonna
+  // o in quella accanto; quello che c'e' oltre, separato da un tab, no.
+  const dopo=(re)=>{for(const l of righe){const m=l.match(re);const v=m&&norm(String(m[m.length-1]).replace(/^\t+/,'').split('\t')[0]);if(v)return v}return null};
+  r.oggetto=dopo(/^(?:Description of the Services(?:\s*\/\s*Project)?|Description des services|Oggetto(?: del contratto| dell[’']incarico| della prestazione)?|Descrizione (?:dei servizi|delle attività|della prestazione))\s*:?\s*(.*)$/i);
+  r.clienteFinale=dopo(/^(?:End client|Final client|Client final|Client|Cliente finale|Cliente)\s*:\s*(.*)$/i);
+  const soa=dopo(/SOA ID\s*:?\s*_?\s*(.*)$/i);
+  r.riferimento=soa?'SOA '+soa.replace(/^_\s*/,''):dopo(/(?:Contract|Contratto|Purchase Order|Ordine(?: d[’']acquisto)?|PO)\s*(?:n\.?|no\.?|number|nr\.?|ID)\s*:?\s*(\S.*)$/i);
+  for(const l of righe){
+    if(r.tariffa==null&&/(?:Fee Rate|Tarif|Tariffa|Daily rate|Day rate|Compenso giornaliero)/i.test(l)){
+      const m=l.match(/(?:EUR|€|CHF)\s*([\d.,']+)|([\d.,']+)\s*(?:EUR|€|CHF)/i);
+      if(m){r.tariffa=numeroContratto((m[1]||m[2]).replace(/'/g,''));r.valuta=/CHF/i.test(l)?'CHF':'EUR';r.tariffaGiornaliera=/dail|day|giorn|jour/i.test(l)}
+    }
+    if(r.ore==null){const m=l.match(/(\d+(?:[.,]\d+)?)\s*(?:Hours|ore|heures)\s*(?:per|al|par|\/)\s*(?:Day|giorno|jour)/i);if(m)r.ore=Number(m[1].replace(',','.'))}
+    if(!r.periodo&&/(?:Period|Dates|Periodo|Durata|duration|Durée)/i.test(l)){
+      const m=l.match(/(\d{1,2}[\/.]\d{1,2}[\/.]\d{4})\s*[-–]\s*(\d{1,2}[\/.]\d{1,2}[\/.]\d{4})/);
+      if(m)r.periodo={da:dataContratto(m[1]),a:dataContratto(m[2])};
+    }
+    if(!r.partitaIva){const m=l.match(/\b(CHE[-\s]?\d{3}[.\s]?\d{3}[.\s]?\d{3})\b|(?:P\.?\s?IVA|Partita IVA|VAT(?: number| no\.?)?|UID|IDE)\s*:?\s*((?:IT)?\s?\d{11})\b/i);if(m)r.partitaIva=norm(m[1]||m[2]).replace(/\s/g,'')}
+  }
+  const testo=righe.join('\n');
+  const soc=testo.match(/\b([A-Z][\w&.\-]*(?: [A-Z][\w&.\-]*){0,5} (?:SA|S\.A\.|AG|GmbH|Ltd|Limited|S\.r\.l\.|Srl|SRL|S\.p\.A\.|SpA|Inc\.?|LLC|BV|SAS|SARL|Sàrl))\b/);
+  if(soc)r.intestatario=soc[1];
+  const mail=[...new Set(testo.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g)||[])];
+  // Prima gli indirizzi delle fatture, poi gli altri
+  r.email=mail.sort((a,b)=>(/invoice|fattur|billing|factur|account/i.test(b)?1:0)-(/invoice|fattur|billing|factur|account/i.test(a)?1:0));
+  const parole=testo.toLowerCase();
+  r.lingua=(parole.match(/\b(the|and|of|shall)\b/g)||[]).length>(parole.match(/\b(il|della|del|che|per)\b/g)||[]).length?'en':'it';
+  return r;
+}
+async function estraiContratto(buf){return leggiContratto(await righePdf(buf))}
+function contrattoScelto(input){
+  const file=input&&input.files&&input.files[0];
+  const box=document.getElementById('contrattoEsito');
+  if(!file||!box)return;
+  box.innerHTML='<div class="small">Leggo il contratto…</div>';
+  const reader=new FileReader();
+  reader.onload=async()=>{
+    let r;
+    try{r=await estraiContratto(reader.result)}
+    catch(e){box.innerHTML='<div class="small">Non si è potuto leggere il PDF: '+esc(e&&e.message||String(e))+'. Se è una scansione, non ha testo da leggere.</div>';return}
+    finally{input.value=''}
+    const form=input.closest('form');
+    const metti=(nome,v)=>{const el=form&&form.querySelector(`[name=${nome}]`);if(el&&v!=null&&v!==''){el.value=v;el.classList.add('daContratto')}};
+    metti('invoice_subject',r.oggetto);metti('invoice_end_client',r.clienteFinale);metti('invoice_reference',r.riferimento);
+    if(r.tariffa&&r.tariffaGiornaliera!==false)metti('daily_rate',r.tariffa);
+    metti('standard_hours',r.ore);metti('vat_number',r.partitaIva);
+    const lin=form&&form.querySelector(`[name=invoice_language][value=${r.lingua}]`);if(lin)lin.checked=true;
+    const riga=(etichetta,v)=>`<div><span>${etichetta}</span><b>${v?esc(String(v)):'<i>non trovato</i>'}</b></div>`;
+    box.innerHTML=`<div class="contrattoLetto">${riga('Oggetto',r.oggetto)}${riga('Cliente finale',r.clienteFinale)}${riga('Riferimento',r.riferimento)}${riga('Tariffa',r.tariffa?(r.valuta==='CHF'?'CHF '+fmtNum(r.tariffa,2):fmtEUR(r.tariffa))+(r.tariffaGiornaliera?' al giorno':''):null)}${riga('Ore al giorno',r.ore)}${riga('Periodo',r.periodo?fmtDMY(r.periodo.da)+' – '+fmtDMY(r.periodo.a):null)}${riga('Intestatario fattura',r.intestatario)}${riga('Partita IVA / UID',r.partitaIva)}${riga('Lingua',r.lingua==='en'?'English':'Italiano')}</div>${r.email.length?`<div class="small" style="margin-top:8px">Contatti: ${r.email.map(esc).join(' · ')}</div>`:''}<div class="small" style="margin-top:8px">Ho compilato i campi qui sotto con quello che ho trovato: controllali e premi «Salva». Il PDF non è stato salvato.</div>`;
+  };
+  reader.onerror=()=>{box.innerHTML='<div class="small">Non si è potuto aprire il file.</div>'};
+  reader.readAsArrayBuffer(file);
+}
+function clientEdit(){const c=clientById(state.edit);if(!c)return clients();return appShell(`<h1>Modifica cliente</h1><form class="form" onsubmit="saveClient(event)"><div class="card"><b>Carica il contratto</b><div class="desc" style="margin-top:4px">Il PDF del contratto o del SOA: leggo oggetto, cliente finale, riferimento, tariffa e contatti per la fattura mensile. Il file non si conserva.</div><input type="file" accept="application/pdf,.pdf" style="margin-top:10px" onchange="contrattoScelto(this)"><div id="contrattoEsito" style="margin-top:10px"></div></div><div class="field"><label>Nome cliente</label><input name="name" value="${esc(c.name)}" required></div><div class="field"><label>Codice cliente</label><input name="code" maxlength="5" value="${esc(c.code||'')}" oninput="this.value=normCode(this.value)"${projectsOfClient(c.id).some(p=>p.code)?' readonly title="Ha gia\' dei progetti: il codice non si cambia"':''}><div class="small">${projectsOfClient(c.id).some(p=>p.code)?'Bloccato: da questo codice dipendono i codici dei progetti.':'Da 2 a 5 lettere o cifre.'}</div></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h" ${c.compensation_type==='daily_rate_8h'?'selected':''}>Tariffa giornaliera 8h</option><option value="monthly_flat" ${c.compensation_type==='monthly_flat'?'selected':''}>Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="${Number(c.daily_rate||0)}"></div><div class="field"><label>Ore standard giornata</label><input name="standard_hours" type="number" step="0.25" value="${Number(c.standard_hours||8)}"></div><div class="field"><label>Partita IVA</label><input name="vat_number" inputmode="numeric" value="${esc(c.vat_number||'')}" placeholder="Es. 11695380961"><div class="small">Serve a riconoscere il cliente quando carichi una fattura emessa: è l’unico abbinamento certo.</div></div><div class="field"><label>Lingua delle fatture</label>${sceltaSegmenti('invoice_language',[['it','Italiano'],['en','English']],c.invoice_language==='en'?'en':'it','')}<div class="small">Per un cliente estero: le descrizioni da incollare su Fiscozen escono in inglese.</div></div><div class="field"><label>Oggetto del contratto</label><input name="invoice_subject" value="${esc(c.invoice_subject||'')}" placeholder="Es. Consulenza SAP, Project Management"><div class="small">La posizione per cui fatturi, come la chiama il contratto. Apre la riga della fattura; vuoto: «Consulenza».</div></div><div class="field"><label>Cliente finale</label><input name="invoice_end_client" value="${esc(c.invoice_end_client||'')}" placeholder="Es. Richemont"><div class="small">Per chi lavori davvero. Vuoto: il nome del progetto.</div></div><div class="field"><label>Riferimento contratto</label><input name="invoice_reference" value="${esc(c.invoice_reference||'')}" placeholder="Es. SOA, ordine d’acquisto"><div class="small">Facoltativo: finisce in fondo alla riga, serve al cliente per abbinare la fattura.</div></div><div class="field"><label>Sede operativa (base trasferte)</label><input name="base_city" value="${esc(c.base_city||'')}" placeholder="Es. Milano"></div><div class="field"><label>Attivo</label><select name="active"><option value="true" ${c.active?'selected':''}>Sì</option><option value="false" ${!c.active?'selected':''}>No</option></select></div><h2>Policy rimborsi spese</h2><p class="sub">Per ogni voce di spesa scegli come viene gestita con questo cliente. L'app la proporrà in automatico quando inserisci una spesa.</p><div class="card"><b>Policy rimborsi</b><div class="desc" style="margin-top:4px">Chi paga ogni voce di spesa e fino a quanto. Sta in una pagina sua, così c'è spazio per i limiti.</div><button type="button" class="secondary" style="margin-top:12px" onclick="apriPolicy('${c.id}')">Apri la policy di ${esc(c.name)}</button></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteClient('${c.id}')">Elimina cliente</button><button type="button" class="secondary" onclick="${wbsReady()?`openClient('${c.id}')`:`go('clients')`}">Annulla</button></div></form>`)}
 async function addClient(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));
   // il codice cliente regge tutta la catena dei codici sotto: se non
   // lo si scrive, dal cliente non si riesce piu' a creare un progetto
@@ -7959,6 +8066,8 @@ Object.assign(window,{
   exportTimesheet,
   clients,
   editClient,
+  contrattoScelto,
+  estraiContratto,
   clientEdit,
   addClient,
   saveClient,

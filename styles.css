@@ -1100,3 +1100,5 @@ table.griglia.numeriRiga td.riga .n{font-variant-numeric:tabular-nums}
 .sceltaSeg input{position:absolute;opacity:0;pointer-events:none;width:1px;height:1px}
 .field .sceltaSeg label:has(input:checked){background:linear-gradient(135deg,#7C89A6,#62708F);color:#fff}
 .field .sceltaSeg label:has(input:focus-visible){outline:2px solid var(--primary);outline-offset:1px}
+/* Il contratto letto: etichetta e valore, uno per riga; il valore va a capo */
+.contrattoLetto{display:grid;gap:6px}.contrattoLetto div{display:grid;grid-template-columns:140px 1fr;gap:10px;font-size:14px}.contrattoLetto span{color:var(--muted)}.contrattoLetto b{font-weight:600;overflow-wrap:anywhere}.contrattoLetto i{color:var(--muted);font-weight:400}.field input.daContratto{border-color:rgba(124,137,166,.66);background:rgba(124,137,166,.08)}
