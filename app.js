@@ -5761,10 +5761,18 @@ function policyRimborsi(){
   const riga=cid=>pol.find(r=>r.category_id===cid)||{};
   const cats=(data.expenseCategories||[]).filter(x=>x.active);
   if(!cats.length)return appShell(`<div class="screenTitle">Policy rimborsi</div><div class="card">Crea prima delle voci di spesa: la policy dice cosa fare di ognuna.</div><button class="secondary" onclick="go('expenseCategories')">Vai alle voci di spesa</button>`);
-  return appShell(`<div class="screenTitle">Policy rimborsi</div><p class="sub">Per ogni voce di spesa: <b>chi la paga</b> e, se il cliente ha un tetto, <b>fino a quanto</b>. Il limite non impedisce di sforare: quando lo superi l'app te lo dice mentre inserisci, e ti offre di spezzare la spesa in due \u2014 la parte entro il tetto in fattura, l'eccedenza a tuo carico. <b>Massimo 0 = nessun limite.</b></p><div class="field"><label>Cliente</label><select onchange="cambiaClientePolicy(this.value)">${cl.map(x=>`<option value="${x.id}"${x.id===c.id?' selected':''}>${esc(x.name)}</option>`).join('')}</select></div><form class="form" onsubmit="savePolicy(event)"><input type="hidden" name="client_id" value="${c.id}">${cats.map(cat=>{
+  const prop=state.policyProposta&&state.policyProposta.clientId===c.id?state.policyProposta:null;
+  return appShell(`<div class="screenTitle">Policy rimborsi</div><p class="sub">Per ogni voce di spesa: <b>chi la paga</b> e, se il cliente ha un tetto, <b>fino a quanto</b>. Il limite non impedisce di sforare: quando lo superi l'app te lo dice mentre inserisci, e ti offre di spezzare la spesa in due \u2014 la parte entro il tetto in fattura, l'eccedenza a tuo carico. <b>Massimo 0 = nessun limite.</b></p><div class="field"><label>Cliente</label><select onchange="cambiaClientePolicy(this.value)">${cl.map(x=>`<option value="${x.id}"${x.id===c.id?' selected':''}>${esc(x.name)}</option>`).join('')}</select></div><div class="card"><b>Carica la policy del cliente</b><div class="desc" style="margin-top:4px">Il PDF della travel policy o del contratto: leggo i limiti di spesa e li propongo voce per voce. Li controlli, li cambi se serve, e valgono solo quando salvi. Il file non si conserva.</div><input type="file" accept="application/pdf,.pdf" style="margin-top:10px" onchange="policyPdfScelto(this,'${c.id}')"><details style="margin-top:10px"${prop&&prop.vuota?' open':''}><summary class="small">Oppure incolla il testo</summary><textarea id="policyTesto" rows="5" style="width:100%;margin-top:8px" placeholder="Es. Pasti: massimo 35 € a pasto. Hotel: fino a 150 € a notte."></textarea><button type="button" class="secondary" style="margin-top:8px" onclick="policyTestoIncollato('${c.id}')">Leggi il testo</button></details><div id="policyEsito" style="margin-top:10px">${prop?esitoPolicyLetta(prop)+`<button type="button" class="secondary" style="margin-top:10px" onclick="annullaPropostaPolicy()">Lascia la policy com\u2019era</button>`:''}</div></div><form class="form" onsubmit="savePolicy(event)"><input type="hidden" name="client_id" value="${c.id}">${cats.map(cat=>{
     const r=riga(cat.id);
     const unita=cat.unit_label?esc(cat.unit_label):'';
-    return `<div class="bloccoCampi policyVoce"><div class="bloccoTit">${esc(cat.name)}</div><div class="field"><label>Chi la paga</label><select name="policy_${cat.id}">${reimbTypeOptions(r.type||'own')}</select></div><div class="field"><label>Massimo \u20ac</label><input name="cap_${cat.id}" type="number" step="0.01" value="${Number(r.cap||0)||''}" placeholder="0 = nessun limite"></div>${unita?`<div class="field"><label>Il massimo vale</label><select name="perunit_${cat.id}"><option value="false"${r.per_unit?'':' selected'}>per l\u2019intera spesa</option><option value="true"${r.per_unit?' selected':''}>per ogni ${unita}</option></select></div>`:`<input type="hidden" name="perunit_${cat.id}" value="false">`}</div>`;
+    // La proposta letta dalla policy prende il posto del salvato, e si
+    // vede: il campo e' segnato finche' non si salva.
+    const pv=propostaDiVoce(c.id,cat.id);
+    const tipo=pv?(pv.esclusa?'own':'invoice'):(r.type||'own');
+    const cap=pv?(pv.esclusa?0:pv.cap):Number(r.cap||0);
+    const perUnit=pv?(!pv.esclusa&&pv.perUnita&&pv.haUnita):!!r.per_unit;
+    const seg=pv?' class="daContratto"':'';
+    return `<div class="bloccoCampi policyVoce"><div class="bloccoTit">${esc(cat.name)}${pv?' <span class="small">\u00b7 dalla policy</span>':''}</div><div class="field"><label>Chi la paga</label><select name="policy_${cat.id}"${seg}>${reimbTypeOptions(tipo)}</select></div><div class="field"><label>Massimo \u20ac</label><input name="cap_${cat.id}" type="number" step="0.01" value="${cap||''}" placeholder="0 = nessun limite"${seg}></div>${unita?`<div class="field"><label>Il massimo vale</label><select name="perunit_${cat.id}"${seg}><option value="false"${perUnit?'':' selected'}>per l\u2019intera spesa</option><option value="true"${perUnit?' selected':''}>per ogni ${unita}</option></select></div>`:`<input type="hidden" name="perunit_${cat.id}" value="false">`}</div>`;
   }).join('')}<div class="actions"><button class="primary">Salva la policy di ${esc(c.name)}</button><button type="button" class="secondary" onclick="go('settings')">Indietro</button></div></form>`);
 }
 async function savePolicy(ev){
@@ -5774,6 +5782,7 @@ async function savePolicy(ev){
   const policy=collectPolicyFromForm(f,parsePolicy(clientById(id)));
   const res=await updateResilient('clients',{expense_policy:policy},id,['expense_policy']);
   if(res.error)return setMsg('Non si \u00e8 potuta salvare la policy: '+motivoLeggibile(res.error),9000);
+  state.policyProposta=null;
   await reload();
   state.view='policyRimborsi';state.edit=id;render();
   setMsg('Policy di '+clientName(id)+' salvata.',4000);
@@ -5869,8 +5878,8 @@ function contrattoScelto(input){
   box.innerHTML='<div class="small">Leggo il contratto…</div>';
   const reader=new FileReader();
   reader.onload=async()=>{
-    let r;
-    try{r=await estraiContratto(reader.result)}
+    let r,righe;
+    try{righe=await righePdf(reader.result);r=leggiContratto(righe)}
     catch(e){box.innerHTML='<div class="small">Non si è potuto leggere il PDF: '+esc(e&&e.message||String(e))+'. Se è una scansione, non ha testo da leggere.</div>';return}
     finally{input.value=''}
     const form=input.closest('form');
@@ -5880,10 +5889,163 @@ function contrattoScelto(input){
     metti('standard_hours',r.ore);metti('vat_number',r.partitaIva);
     const lin=form&&form.querySelector(`[name=invoice_language][value=${r.lingua}]`);if(lin)lin.checked=true;
     const riga=(etichetta,v)=>`<div><span>${etichetta}</span><b>${v?esc(String(v)):'<i>non trovato</i>'}</b></div>`;
-    box.innerHTML=`<div class="contrattoLetto">${riga('Oggetto',r.oggetto)}${riga('Cliente finale',r.clienteFinale)}${riga('Riferimento',r.riferimento)}${riga('Tariffa',r.tariffa?(r.valuta==='CHF'?'CHF '+fmtNum(r.tariffa,2):fmtEUR(r.tariffa))+(r.tariffaGiornaliera?' al giorno':''):null)}${riga('Ore al giorno',r.ore)}${riga('Periodo',r.periodo?fmtDMY(r.periodo.da)+' – '+fmtDMY(r.periodo.a):null)}${riga('Intestatario fattura',r.intestatario)}${riga('Partita IVA / UID',r.partitaIva)}${riga('Lingua',r.lingua==='en'?'English':'Italiano')}</div>${r.email.length?`<div class="small" style="margin-top:8px">Contatti: ${r.email.map(esc).join(' · ')}</div>`:''}<div class="small" style="margin-top:8px">Ho compilato i campi qui sotto con quello che ho trovato: controllali e premi «Salva». Il PDF non è stato salvato.</div>`;
+    box.innerHTML=`<div class="contrattoLetto">${riga('Oggetto',r.oggetto)}${riga('Cliente finale',r.clienteFinale)}${riga('Riferimento',r.riferimento)}${riga('Tariffa',r.tariffa?(r.valuta==='CHF'?'CHF '+fmtNum(r.tariffa,2):fmtEUR(r.tariffa))+(r.tariffaGiornaliera?' al giorno':''):null)}${riga('Ore al giorno',r.ore)}${riga('Periodo',r.periodo?fmtDMY(r.periodo.da)+' – '+fmtDMY(r.periodo.a):null)}${riga('Intestatario fattura',r.intestatario)}${riga('Partita IVA / UID',r.partitaIva)}${riga('Lingua',r.lingua==='en'?'English':'Italiano')}</div>${r.email.length?`<div class="small" style="margin-top:8px">Contatti: ${r.email.map(esc).join(' · ')}</div>`:''}<div class="small" style="margin-top:8px">Ho compilato i campi qui sotto con quello che ho trovato: controllali e premi «Salva». Il PDF non è stato salvato.</div>${limitiDalContratto(righe)}`;
   };
   reader.onerror=()=>{box.innerHTML='<div class="small">Non si è potuto aprire il file.</div>'};
   reader.readAsArrayBuffer(file);
+}
+// ─── La policy del cliente, letta dal PDF ──────────────────────────
+// I limiti di spesa stanno nella travel policy del cliente (o in una
+// clausola del contratto): «pasti fino a 35 €», «hotel max 150 € a
+// notte». Si carica il PDF, o se ne incolla il testo, e l'app PROPONE i
+// limiti voce per voce. Nessun limite si salva da solo: compila la
+// pagina della policy, che resta modificabile, e si salva col pulsante.
+// Come per il contratto, il file si legge nel browser e non si conserva.
+//
+// Ogni gruppo dice come si riconosce nel testo e come si chiama la voce
+// di spesa a cui va: le voci le nomina l'utente, quindi si abbinano per
+// parole, in italiano, inglese e francese.
+const POLICY_GRUPPI=[
+  {k:'pasti',testo:/\b(?:pranz\w*|cen[ae]|past[oi]|vitto|ristor\w*|meals?|lunch\w*|dinners?|breakfasts?|colazion[ei]|repas|déjeuner|dîner|food)\b/i,voce:/pranz|cena|past[oi]|vitto|ristor|meal|lunch|dinner|colazion|repas/i},
+  {k:'alloggio',testo:/\b(?:hotels?|albergh?\w*|allogg\w*|pernott\w*|accommodations?|lodging|hébergement|hôtel)\b/i,voce:/hotel|alberg|allogg|pernott|accommodation|lodging|hébergement/i},
+  {k:'taxi',testo:/\b(?:taxi|ncc|uber)\b/i,voce:/taxi|ncc/i},
+  {k:'volo',testo:/\b(?:vol[oi]|aere\w*|flights?|air ?fares?|avion)\b/i,voce:/vol[oi]\b|aereo|flight|avion/i},
+  {k:'treno',testo:/\b(?:tren[oi]|trains?|rail\w*|ferroviari\w*)\b/i,voce:/treno|train|rail/i},
+  {k:'parcheggio',testo:/\b(?:parchegg\w*|parking)\b/i,voce:/parchegg|parking/i},
+  {k:'pedaggio',testo:/\b(?:pedagg\w*|tolls?|autostrad\w*|péages?)\b/i,voce:/pedagg|toll|péage/i},
+  {k:'noleggio',testo:/\b(?:noleggi\w*|car rentals?|rental cars?|location de voiture)\b/i,voce:/noleggi|rental|location/i},
+  {k:'carburante',testo:/\b(?:carburant\w*|fuel|benzin\w*|gasoline|petrol)\b/i,voce:/carburant|fuel|benzin/i},
+  {k:'km',testo:/\b(?:chilometr\w*|mileage|kilom\w*)\b|\/\s?km\b|\bper km\b|\bal km\b/i,voce:/\bkm\b|chilometr|mileage|kilom/i}
+];
+// Le parole che fanno di un importo un tetto. Senza, «il volo costa
+// 400 €» in un esempio diventerebbe un limite.
+const POLICY_TETTO=/\b(?:max\w*|mass\w*|fino a|up to|not (?:to )?exceed\w*|non (?:deve |può )?super\w*|limit\w*|cap(?:ped)?|tett[oi]|plafond|entro|al più|at most|jusqu['’]à|maximal\w*|ceiling|non oltre)\b/i;
+const POLICY_PER_UNITA=/\b(?:per (?:night|notte|day|giorno|nuit)|a notte|al giorno|par (?:nuit|jour)|per diem|nightly|daily)\b|\/\s?(?:notte|night|giorno|day)\b/i;
+const POLICY_ESCLUSA=/\b(?:not (?:be )?reimburs\w*|non (?:sono |è |viene |vengono )?rimbors\w*|not covered|non coper\w*|à la charge du consultant|a carico del consulente|not eligible|non ammess\w*)\b/i;
+function gruppoDiVoce(cat){const g=POLICY_GRUPPI.find(g=>g.voce.test(String(cat&&cat.name||'')));return g?g.k:null}
+function leggiPolicy(righe,cats){
+  // Le frasi: le righe di una tabella sono gia' frasi; un paragrafo va
+  // spezzato sul punto seguito da una maiuscola, cosi' i punti dentro un
+  // numero (35.00) o un'abbreviazione («max. 35») restano dove sono.
+  const frasi=[];
+  (righe||[]).forEach(l=>String(l||'').replace(/\t/g,' ').split(/[.;](?=\s+[A-ZÀ-Ý«"(]|\s*$)|•/).forEach(s=>{s=s.replace(/\s+/g,' ').trim();if(s)frasi.push(s)}));
+  const trovati={};const scartati=[];const esclusi={};
+  const IMPORTO=/(?:(€|EUR|CHF)\s*(\d[\d.,']*))|(?:(\d[\d.,']*)\s*(€|EUR|euro|CHF|Fr\.?)(?![a-z]))/gi;
+  frasi.forEach(f=>{
+    // Dove compare ogni gruppo, e dove ogni importo: un importo va al
+    // gruppo nominato piu' vicino prima di lui («pranzo 35 €, cena 50 €»).
+    const nomi=[];
+    POLICY_GRUPPI.forEach(g=>{const re=new RegExp(g.testo.source,'gi');let m;while((m=re.exec(f)))nomi.push({k:g.k,i:m.index})});
+    nomi.sort((a,b)=>a.i-b.i);
+    const importi=[];let m;IMPORTO.lastIndex=0;
+    while((m=IMPORTO.exec(f))){
+      const v=numeroContratto(String(m[2]||m[3]).replace(/'/g,'').replace(/[.,]$/,''));
+      if(v)importi.push({v,i:m.index,valuta:/CHF|Fr/i.test(m[1]||m[4])?'CHF':'EUR'});
+    }
+    if(!importi.length){
+      if(POLICY_ESCLUSA.test(f))nomi.forEach(n=>{if(!esclusi[n.k])esclusi[n.k]=f});
+      return;
+    }
+    if(!POLICY_TETTO.test(f)&&!POLICY_PER_UNITA.test(f)){return}
+    importi.forEach(imp=>{
+      const prima=nomi.filter(n=>n.i<imp.i);
+      const n=prima.length?prima[prima.length-1]:nomi[0];
+      if(!n){scartati.push({fonte:f,importo:imp.v,valuta:imp.valuta});return}
+      // Il km e' una tariffa, non un tetto: la tariffa sta nel veicolo
+      (trovati[n.k]=trovati[n.k]||[]).push({cap:imp.v,valuta:imp.valuta,perUnita:POLICY_PER_UNITA.test(f),fonte:f});
+    });
+  });
+  const voci=[];
+  (cats||[]).forEach(cat=>{
+    const k=gruppoDiVoce(cat);if(!k)return;
+    if(trovati[k]){
+      const tutti=trovati[k];
+      // Due tetti per la stessa voce (pranzo 35, cena 50 sulla voce
+      // «Pranzo / Cena»): vale il piu' alto, e si dicono tutti e due.
+      const eur=tutti.filter(t=>t.valuta==='EUR');
+      const scelto=(eur.length?eur:tutti).reduce((a,b)=>b.cap>a.cap?b:a);
+      voci.push({category_id:cat.id,nome:cat.name,gruppo:k,cap:scelto.cap,valuta:scelto.valuta,
+        perUnita:scelto.perUnita,haUnita:!!cat.unit_label,unita:cat.unit_label||'',fonti:[...new Set(tutti.map(t=>t.fonte))],
+        altri:tutti.filter(t=>t!==scelto).map(t=>t.cap),
+        applicabile:k!=='km'&&scelto.valuta==='EUR'});
+    }else if(esclusi[k]){
+      voci.push({category_id:cat.id,nome:cat.name,gruppo:k,esclusa:true,fonti:[esclusi[k]],applicabile:true});
+    }
+  });
+  // Quello che la policy dice di voci che l'utente non ha
+  const coperti=new Set((cats||[]).map(gruppoDiVoce));
+  Object.keys(trovati).filter(k=>!coperti.has(k)).forEach(k=>trovati[k].forEach(t=>scartati.push({fonte:t.fonte,importo:t.cap,valuta:t.valuta})));
+  return {voci,scartati};
+}
+// La proposta compila la pagina della policy, non il database: si
+// tiene finche' non si salva o si cambia cliente.
+function propostaPolicy(clientId,letta){
+  state.policyProposta=letta&&letta.voci.length||letta&&letta.scartati.length?{clientId,...letta}:null;
+}
+function propostaDiVoce(clientId,catId){
+  const p=state.policyProposta;
+  if(!p||p.clientId!==clientId)return null;
+  const v=p.voci.find(v=>v.category_id===catId);
+  return v&&v.applicabile?v:null;
+}
+function esitoPolicyLetta(p){
+  if(!p)return '';
+  const eur=v=>v.valuta==='CHF'?'CHF '+fmtNum(v.cap,2):fmtEUR(v.cap);
+  const righe=p.voci.map(v=>{
+    let cosa;
+    if(v.esclusa)cosa='non rimborsata: <b>a tuo carico</b>';
+    else if(v.gruppo==='km')cosa=`${eur(v)} al km: è una tariffa, non un tetto. Non la metto qui: la tariffa sta nel veicolo`;
+    else if(v.valuta==='CHF')cosa=`<b>${eur(v)}</b>: è in franchi, non la metto. Scrivi tu il massimo in euro`;
+    else{
+      cosa=`massimo <b>${eur(v)}</b>${v.perUnita&&v.haUnita?' per ogni '+esc(v.unita):''}`;
+      if(v.altri.length)cosa+=` (la policy dice anche ${v.altri.map(x=>fmtEUR(x)).join(', ')}: tengo il più alto)`;
+      if(v.perUnita&&!v.haUnita)cosa+=`. Nella policy è a notte o a giorno: qui vale per l’intera spesa`;
+    }
+    return `<div><span>${esc(v.nome)}</span><b style="font-weight:400">${cosa}<span class="policyFonte">«${esc(v.fonti[0])}»</span></b></div>`;
+  }).join('');
+  const altro=p.scartati.length?`<div class="small" style="margin-top:8px">Nella policy ci sono anche limiti per voci che non hai: ${p.scartati.map(s=>'«'+esc(s.fonte)+'»').join(' · ')}</div>`:'';
+  const nessuno=!p.voci.length?'<div class="small">Non ho trovato limiti per le tue voci di spesa.</div>':'';
+  return `<div class="contrattoLetto">${righe}</div>${nessuno}${altro}<div class="small" style="margin-top:8px">${p.voci.some(v=>v.applicabile)?'Ho compilato le voci qui sotto: controllale, cambiale se serve, e premi «Salva». Finché non salvi non cambia niente.':''} Il file non è stato salvato.</div>`;
+}
+function policyLetta(clientId,righe){
+  const letta=leggiPolicy(righe,(data.expenseCategories||[]).filter(x=>x.active));
+  propostaPolicy(clientId,letta);
+  if(!state.policyProposta)state.policyProposta={clientId,voci:[],scartati:[],vuota:true};
+  render();
+}
+function policyPdfScelto(input,clientId){
+  const file=input&&input.files&&input.files[0];
+  const box=document.getElementById('policyEsito');
+  if(!file)return;
+  if(box)box.innerHTML='<div class="small">Leggo la policy…</div>';
+  const reader=new FileReader();
+  reader.onload=async()=>{
+    let righe;
+    try{righe=await righePdf(reader.result)}
+    catch(e){if(box)box.innerHTML='<div class="small">Non si è potuto leggere il PDF: '+esc(e&&e.message||String(e))+'. Se è una scansione, non ha testo: incollalo qui sotto.</div>';return}
+    finally{input.value=''}
+    if(!righe.length){if(box)box.innerHTML='<div class="small">Il PDF non ha testo da leggere: è una scansione. Copia il testo della policy e incollalo qui sotto.</div>';return}
+    policyLetta(clientId,righe);
+  };
+  reader.onerror=()=>{if(box)box.innerHTML='<div class="small">Non si è potuto aprire il file.</div>'};
+  reader.readAsArrayBuffer(file);
+}
+function policyTestoIncollato(clientId){
+  const t=document.getElementById('policyTesto');
+  const testo=t?t.value:'';
+  if(!testo.trim())return setMsg('Incolla prima il testo della policy.',4000);
+  policyLetta(clientId,testo.split(/\r?\n/));
+}
+function annullaPropostaPolicy(){state.policyProposta=null;render()}
+// Se il contratto ha anche la policy delle spese, i limiti si
+// propongono nella pagina della policy: li' si vedono e si salvano.
+function limitiDalContratto(righe){
+  const id=state.edit;
+  const letta=leggiPolicy(righe,(data.expenseCategories||[]).filter(x=>x.active));
+  const n=letta.voci.filter(v=>v.applicabile).length;
+  if(!id||!n)return '';
+  propostaPolicy(id,letta);
+  return `<div class="small" style="margin-top:10px">Nel contratto ci sono anche ${n===1?'un limite':n+' limiti'} di spesa (${letta.voci.filter(v=>v.applicabile).map(v=>esc(v.nome)).join(', ')}). Salva il cliente e poi apri la policy qui sotto: li trovi già compilati, da controllare.</div>`;
 }
 function clientEdit(){const c=clientById(state.edit);if(!c)return clients();return appShell(`<h1>Modifica cliente</h1><form class="form" onsubmit="saveClient(event)"><div class="card"><b>Carica il contratto</b><div class="desc" style="margin-top:4px">Il PDF del contratto o del SOA: leggo oggetto, cliente finale, riferimento, tariffa e contatti per la fattura mensile. Il file non si conserva.</div><input type="file" accept="application/pdf,.pdf" style="margin-top:10px" onchange="contrattoScelto(this)"><div id="contrattoEsito" style="margin-top:10px"></div></div><div class="field"><label>Nome cliente</label><input name="name" value="${esc(c.name)}" required></div><div class="field"><label>Codice cliente</label><input name="code" maxlength="5" value="${esc(c.code||'')}" oninput="this.value=normCode(this.value)"${projectsOfClient(c.id).some(p=>p.code)?' readonly title="Ha gia\' dei progetti: il codice non si cambia"':''}><div class="small">${projectsOfClient(c.id).some(p=>p.code)?'Bloccato: da questo codice dipendono i codici dei progetti.':'Da 2 a 5 lettere o cifre.'}</div></div><div class="field"><label>Tipo compenso</label><select name="compensation_type"><option value="daily_rate_8h" ${c.compensation_type==='daily_rate_8h'?'selected':''}>Tariffa giornaliera 8h</option><option value="monthly_flat" ${c.compensation_type==='monthly_flat'?'selected':''}>Una tantum mensile</option></select></div><div class="field"><label>Tariffa giornaliera</label><input name="daily_rate" type="number" step="0.01" value="${Number(c.daily_rate||0)}"></div><div class="field"><label>Ore standard giornata</label><input name="standard_hours" type="number" step="0.25" value="${Number(c.standard_hours||8)}"></div><div class="field"><label>Partita IVA</label><input name="vat_number" inputmode="numeric" value="${esc(c.vat_number||'')}" placeholder="Es. 11695380961"><div class="small">Serve a riconoscere il cliente quando carichi una fattura emessa: è l’unico abbinamento certo.</div></div><div class="field"><label>Lingua delle fatture</label>${sceltaSegmenti('invoice_language',[['it','Italiano'],['en','English']],c.invoice_language==='en'?'en':'it','')}<div class="small">Per un cliente estero: le descrizioni da incollare su Fiscozen escono in inglese.</div></div><div class="field"><label>Oggetto del contratto</label><input name="invoice_subject" value="${esc(c.invoice_subject||'')}" placeholder="Es. Consulenza SAP, Project Management"><div class="small">La posizione per cui fatturi, come la chiama il contratto. Apre la riga della fattura; vuoto: «Consulenza».</div></div><div class="field"><label>Cliente finale</label><input name="invoice_end_client" value="${esc(c.invoice_end_client||'')}" placeholder="Es. Richemont"><div class="small">Per chi lavori davvero. Vuoto: il nome del progetto.</div></div><div class="field"><label>Riferimento contratto</label><input name="invoice_reference" value="${esc(c.invoice_reference||'')}" placeholder="Es. SOA, ordine d’acquisto"><div class="small">Facoltativo: finisce in fondo alla riga, serve al cliente per abbinare la fattura.</div></div><div class="field"><label>Sede operativa (base trasferte)</label><input name="base_city" value="${esc(c.base_city||'')}" placeholder="Es. Milano"></div><div class="field"><label>Attivo</label><select name="active"><option value="true" ${c.active?'selected':''}>Sì</option><option value="false" ${!c.active?'selected':''}>No</option></select></div><h2>Policy rimborsi spese</h2><p class="sub">Per ogni voce di spesa scegli come viene gestita con questo cliente. L'app la proporrà in automatico quando inserisci una spesa.</p><div class="card"><b>Policy rimborsi</b><div class="desc" style="margin-top:4px">Chi paga ogni voce di spesa e fino a quanto. Sta in una pagina sua, così c'è spazio per i limiti.</div><button type="button" class="secondary" style="margin-top:12px" onclick="apriPolicy('${c.id}')">Apri la policy di ${esc(c.name)}</button></div><div class="actions"><button class="primary">Salva modifiche</button><button type="button" class="secondary danger" onclick="deleteClient('${c.id}')">Elimina cliente</button><button type="button" class="secondary" onclick="${wbsReady()?`openClient('${c.id}')`:`go('clients')`}">Annulla</button></div></form>`)}
 async function addClient(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));
@@ -8214,6 +8376,10 @@ Object.assign(window,{
   editClient,
   contrattoScelto,
   estraiContratto,
+  leggiPolicy,
+  policyPdfScelto,
+  policyTestoIncollato,
+  annullaPropostaPolicy,
   clientEdit,
   addClient,
   saveClient,

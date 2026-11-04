@@ -413,23 +413,14 @@ Questi non li ha trovati la batteria. Vale la pena dirlo.
 
 ## Cosa resta aperto
 
-- **La policy del cliente da PDF.** L'app è vanilla JS + Supabase,
-  senza server e senza modelli: non può capire un PDF da sola. Ora che
-  Supabase Storage c'è (Strato 5b), il PDF si *può* allegare al cliente,
-  e si può aggiungere un campo «incolla qui il testo della policy» con
-  un riconoscitore di schemi («massimo 35 euro per pasto», «fino a 150 €
-  a notte») che **propone** i limiti da confermare. Oppure mandi il PDF
-  di K2 e i limiti te li imposto io. Da decidere.
-- **Il piè di lista in fattura.** Oggi sta in una sezione sua, fuori dal
-  totale, perché è una partita di giro: nessun importo di fattura si è
-  mosso. Se lo vuoi *dentro* la fattura, si cambia in una riga.
-- **La diaria** (indennità giornaliera) non è stata fatta: nei portali
-  c'è, ma per un forfettario che riaddebita analiticamente serve meno.
-- **Il multi-valuta**: Geneva è in franchi, ma oggi si scrive l'importo
-  già in euro. Una conversione semplice si può aggiungere.
-- **Le ricevute scaricabili insieme all'Excel della trasferta.** La
-  prima stesura di questo documento le prometteva nello strato 5b.
-  Non sono state fatte: l'export legge solo i campi della spesa, non
-  `receipt_path`, quindi non esiste un modo di tirare giù il fascicolo
-  di una trasferta in un colpo solo. La promessa è stata tolta dalla
-  descrizione dello strato; la cosa resta da fare, e non è grande.
+Niente. Al 4 novembre 2026:
+
+- **La policy del cliente da PDF: fatta.** Nella pagina «Policy
+  rimborsi» si carica il PDF della policy (o se ne incolla il testo) e
+  l'app propone i limiti voce per voce; anche «Carica il contratto»
+  nella scheda cliente li trova, se il contratto li ha. I limiti si
+  controllano e valgono solo quando si salva; il PDF non si conserva.
+  Non si propongono i tetti in franchi né la tariffa al km.
+- **Il piè di lista** è stato tolto in v1.54.0 (rimborsi non tassati).
+- **La diaria, il multi-valuta e le ricevute insieme all'Excel della
+  trasferta**: Giovanni ha detto che non servono.
