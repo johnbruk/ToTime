@@ -1127,6 +1127,14 @@ table.griglia.numeriRiga td.riga .n{font-variant-numeric:tabular-nums}
   .kpiGrid>div{border-right:0;padding-right:0}
   .statRow{grid-template-columns:1fr}
 }
+/* Con il testo «Piccolo» i 20,5 rem sono meno di 300 px e su un telefono
+   da 320 px le tre colonne restavano: «3.402,05 €» non ci sta. Sotto i
+   300 px di larghezza i riquadri vanno comunque uno sotto l'altro. */
+@container app (max-width:300px){
+  .kpiGrid,.kpiGrid.three,.kpiGrid.four{grid-template-columns:1fr;row-gap:12px}
+  .kpiGrid>div{border-right:0;padding-right:0}
+  .statRow{grid-template-columns:1fr}
+}
 @container app (max-width:18rem){
   .refHead,.cliHead{flex-wrap:wrap}
   .ceTab th{white-space:normal}
@@ -1135,6 +1143,9 @@ table.griglia.numeriRiga td.riga .n{font-variant-numeric:tabular-nums}
   /* (le righe delle fatture sono già una colonna sola: restano così) */
   .row:not(.rowFattura){grid-template-columns:auto minmax(0,1fr)}
   .row:not(.rowFattura)>:nth-child(n+3){grid-column:2;justify-self:start;text-align:left}
+  /* l'importo, col puntino delle migliaia, a testo enorme non sta sotto
+     al titolo: prende tutta la riga, cosi' la cifra non si taglia */
+  .row:not(.rowFattura)>.value:nth-child(n+3){grid-column:1/-1}
   /* conto economico: la voce su una riga, le due cifre sotto */
   .ceTab,.ceTab thead,.ceTab tbody{display:block}
   .ceTab tr{display:flex;flex-wrap:wrap;column-gap:10px;border-bottom:1px solid var(--line)}

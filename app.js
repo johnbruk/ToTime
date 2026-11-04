@@ -341,7 +341,8 @@ const MIGRAZIONE_DI={
   invoice_language:'2026-10-30_fatture-in-inglese.sql',
   invoice_subject:'2026-10-30_fatture-in-inglese.sql',
   invoice_end_client:'2026-10-30_fatture-in-inglese.sql',
-  invoice_reference:'2026-10-30_fatture-in-inglese.sql'
+  invoice_reference:'2026-10-30_fatture-in-inglese.sql',
+  invoice_kind:'2026-11-04_fattura-delle-spese.sql'
 };
 const NOME_COLONNA={
   trip_id:'la trasferta',vehicle_id:'il veicolo',from_place:'la partenza',
@@ -357,7 +358,8 @@ const NOME_COLONNA={
   invoice_language:'la lingua delle fatture',
   invoice_subject:'l’oggetto del contratto',
   invoice_end_client:'il cliente finale',
-  invoice_reference:'il riferimento del contratto'
+  invoice_reference:'il riferimento del contratto',
+  invoice_kind:'la fattura delle spese'
 };
 // Il messaggio da dire quando una scrittura ha dovuto lasciare fuori
 // dei campi: cosa non e' stato salvato, e quale migrazione lo sistema.
@@ -969,6 +971,8 @@ function rimborsiDelMese(clientId,mese){
 }
 const vicini=(a,b)=>Math.abs(Number(a||0)-Number(b||0))<0.005;
 const TIPI_FATTURA={TD01:'fattura',TD06:'parcella',TD24:'fattura differita',TD25:'fattura differita'};
+// Una riga di fattura che riaddebita una spesa, in italiano o in inglese.
+function rigaDiSpesa(r){return /rimbors|\bspes[ae]\b|trasfert|\bkm\b|chilometr|anticipazion|reimburs|\bexpenses?\b|mileage|business trip/i.test(r&&r.descrizione||'')}
 function confrontaFattura(f){
   const esiti=[];
   const nota=(liv,titolo,dettaglio)=>esiti.push({liv,titolo,dettaglio});
@@ -1132,7 +1136,10 @@ function confrontaFattura(f){
   //        lavoro: un rimborso si fattura insieme al lavoro del suo
   //        mese. Col solo importo, una spesa vecchia di un altro mese
   //        con la stessa cifra poteva trascinarsi la riga.
-  const pareRimborso=r=>/rimbors|\bspes[ae]\b|trasfert|\bkm\b|chilometr/i.test(r.descrizione||'');
+  const pareRimborso=rigaDiSpesa;
+  // Una fattura con sole righe di spesa e' la fattura delle spese: si
+  // confronta con le spese del mese, e si registra sulla sua scheda.
+  const tipo=f.righe.length&&f.righe.every(rigaDiSpesa)?'expenses':'work';
   const mesiLavoro=new Set(f.righe.filter(r=>r.mese&&!pareRimborso(r)).map(r=>r.mese));
   if(cliente)f.righe.forEach(r=>{
     if(!pareRimborso(r))return;
@@ -1190,8 +1197,7 @@ function confrontaFattura(f){
   //    risultava con la rivalsa di troppo, o mancante.
   const tsAnno=currentTaxSetting(Number(String(f.data||'').slice(0,4))||currentYear());
   const testata=(cliente&&mesi.length===1)
-    ? (data.billingHeaders||[]).find(h=>h.client_id===cliente.id&&
-        (String(h.year)+'-'+String(h.month).padStart(2,'0'))===mesi[0])
+    ? schedeDelMese(cliente.id,Number(mesi[0].slice(0,4)),Number(mesi[0].slice(5,7)))[tipo]||null
     : null;
   const ts=testata?{...tsAnno,
     inps_recharge_enabled:testata.inps_recharge_enabled ?? tsAnno.inps_recharge_enabled,
@@ -1201,7 +1207,12 @@ function confrontaFattura(f){
   const dove=testata?`nella fattura salvata di ${monthLabel(mesi[0])}`:'in Configurazione fiscale';
   const alConf=Number(ts.inps_recharge_rate||4);
   const attivaConf=ts.inps_recharge_enabled!==false;
-  if(f.rivalsaImporto>0&&!attivaConf)
+  if(tipo==='expenses'){
+    if(f.rivalsaImporto>0)
+      nota('scostamento','Rivalsa sulla fattura delle spese',
+        `La fattura ha solo spese e addebita ${fmtEUR(f.rivalsaImporto)} di rivalsa: sulle spese la rivalsa non va. Su Fiscozen non spuntare «Applica contributo GS INPS».`);
+  }
+  else if(f.rivalsaImporto>0&&!attivaConf)
     nota('scostamento','Rivalsa in fattura ma disattivata in configurazione',
       `La fattura addebita ${fmtEUR(f.rivalsaImporto)} di rivalsa, mentre ${dove} la rivalsa e' spenta.`);
   else if(!(f.rivalsaImporto>0)&&attivaConf)
@@ -1268,10 +1279,16 @@ function confrontaFattura(f){
         nota('scostamento',`Giorni diversi da quelli consuntivati · ${et}`,
           `In fattura ${fmtNum(m.giorni,2)} gg${quante}, consuntivati ${fmtNum(cons,2)} gg. ${m.giorni>cons?'Hai fatturato piu’ di quanto risulta lavorato.':'Hai fatturato meno di quanto risulta lavorato.'}`);
     }
-    const atteso=importoConsuntivato(cliente.id,mese)+rimborsiDelMese(cliente.id,mese);
+    // Quello che l'app si aspetta: le spese del mese nella fattura delle
+    // spese, il lavoro in quella del lavoro. Una fattura del lavoro con
+    // dentro anche righe di spesa e' com'era prima della separazione.
+    const conSpese=tipo==='work'&&f.righe.some(r=>r.mese===mese&&rigaDiSpesa(r));
+    const atteso=tipo==='expenses'?rimborsiDelMese(cliente.id,mese)
+      :importoConsuntivato(cliente.id,mese)+(conSpese?rimborsiDelMese(cliente.id,mese):0);
+    const cosa=tipo==='expenses'?'le spese da riaddebitare del mese':(conSpese?'lavoro piu’ rimborsi spese del mese':'il lavoro del mese');
     if(!vicini(atteso,m.importo))
       nota('scostamento',`Importo diverso dal fatturabile · ${et}`,
-        `In fattura ${fmtEUR(m.importo)}${quante}, l'app si aspettava ${fmtEUR(atteso)} (lavoro piu’ rimborsi spese del mese).`);
+        `In fattura ${fmtEUR(m.importo)}${quante}, l'app si aspettava ${fmtEUR(atteso)} (${cosa}).`);
   });
 
   if(cliente&&!senzaMese&&fatturaPianificato()&&mesi.some(m=>pianificatoNelMese(cliente.id,m)))
@@ -1291,11 +1308,13 @@ function confrontaFattura(f){
       `${mesi.map(monthLabel).join(', ')}. Registrandola, ogni mese ha la sua scheda, tutte con lo stesso numero.`);
 
   // 6. Rimborsi che l'app si aspettava e in fattura non si vedono.
-  if(cliente)mesi.forEach(m=>{
+  //    Le spese hanno la loro fattura: qui si ricorda solo se non e'
+  //    ancora partita.
+  if(cliente&&tipo==='work')mesi.forEach(m=>{
     const rb=rimborsiDelMese(cliente.id,m);
-    if(rb>0&&!f.righe.some(r=>r.mese===m&&/spes|rimbors|trasfert/i.test(r.descrizione)))
-      nota('nota',`Rimborsi spese senza una riga propria · ${monthLabel(m)}`,
-        `L’app ha ${fmtEUR(rb)} di spese da riaddebitare in quel mese. Se sono dentro la riga della consulenza va bene; se non sono state fatturate, sono soldi tuoi.`);
+    if(rb>0&&!f.righe.some(r=>r.mese===m&&rigaDiSpesa(r))&&!speseFatturate(cliente.id,Number(m.slice(0,4)),Number(m.slice(5,7))))
+      nota('nota',`Spese del mese da fatturare a parte · ${monthLabel(m)}`,
+        `L’app ha ${fmtEUR(rb)} di spese da riaddebitare in quel mese: vanno nella fattura delle spese, che non risulta ancora emessa.`);
   });
 
   // 6-bis. Le anticipazioni ex art. 15 hanno natura N1: se l'app ne
@@ -1315,7 +1334,7 @@ function confrontaFattura(f){
     nota('nota',bolloAddebitato?'Bollo addebitato al cliente':'Bollo a tuo carico',
       `${fmtEUR(f.bolloImporto)} di imposta di bollo${f.bolloVirtuale?', assolta in modo virtuale':''}${bolloAddebitato?', compresa nel totale della fattura.':', non addebitata al cliente.'}`);
 
-  return {esiti,cliente,mesi,abbinamento:ab.come,
+  return {esiti,cliente,mesi,abbinamento:ab.come,tipo,
     perMese,senzaMese,scontoNonRipartibile,bolloAddebitato};
 }
 // La schermata che fa vedere cosa si e' capito, PRIMA di toccare
@@ -1455,8 +1474,11 @@ function pianoRegistrazione(r){
     const bollo=(ultima&&r.bolloAddebitato)?cent(f.bolloImporto):0;
     const arrot=ultima?Number(f.arrotondamento||0):0;
     const [y,mm]=m.split('-').map(Number);
-    const esistente=(data.billingHeaders||[]).find(h=>h.client_id===r.cliente.id&&Number(h.year)===y&&Number(h.month)===mm)||null;
-    return {mese:m,year:y,month:mm,base,rivalsa,bollo,totale:cent(base+rivalsa+bollo+arrot),esistente};
+    const esistente=schedeDelMese(r.cliente.id,y,mm)[r.tipo==='expenses'?'expenses':'work']||null;
+    // Quanto della base sono spese: tutta, nella fattura delle spese;
+    // le righe di spesa, se stanno in quella del lavoro.
+    const spese=r.tipo==='expenses'?base:cent(f.righe.filter(x=>x.mese===m&&rigaDiSpesa(x)).reduce((a,x)=>a+Number(x.importo||0),0));
+    return {mese:m,year:y,month:mm,base,rivalsa,bollo,spese,totale:cent(base+rivalsa+bollo+arrot),esistente};
   });
   const somma=cent(righe.reduce((a,x)=>a+x.totale,0));
   // Il totale documento e' facoltativo: assente non vuol dire zero.
@@ -1494,7 +1516,7 @@ function cardRegistrazione(r){
     <div class="desc">${fmtEUR(x.base)} di imponibile${x.rivalsa?' + '+fmtEUR(x.rivalsa)+' di rivalsa':''}${x.bollo?' + '+fmtEUR(x.bollo)+' di bollo':''}</div>
     <div class="desc">${x.esistente?(stesso(x)?'Già registrata: si aggiorna':'La scheda del mese c’è già: si completa'):'Scheda nuova'}${x.esistente&&x.esistente.status==='collected'?' · resta incassata':''}</div></div>
     <div class="value">${fmtEUR(x.totale)}</div></div>`).join('');
-  return `<h2>Registra la fattura</h2><p class="sub">Si scrivono sulle schede di fatturazione i numeri di questa fattura, un mese per scheda e tutte con lo stesso numero. Sono quelli che usano il bilancio e la stima delle imposte.</p>
+  return `<h2>Registra la fattura${r.tipo==='expenses'?' delle spese':''}</h2><p class="sub">Si scrivono sulle schede di fatturazione i numeri di questa fattura, un mese per scheda e tutte con lo stesso numero. Sono quelli che usano il bilancio e la stima delle imposte.</p>
 <div class="list">${righe}</div>
 ${archivioPronto()
   ?`<p class="sub">Si conserva anche il file XML, con la natura IVA${natureFattura(r.f).length?' ('+esc(natureFattura(r.f).join(', '))+')':''}: lo ritrovi nel dettaglio della fattura.</p>`
@@ -1517,6 +1539,7 @@ async function registraFatturaOra(){
   const p=pianoRegistrazione(r);
   if(!p.ok)return setMsgLeggero(p.perche,9000);
   if(p.gia&&!p.daConservare)return setMsgLeggero('È già registrata così.',5000);
+  if(r.tipo==='expenses'&&!(await haTipoFattura()))return setMsgLeggero('Per registrare la fattura delle spese manca un pezzo nel database: lancia la migrazione '+MIGRAZIONE_DI.invoice_kind+'.',12000);
   const f=r.f;
   if(!p.gia){
     const elenco=p.righe.map(x=>'· '+monthLabel(x.mese)+': '+fmtEUR(x.totale)).join('\n');
@@ -1535,7 +1558,9 @@ async function registraFatturaOra(){
         inps_recharge_enabled:x.rivalsa>0,inps_recharge_rate:Number(f.rivalsaAliquota||0)||null,
         inps_recharge_amount:x.rivalsa,
         stamp_duty_enabled:x.bollo>0,stamp_duty_amount:x.bollo,
+        expenses_amount:x.spese,
         invoice_total_amount:x.totale};
+      if(r.tipo==='expenses')payload.invoice_kind='expenses';
       const res=x.esistente
         ? await updateResilient('billing_headers',payload,x.esistente.id)
         : await insertResilient('billing_headers',payload);
@@ -1659,8 +1684,45 @@ function renderTemplate(tpl,row){
   return text.replaceAll('[Mese Anno]',monthLabel(state.month)).replaceAll('[Progetto]',project).replaceAll('[Cliente]',clientName(row.client_id)||'').replaceAll('[Giorni]',fmtDays(row.hours)).replaceAll('[Ore]',fmtNum(row.hours||0,1)).replaceAll('[Importo]',fmtEUR(row.amount||0));
 }
 function fiscoText(row){return renderTemplate(invoiceTemplateByType(row.type),row)}
-function headerForClient(client_id){const {year,month}=periodParts();return data.billingHeaders.find(h=>h.client_id===client_id&&Number(h.year)===year&&Number(h.month)===month)}
-function headerStatus(client_id){return headerForClient(client_id)?.status||'to_invoice'}
+// ─── Lavoro e spese: due fatture al mese ────────────────────────────
+// Le spese non vanno nella fattura dei consuntivi: si fatturano sempre
+// a parte. Ogni cliente ha quindi, per ogni mese, una fattura del
+// LAVORO (giornate, compensi, rivalsa INPS se la scegli) e una delle
+// SPESE (i rimborsi, mai con la rivalsa). Ognuna ha la sua scheda in
+// billing_headers, distinta da invoice_kind; senza la colonna, o vuota,
+// la scheda e' quella del lavoro.
+//
+// Prima le spese stavano nella fattura del lavoro: un mese con quella
+// fattura emessa e le spese dentro (expenses_amount > 0, o non saputo
+// perche' registrata dall'XML prima della separazione) le ha gia'
+// fatturate, e non ne chiede un'altra.
+function tipoFattura(h){return h&&h.invoice_kind==='expenses'?'expenses':'work'}
+const emessaStato=st=>st==='invoice_issued'||st==='collected';
+function schedeDelMese(clientId,year,month){
+  const out={};
+  (data.billingHeaders||[]).forEach(h=>{if(h.client_id===clientId&&Number(h.year)===Number(year)&&Number(h.month)===Number(month)){const t=tipoFattura(h);if(!out[t])out[t]=h}});
+  return out;
+}
+function speseNellaFatturaDelLavoro(sc){
+  const w=sc&&sc.work;
+  return !!w&&!sc.expenses&&emessaStato(w.status)&&(w.expenses_amount==null||Number(w.expenses_amount)>0);
+}
+// La scheda che decide delle spese di quel mese: la loro, oppure quella
+// del lavoro se le ha dentro, o se esclude il mese intero (com'era
+// prima che le spese avessero una fattura loro).
+function schedaDelleSpese(sc){
+  if(!sc)return null;
+  if(sc.expenses)return sc.expenses;
+  const w=sc.work;
+  return w&&(speseNellaFatturaDelLavoro(sc)||w.status==='excluded')?w:null;
+}
+// Le spese del cliente in quel mese sono gia' in una fattura emessa?
+function speseFatturate(clientId,year,month){
+  const h=schedaDelleSpese(schedeDelMese(clientId,year,month));
+  return !!h&&emessaStato(h.status);
+}
+function headerForClient(client_id,tipo='work'){const {year,month}=periodParts();return schedeDelMese(client_id,year,month)[tipo]}
+function headerStatus(client_id,tipo='work'){return headerForClient(client_id,tipo)?.status||'to_invoice'}
 function statusLabel(s){return ({to_invoice:'Da fatturare',invoice_issued:'Fattura emessa',collected:'Incassato',excluded:'Escluso'})[s]||'Da fatturare'}
 function statusClass(s){return ({to_invoice:'orange',invoice_issued:'blue',collected:'green',excluded:'gray'})[s]||'orange'}
 
@@ -1712,9 +1774,11 @@ function annualTotals(year=currentYear()){const a=annualMonthData(year);const t=
   t.daFatturare=Math.max(0,t.fatturabile-t.fatturatoBase);t.margine=t.compensi-t.costi;
   // Quanto del «da fatturare» sono rimborsi non tassati: le spese dei
   // mesi la cui fattura non e' ancora emessa. Serve a chi stima le tasse.
-  const emessi=new Set((data.billingHeaders||[]).filter(h=>Number(h.year)===Number(year)&&['invoice_issued','collected'].includes(h.status)).map(h=>h.client_id+'|'+Number(h.month)));
-  t.nonTassatiDaFatturare=expenseRowsForYear(year).filter(e=>rimborsoNonTassato(e)&&!emessi.has(e.client_id+'|'+(monthIndexFromDate(e.expense_date)+1)))
-    .reduce((s,e)=>s+Number(e.amount||0),0);
+  // E quanto del «da fatturare» sono spese: vanno nella loro fattura,
+  // senza rivalsa.
+  const ancoraDaFatturare=expenseRowsForYear(year).filter(e=>expIsInvoice(e)&&!speseFatturate(e.client_id,year,monthIndexFromDate(e.expense_date)+1));
+  t.nonTassatiDaFatturare=ancoraDaFatturare.filter(rimborsoNonTassato).reduce((s,e)=>s+Number(e.amount||0),0);
+  t.speseDaFatturare=ancoraDaFatturare.reduce((s,e)=>s+Number(e.amount||0),0);
   return t}
 function currentTaxSetting(year=currentYear()){return data.taxSettings.find(t=>Number(t.fiscal_year)===Number(year))||{fiscal_year:year,regime:'forfettario',ateco_code:'62.20.10',ateco_description:'Consulenza informatica',profitability_coefficient:67,substitute_tax_rate:5,inps_recharge_enabled:true,inps_recharge_rate:4,inps_gs_rate:26.07,stamp_duty_enabled:true,stamp_duty_amount:2,annual_revenue_limit:85000,activity_start_date:DEFAULT_DEFAULT_ACTIVITY_START_DATE,projection_method:'weighted_average',projection_excluded_months:[],projection_include_current_month:true,projection_prudent_factor:0.85,projection_optimistic_factor:1.10,risk_low_threshold:70,risk_medium_threshold:90,risk_high_threshold:100}}
 // ─── I rimborsi spese e il reddito ──────────────────────────────────
@@ -1802,6 +1866,9 @@ function spesaAllEstero(e){return paeseSpesa(e)!=='IT'}
 // cliente in quel mese. Mai piu' della base della fattura.
 function nonTassatiDellaScheda(h){
   if(!h)return 0;
+  // La fattura del lavoro le spese non le ha, salvo nei mesi fatturati
+  // prima della separazione.
+  if(tipoFattura(h)==='work'&&!speseNellaFatturaDelLavoro(schedeDelMese(h.client_id,h.year,h.month)))return 0;
   const pre=String(h.year)+'-'+String(h.month).padStart(2,'0');
   const v=(data.travelExpenses||[]).filter(e=>e.client_id===h.client_id&&String(e.expense_date||'').startsWith(pre)&&rimborsoNonTassato(e))
     .reduce((s,e)=>s+Number(e.amount||0),0);
@@ -1944,7 +2011,9 @@ function billingCalc(group,header={}){
     .reduce((s,l)=>s+(l.items||[]).filter(rimborsoNonTassato).reduce((a,e)=>a+Number(e.amount||0),0),0);
   const taxableBase=services+manual+expenses;
   const inpsBase=taxableBase-expensesNonTaxed;
-  const inpsEnabled=header.inps_recharge_enabled ?? settings.inps_recharge_enabled ?? true;
+  // La fattura delle spese la rivalsa non la porta mai: si sceglie solo
+  // su quella del lavoro.
+  const inpsEnabled=group.kind==='expenses'?false:(header.inps_recharge_enabled ?? settings.inps_recharge_enabled ?? true);
   const inpsRate=Number(header.inps_recharge_rate ?? settings.inps_recharge_rate ?? 4);
   const inpsAmount=inpsEnabled?inpsBase*inpsRate/100:0;
   // Il bollo si sceglie una volta per tutto l'anno, in Configurazione
@@ -2100,27 +2169,33 @@ function margineMesi(year=currentYear()){
     costi:Number(m.costi||0),fuoriReddito:Number(m.rimborsiAnalitici||0),bollo:Number(bo.perMese[i]||0)}));
   // un cliente con la fattura del mese gia' emessa, o escluso, non ha
   // niente da fatturare in quel mese
+  // Il lavoro e le spese hanno due fatture: ognuna si chiude per conto
+  // suo. Nei mesi fatturati prima della separazione le spese stanno in
+  // quella del lavoro, e si chiudono con lei.
   const chiuso=new Set(),scheda={};
   data.billingHeaders.filter(h=>Number(h.year)===Number(year)).forEach(h=>{
     const i=Number(h.month||1)-1;if(i<0||i>11)return;
-    scheda[h.client_id+'|'+i]=h;
+    const t=tipoFattura(h),k=h.client_id+'|'+i;
+    if(t==='work')scheda[k]=h;
     if(['invoice_issued','collected'].includes(h.status)){
       mesi[i].emesso+=Number(h.invoice_total_amount||h.total_amount||0);
       mesi[i].bolloAddebitato+=Number(h.stamp_duty_amount||0);
-      chiuso.add(h.client_id+'|'+i);
-    }else if(h.status==='excluded')chiuso.add(h.client_id+'|'+i);
+      chiuso.add(k+'|'+t);
+    }else if(h.status==='excluded')chiuso.add(k+'|'+t);
+    const hs=t==='work'?schedaDelleSpese(schedeDelMese(h.client_id,h.year,h.month)):null;
+    if(hs===h&&['invoice_issued','collected','excluded'].includes(h.status))chiuso.add(k+'|expenses');
   });
   // La rivalsa come la calcola la pagina di fatturazione: quella salvata
   // sulla scheda del mese, se c'e' — spenta per un cliente estero, o con
   // un'aliquota sua — altrimenti quella della Configurazione fiscale.
   const rivalsa=k=>{const h=scheda[k]||{};
     return (h.inps_recharge_enabled??ts.inps_recharge_enabled??true)?Number(h.inps_recharge_rate??ts.inps_recharge_rate??4)/100:0};
-  // I rimborsi non tassati la rivalsa non la portano: entrano per quello che sono.
-  const daFatturare=(clientId,i,v,senzaRivalsa)=>{const k=clientId+'|'+i;if(!chiuso.has(k))mesi[i].daFatturare+=v*(1+(senzaRivalsa?0:rivalsa(k)))};
+  // Le spese la rivalsa non la portano mai: hanno la loro fattura.
+  const daFatturare=(clientId,i,v,spesa)=>{const k=clientId+'|'+i;if(!chiuso.has(k+'|'+(spesa?'expenses':'work')))mesi[i].daFatturare+=v*(1+(spesa?0:rivalsa(k)))};
   rowsForYear(year).forEach(e=>{if(!isPlanned(e))daFatturare(e.client_id,monthIndexFromDate(e.entry_date),dailyAmount(e))});
   monthlyRowsForYear(year).forEach(e=>daFatturare(e.client_id,Number(e.month||1)-1,Number(e.amount||0)));
   manualRowsForYear(year).forEach(e=>{if(!isPlanned(e))daFatturare(e.client_id,monthIndexFromDate(e.entry_date),Number(e.amount||0))});
-  expenseRowsForYear(year).filter(e=>expType(e)==='invoice').forEach(e=>daFatturare(e.client_id,monthIndexFromDate(e.expense_date),Number(e.amount||0),rimborsoNonTassato(e)));
+  expenseRowsForYear(year).filter(e=>expType(e)==='invoice').forEach(e=>daFatturare(e.client_id,monthIndexFromDate(e.expense_date),Number(e.amount||0),true));
   // L'imposta con le regole della Tassazione e del Bilancio: si toglie
   // dal reddito dell'anno quello che di contributi si versa NELL'ANNO,
   // non i contributi dell'anno stesso (che si pagano l'anno dopo). Prima
@@ -4229,7 +4304,23 @@ if(r.kind==='manual')return `<div ${rowAttrs('manual',r.id)}><div class="date">$
 return `<div ${rowAttrs('expense',r.id)}><div class="date">${selBox('expense',r.id)}${dateIT(r.expense_date)}</div><div>${cli}<div class="title">${esc(titoloRiga(r))}</div><div class="desc">Spesa · ${esc(expenseCategoryName(r.expense_category_id))} ${r.work_site||r.work_city?'· '+esc([r.work_site,r.work_city].filter(Boolean).join(' - ')):''}</div><div class="desc">${esc(r.description||'')}</div></div><div class="value">Spesa</div></div>`}
 
 function annualSummaryCard(){const y=currentYear();const at=annualTotals(y);return `<div class="card cardLink" onclick="openAnnualMonths()" role="button" title="Dettaglio consuntivato mese per mese"><b>Annuale ${y} <span class="cardLinkArrow">›</span></b><div class="kpiGrid three" style="margin-top:14px"><div><span>Consuntivato</span><strong>${fmtEUR(at.consuntivato)}</strong></div><div><span>Fatturato</span><strong>${fmtEUR(at.fatturato)}</strong></div><div><span>Incassato</span><strong>${fmtEUR(at.incassato)}</strong></div></div><div class="metricLine" style="margin-top:12px">Da incassare <span class="dot">·</span> ${fmtEUR(at.daIncassare)}</div>${at.rimborsiAnalitici>0.005?`<div class="metricLine" style="margin-top:6px">Rimborsi non tassati <span class="dot">·</span> ${fmtEUR(at.rimborsiAnalitici)} <span class="desc" style="margin:0">nel fatturato, ma non sono ricavi</span></div>`:''}</div>`}
-function billingGroupsByClient(){const lines=groupSummary();const by={};lines.forEach(l=>{if(!by[l.client_id])by[l.client_id]={client_id:l.client_id,lines:[],baseTotal:0,total:0,hours:0,pAmount:0,pHours:0};by[l.client_id].lines.push(l);by[l.client_id].baseTotal+=Number(l.amount||0);by[l.client_id].hours+=Number(l.hours||0);by[l.client_id].pAmount+=Number(l.pAmount||0);by[l.client_id].pHours+=Number(l.pHours||0)});Object.values(by).forEach(g=>{const header=headerForClient(g.client_id)||{};g.calc=billingCalc(g,header);g.total=g.calc.total});return Object.values(by).sort((a,b)=>clientName(a.client_id).localeCompare(clientName(b.client_id)))}
+// Un gruppo per cliente e per fattura: il lavoro e le spese. Le spese
+// restano nel gruppo del lavoro solo nei mesi fatturati prima della
+// separazione, quando stavano nella stessa fattura.
+const TIPI_RIGA_SPESE=['travel_expenses','expense_report'];
+function billingGroupsByClient(){
+  const {year,month}=periodParts();
+  const by={};
+  groupSummary().forEach(l=>{
+    const sc=schedeDelMese(l.client_id,year,month);
+    const tipo=TIPI_RIGA_SPESE.includes(l.type)&&!(sc.work&&schedaDelleSpese(sc)===sc.work)?'expenses':'work';
+    const k=l.client_id+'|'+tipo;
+    const g=by[k]=by[k]||{client_id:l.client_id,kind:tipo,lines:[],baseTotal:0,total:0,hours:0,pAmount:0,pHours:0};
+    g.lines.push(l);g.baseTotal+=Number(l.amount||0);g.hours+=Number(l.hours||0);g.pAmount+=Number(l.pAmount||0);g.pHours+=Number(l.pHours||0);
+  });
+  Object.values(by).forEach(g=>{const header=headerForClient(g.client_id,g.kind)||{};g.calc=billingCalc(g,header);g.total=g.calc.total});
+  return Object.values(by).sort((a,b)=>clientName(a.client_id).localeCompare(clientName(b.client_id))||(a.kind==='work'?-1:1));
+}
 // ─── La pagina di fatturazione ──────────────────────────
 //
 // Com'era: quattro schede di riepilogo impilate sotto un titolo solo,
@@ -4267,7 +4358,8 @@ function billingGroupsByClient(){const lines=groupSummary();const by={};lines.fo
 // FreshBooks chiama «unbilled expenses», quello che si guarda di mattina.
 function speseDaRiaddebitareMese(){
   const r={totale:0,analitico:0,art15:0,tassati:0,daSistemare:0,emessi:0};
-  const emessa=c=>{const h=headerForClient(c);return !!h&&['invoice_issued','collected'].includes(h.status)};
+  const {year,month}=periodParts();
+  const emessa=c=>speseFatturate(c,year,month);
   expenseRows().filter(expIsInvoice).forEach(e=>{
     const v=Number(e.amount||0),n=naturaRimborso(e);
     if(emessa(e.client_id)){r.emessi+=v;return}
@@ -4285,7 +4377,7 @@ function rimborsiMeseCard(){
   if(r.art15>0)voci.push(`<div><span>${VOCE_FISCOZEN.art15}</span><strong>${fmtEUR(r.art15)}</strong></div>`);
   if(r.tassati>0)voci.push(`<div><span>Tassati (km e da sistemare)</span><strong>${fmtEUR(r.tassati)}</strong></div>`);
   return `<div class="card"><b>Spese da riaddebitare · ${fmtEUR(r.totale)}</b>
-<div class="desc" style="margin-top:2px">Le voci con il nome che hanno su Fiscozen. Le prime due non sono tassate e non portano la rivalsa del 4%.</div>
+<div class="desc" style="margin-top:2px">Vanno nella fattura delle spese, a parte da quella del lavoro e senza rivalsa. Le voci hanno il nome che hanno su Fiscozen; le prime due non sono tassate.</div>
 <div class="kpiGrid${voci.length===3?' three':''}" style="margin-top:12px">${voci.join('')}</div>
 ${r.daSistemare?`<div class="metricLine" style="margin-top:10px"><span class="tag orange">da sistemare</span> ${r.daSistemare===1?'1 spesa':r.daSistemare+' spese'} senza fattura o pagate in contanti: oggi sono tassate. <a href="#" onclick="apriSpeseDaSistemare();return false">Vedi quali</a></div>`:''}
 <div class="metricLine" style="margin-top:8px"><a href="#" onclick="apriRicevuteMese();return false">Scarica le ricevute del mese</a> <span class="dot">·</span> un PDF da mandare al cliente</div></div>`;
@@ -4295,7 +4387,10 @@ ${r.daSistemare?`<div class="metricLine" style="margin-top:10px"><span class="ta
 // sparire: torna qui finche' non lo si fattura.
 function speseRimasteFuori(){
   const pre=state.month;const da=String(Number(pre.slice(0,4))-1)+pre.slice(4);
-  const scheda={};(data.billingHeaders||[]).forEach(h=>{scheda[h.client_id+'|'+h.year+'-'+String(h.month).padStart(2,'0')]=h});
+  // La scheda che tiene le spese: la loro fattura, oppure, nei mesi
+  // fatturati prima della separazione, quella del lavoro.
+  const scheda={};(data.billingHeaders||[]).forEach(h=>{const k=h.client_id+'|'+h.year+'-'+String(h.month).padStart(2,'0');
+    const hs=schedaDelleSpese(schedeDelMese(h.client_id,h.year,h.month));if(hs)scheda[k]=hs});
   const gruppi={};
   (data.travelExpenses||[]).filter(expIsInvoice).forEach(e=>{
     const m=String(e.expense_date||'').slice(0,7);
@@ -4388,10 +4483,10 @@ function billingAnno(){
 function billing(){const groups=billingGroupsByClient();const total=groups.reduce((s,g)=>s+g.total,0);
   return appShell(`<h1>Fatturazione del mese</h1>${monthSelector()}
 ${billingMeseCard(groups,total)}${rimborsiMeseCard()}${speseRimasteFuoriCard()}
-<div class="list">${groups.map(g=>{const st=headerStatus(g.client_id);return `<div class="row" onclick="openBillingClient('${g.client_id}')"><div></div><div><div class="title">${esc(clientName(g.client_id))}</div><div class="metricLine">${metricLine(g.hours,g.total)}</div><div class="desc">Base ${fmtEUR(g.calc.subtotal)} · Rivalsa ${fmtEUR(g.calc.inpsAmount)} · Bollo ${fmtEUR(g.calc.stampAmount)}</div><span class="tag ${statusClass(st)}">${statusLabel(st)}</span></div><div class="value">›</div></div>`}).join('')||emptyState('Nessuna riga fatturabile in questo mese.','+ Registra un consuntivo','newEntryChoice()')}</div>
+<div class="list">${groups.map(g=>{const st=headerStatus(g.client_id,g.kind);const spese=g.kind==='expenses';return `<div class="row" onclick="openBillingClient('${g.client_id}','${g.kind}')"><div></div><div><div class="title">${esc(clientName(g.client_id))} <span class="tag gray">${spese?'Spese':'Lavoro'}</span></div><div class="metricLine">${spese?fmtEUR(g.total):metricLine(g.hours,g.total)}</div><div class="desc">${spese?'Rimborsi '+fmtEUR(g.calc.subtotal)+' · senza rivalsa':'Base '+fmtEUR(g.calc.subtotal)+' · Rivalsa '+fmtEUR(g.calc.inpsAmount)} · Bollo ${fmtEUR(g.calc.stampAmount)}</div><span class="tag ${statusClass(st)}">${statusLabel(st)}</span></div><div class="value">›</div></div>`}).join('')||emptyState('Nessuna riga fatturabile in questo mese.','+ Registra un consuntivo','newEntryChoice()')}</div>
 <div class="miniActions"><button type="button" class="miniBtn" onclick="go('fatturaCarica')" title="Carica l’XML di una fattura già emessa e confrontalo coi consuntivi">⤒ Carica fattura emessa</button></div>
     ${linkReportEconomico()}`)}
-function openBillingClient(clientId){navigateTo('billingDetail',{edit:clientId})}
+function openBillingClient(clientId,tipo='work'){navigateTo('billingDetail',{edit:clientId,editType:tipo==='expenses'?'expenses':'work'})}
 // La descrizione da copiare su Fiscozen diceva «Rimborso spese di
 // trasferta - Ottobre 2026 - Omnichannel - Volo»: mancava la DATA e
 // mancava l'IMPORTO, cioe' proprio cio' che rende l'addebito ANALITICO.
@@ -4437,16 +4532,28 @@ function expenseFiscoTextEN(e){
   pezzi.push(fmtEUREN(e.amount||0));
   return pezzi.filter(Boolean).join(' \u00b7 ');
 }
-function billingDetailView(){const clientId=state.edit;const group=billingGroupsByClient().find(g=>g.client_id===clientId);if(!group)return billing();const header=headerForClient(clientId)||{};const st=header.status||'to_invoice';const calc=billingCalc(group,header);const items=[];const piede=[];group.lines.forEach(l=>{
+function billingDetailView(){const clientId=state.edit;const tipo=state.editType==='expenses'?'expenses':'work';const gruppi=billingGroupsByClient().filter(g=>g.client_id===clientId);const group=gruppi.find(g=>g.kind===tipo);if(!group)return billing();const altro=gruppi.find(g=>g.kind!==tipo);const spese=tipo==='expenses';const header=headerForClient(clientId,tipo)||{};const st=header.status||'to_invoice';const calc=billingCalc(group,header);const items=[];const piede=[];group.lines.forEach(l=>{
     if(l.type==='expense_report'){
       (l.items||[]).forEach(e=>piede.push({title:expenseCategoryName(e.expense_category_id),desc:(e.description?esc(e.description)+' · ':'')+dateIT(e.expense_date),metric:amountLine(expenseCategoryName(e.expense_category_id),Number(e.amount||0)),fisco:expenseFiscoText(e),amount:Number(e.amount||0)}));
       return;
     }
     if(l.type==='travel_expenses'){(l.items||[]).forEach(e=>{const n=naturaRimborso(e);items.push({title:expenseCategoryName(e.expense_category_id),desc:(NATURE_NON_TASSATE.includes(n)?'Su Fiscozen: '+VOCE_FISCOZEN[n]:'Su Fiscozen: '+VOCE_FISCOZEN[n]+' (tassato)')+(e.work_city?' · '+e.work_city:''),fisco:expenseFiscoText(e),importo:Number(e.amount||0),quantita:1,
-      nota:NATURE_NON_TASSATE.includes(n)?'Non tassato: su questa riga non spuntare «Applica contributo GS INPS 4,00%».':(n==='da_sistemare'?motivoDaSistemare(e):'')})})}
+      nota:group.kind==='expenses'?(n==='da_sistemare'?motivoDaSistemare(e):''):(NATURE_NON_TASSATE.includes(n)?'Non tassato: su questa riga non spuntare «Applica contributo GS INPS 4,00%».':(n==='da_sistemare'?motivoDaSistemare(e):''))})})}
     else{items.push({title:projectName(l.project_id)||'Senza progetto',desc:l.label,fisco:fiscoText(l),...campiFiscozen(l)})}});
-  const piedeTot=piede.reduce((s,x)=>s+x.amount,0);return appShell(`<h1>${esc(clientName(clientId))}</h1><p class="sub">Fattura ${monthLabel(state.month)}</p><div class="card"><b>Totale cliente</b><div class="amount" style="margin-top:8px">${fmtEUR(calc.total)}</div><div class="metricLine">Base ${fmtEUR(calc.subtotal)} <span class="dot">·</span> Rivalsa ${fmtEUR(calc.inpsAmount)}${calc.stampAmount>0?' <span class="dot">·</span> Bollo '+fmtEUR(calc.stampAmount):''}</div>${calc.stampDue>0&&calc.stampAmount===0?`<div class="metricLine"><span class="tag gray">A tuo carico</span> ${fmtEUR(calc.stampDue)} di bollo, fuori dal totale</div>`:''}${group.pAmount>0?`<div class="metricLine" style="margin-top:6px"><span class="tag blue">Pianificato</span> ${fmtEUR(group.pAmount)} dei ${fmtEUR(calc.subtotal)} di base${group.pHours>0?` <span class="dot">·</span> ${fmtNum(group.pHours/8,2)} gg/u`:''}</div>`:''}<span class="tag ${statusClass(st)}">${statusLabel(st)}</span></div>${cardFatturaConservata(clientId,header)}<h2>Da incollare su Fiscozen</h2><p class="sub">Una riga per prestazione, coi campi nell'ordine in cui li chiede «Aggiungi prestazione».${linguaFattura(clientId)==='en'?' <span class="tag blue">In inglese</span> come dice la scheda del cliente.':''}${calc.expenses>0?` <a href="#" onclick="apriRicevuteMese('${clientId}');return false">Scarica le ricevute delle spese</a>, da mandare con la fattura.`:''}</p><div class="list">${items.map((it,i)=>`<div class="row"><div>${i+1}</div><div><div class="title">${esc(it.title)}</div><div class="desc">${esc(it.desc)}</div><div class="fzCampi"><div><span>Descrizione</span><div class="copybox" id="copy-${i}">${esc(it.fisco)}</div><button class="secondary" onclick="copyText('${esc(it.fisco).replace(/'/g,'&#39;')}')">Copia descrizione</button></div><div><span>Importo</span><b>${fmtEUR(it.importo)}</b></div><div><span>Quantità</span><b>${fmtNum(it.quantita,2)}</b></div></div>${it.nota?`<div class="small">${esc(it.nota)}</div>`:''}</div><div></div></div>`).join('')}</div>${(calc.inpsEnabled&&calc.inpsAmount>0)||bolloDovuto(calc.stampMode)?`<h2>Questo non si incolla</h2><p class="sub">Fiscozen ci pensa da sé, o in fattura non ci va affatto. Sta qui per saperlo, non per copiarlo.</p><div class="list">${calc.inpsEnabled&&calc.inpsAmount>0?`<div class="row"><div>☑</div><div><div class="title">Rivalsa INPS ${fmtNum(calc.inpsRate,2)}%</div><div class="metricLine">${fmtEUR(calc.inpsAmount)}</div><div class="desc">${Math.abs(Number(calc.inpsRate)-4)<0.005?'La calcola Fiscozen: spunta «Applica contributo GS INPS 4,00%» dentro ogni prestazione. Incollandola anche come voce verrebbe contata due volte.':'Attenzione: la spunta di Fiscozen, «Applica contributo GS INPS 4,00%», applica il 4%, mentre qui l’aliquota è del '+fmtNum(calc.inpsRate,2)+'%. Con la spunta il totale su Fiscozen non tornerebbe con questo: la rivalsa per la gestione separata è del 4%, controlla l’aliquota in Configurazione fiscale.'}</div></div><div></div></div>`:''}${bolloDovuto(calc.stampMode)?`<div class="row"><div>·</div><div><div class="title">Marca da bollo</div><div class="metricLine">${calc.stampDue>0?fmtEUR(calc.stampDue)+(calc.stampAmount>0?'':' <span class="tag gray">a tuo carico</span>'):'Qui non è dovuta'}</div><div class="desc">${calc.stampDue>0?'Non è una prestazione e non si aggiunge fra le voci. '+esc(bolloFrase(calc.stampMode)):'Gli importi esenti non superano '+fmtEUR(BOLLO_SOGLIA)+', quindi qui il bollo non è dovuto.'}</div></div><div></div></div>`:''}</div>`:''}${piede.length?`<h2>Spese a piè di lista</h2><p class="sub">Anticipate da te e <b>da chiedere a parte</b>: non entrano nel totale della fattura, che e' e resta ${fmtEUR(calc.total)}. Sono una partita di giro, quindi la descrizione analitica serve comunque.</p><div class="card"><b>Da farsi rimborsare</b><div class="amount" style="margin-top:8px">${fmtEUR(piedeTot)}</div><small class="desc">${piede.length} ${piede.length===1?'spesa':'spese'}</small></div><div class="list">${piede.map((it,i)=>`<div class="row"><div>·</div><div><div class="title">${esc(it.title)}</div><div class="desc">${it.desc}</div><div class="metricLine">${it.metric}</div><div class="copybox" id="pie-${i}">${esc(it.fisco)}</div><button class="secondary" onclick="copyText('${esc(it.fisco).replace(/'/g,'&#39;')}')">Copia descrizione</button></div><div></div></div>`).join('')}</div>`:''}<h2>Dati fattura / incasso</h2><form class="form" onsubmit="saveBillingHeader(event)"><div class="field"><label>Stato</label><select name="status"><option value="to_invoice" ${st==='to_invoice'?'selected':''}>Da fatturare</option><option value="invoice_issued" ${st==='invoice_issued'?'selected':''}>Fattura emessa</option><option value="collected" ${st==='collected'?'selected':''}>Incassato</option><option value="excluded" ${st==='excluded'?'selected':''}>Escluso</option></select></div><div class="field"><label>Rivalsa INPS</label><select name="inps_recharge_enabled"><option value="true" ${calc.inpsEnabled?'selected':''}>Sì</option><option value="false" ${!calc.inpsEnabled?'selected':''}>No</option></select></div><div class="field"><label>Percentuale rivalsa INPS</label><input name="inps_recharge_rate" type="number" step="0.01" value="${Number(calc.inpsRate||4)}"></div><div class="field"><label>Numero fattura</label><input name="invoice_number" value="${esc(header.invoice_number||'')}"></div><div class="field"><label>Data fattura</label><input name="invoice_date" type="date" value="${esc(header.invoice_date||'')}"></div><div class="field"><label>Data incasso</label><input name="collection_date" type="date" value="${esc(header.collection_date||'')}"></div><div class="field"><label>Importo incassato</label><input name="collected_amount" type="number" step="0.01" value="${Number(header.collected_amount||0)}"></div><div class="field"><label>Note</label><textarea name="notes">${esc(header.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva stato fattura</button>${header.id?`<button type="button" class="secondary danger" onclick="eliminaFattura('${header.id}')">Elimina fattura</button>`:''}<button type="button" class="secondary" onclick="go('billing')">Indietro</button></div></form>`)}
-async function saveBillingHeader(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const clientId=state.edit;const group=billingGroupsByClient().find(g=>g.client_id===clientId);const {year,month}=periodParts();const tempCalc=billingCalc(group,{inps_recharge_enabled:f.inps_recharge_enabled==='true',inps_recharge_rate:Number(f.inps_recharge_rate||4)});const payload={year,month,client_id:clientId,total_amount:Number(tempCalc.subtotal||0),services_amount:tempCalc.services,expenses_amount:tempCalc.expenses,manual_amount:tempCalc.manual,taxable_base_amount:tempCalc.taxableBase,inps_recharge_enabled:tempCalc.inpsEnabled,inps_recharge_rate:tempCalc.inpsRate,inps_recharge_amount:tempCalc.inpsAmount,stamp_duty_enabled:tempCalc.stampEnabled,stamp_duty_amount:tempCalc.stampAmount,invoice_total_amount:tempCalc.total,status:f.status,invoice_number:norm(f.invoice_number)||null,invoice_date:f.invoice_date||null,collection_date:f.collection_date||null,collected_amount:Number(f.collected_amount||0)||null,notes:f.notes||null};const existing=headerForClient(clientId);let error;if(existing){({error}=await updateResilient('billing_headers',payload,existing.id));}else{({error}=await insertResilient('billing_headers',payload));}if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='billingDetail';state.edit=clientId;render()}
+  const piedeTot=piede.reduce((s,x)=>s+x.amount,0);return appShell(`<h1>${esc(clientName(clientId))}</h1><p class="sub">${spese?'Fattura delle spese':'Fattura del lavoro'} · ${monthLabel(state.month)}</p>${altro&&altro.total>0?`<p class="sub">Le ${spese?'giornate':'spese'} si fatturano a parte: <a href="#" onclick="openBillingClient('${clientId}','${altro.kind}');return false">${spese?'fattura del lavoro':'fattura delle spese'}, ${fmtEUR(altro.total)}</a>.</p>`:''}<div class="card"><b>${spese?'Totale spese':'Totale cliente'}</b><div class="amount" style="margin-top:8px">${fmtEUR(calc.total)}</div><div class="metricLine">${spese?'Rimborsi '+fmtEUR(calc.subtotal)+' <span class="dot">·</span> senza rivalsa':'Base '+fmtEUR(calc.subtotal)+' <span class="dot">·</span> Rivalsa '+fmtEUR(calc.inpsAmount)}${calc.stampAmount>0?' <span class="dot">·</span> Bollo '+fmtEUR(calc.stampAmount):''}</div>${calc.stampDue>0&&calc.stampAmount===0?`<div class="metricLine"><span class="tag gray">A tuo carico</span> ${fmtEUR(calc.stampDue)} di bollo, fuori dal totale</div>`:''}${group.pAmount>0?`<div class="metricLine" style="margin-top:6px"><span class="tag blue">Pianificato</span> ${fmtEUR(group.pAmount)} dei ${fmtEUR(calc.subtotal)} di base${group.pHours>0?` <span class="dot">·</span> ${fmtNum(group.pHours/8,2)} gg/u`:''}</div>`:''}<span class="tag ${statusClass(st)}">${statusLabel(st)}</span></div>${cardFatturaConservata(clientId,header)}<h2>Da incollare su Fiscozen</h2><p class="sub">Una riga per prestazione, coi campi nell'ordine in cui li chiede «Aggiungi prestazione».${linguaFattura(clientId)==='en'?' <span class="tag blue">In inglese</span> come dice la scheda del cliente.':''}${calc.expenses>0?` <a href="#" onclick="apriRicevuteMese('${clientId}');return false">Scarica le ricevute delle spese</a>, da mandare con la fattura.`:''}</p><div class="list">${items.map((it,i)=>`<div class="row"><div>${i+1}</div><div><div class="title">${esc(it.title)}</div><div class="desc">${esc(it.desc)}</div><div class="fzCampi"><div><span>Descrizione</span><div class="copybox" id="copy-${i}">${esc(it.fisco)}</div><button class="secondary" onclick="copyText('${esc(it.fisco).replace(/'/g,'&#39;')}')">Copia descrizione</button></div><div><span>Importo</span><b>${fmtEUR(it.importo)}</b></div><div><span>Quantità</span><b>${fmtNum(it.quantita,2)}</b></div></div>${it.nota?`<div class="small">${esc(it.nota)}</div>`:''}</div><div></div></div>`).join('')}</div>${(calc.inpsEnabled&&calc.inpsAmount>0)||bolloDovuto(calc.stampMode)?`<h2>Questo non si incolla</h2><p class="sub">Fiscozen ci pensa da sé, o in fattura non ci va affatto. Sta qui per saperlo, non per copiarlo.</p><div class="list">${calc.inpsEnabled&&calc.inpsAmount>0?`<div class="row"><div>☑</div><div><div class="title">Rivalsa INPS ${fmtNum(calc.inpsRate,2)}%</div><div class="metricLine">${fmtEUR(calc.inpsAmount)}</div><div class="desc">${Math.abs(Number(calc.inpsRate)-4)<0.005?'La calcola Fiscozen: spunta «Applica contributo GS INPS 4,00%» dentro ogni prestazione. Incollandola anche come voce verrebbe contata due volte.':'Attenzione: la spunta di Fiscozen, «Applica contributo GS INPS 4,00%», applica il 4%, mentre qui l’aliquota è del '+fmtNum(calc.inpsRate,2)+'%. Con la spunta il totale su Fiscozen non tornerebbe con questo: la rivalsa per la gestione separata è del 4%, controlla l’aliquota in Configurazione fiscale.'}</div></div><div></div></div>`:''}${bolloDovuto(calc.stampMode)?`<div class="row"><div>·</div><div><div class="title">Marca da bollo</div><div class="metricLine">${calc.stampDue>0?fmtEUR(calc.stampDue)+(calc.stampAmount>0?'':' <span class="tag gray">a tuo carico</span>'):'Qui non è dovuta'}</div><div class="desc">${calc.stampDue>0?'Non è una prestazione e non si aggiunge fra le voci. '+esc(bolloFrase(calc.stampMode)):'Gli importi esenti non superano '+fmtEUR(BOLLO_SOGLIA)+', quindi qui il bollo non è dovuto.'}</div></div><div></div></div>`:''}</div>`:''}${piede.length?`<h2>Spese a piè di lista</h2><p class="sub">Anticipate da te e <b>da chiedere a parte</b>: non entrano nel totale della fattura, che e' e resta ${fmtEUR(calc.total)}. Sono una partita di giro, quindi la descrizione analitica serve comunque.</p><div class="card"><b>Da farsi rimborsare</b><div class="amount" style="margin-top:8px">${fmtEUR(piedeTot)}</div><small class="desc">${piede.length} ${piede.length===1?'spesa':'spese'}</small></div><div class="list">${piede.map((it,i)=>`<div class="row"><div>·</div><div><div class="title">${esc(it.title)}</div><div class="desc">${it.desc}</div><div class="metricLine">${it.metric}</div><div class="copybox" id="pie-${i}">${esc(it.fisco)}</div><button class="secondary" onclick="copyText('${esc(it.fisco).replace(/'/g,'&#39;')}')">Copia descrizione</button></div><div></div></div>`).join('')}</div>`:''}<h2>Dati fattura / incasso</h2><form class="form" onsubmit="saveBillingHeader(event)"><div class="field"><label>Stato</label><select name="status"><option value="to_invoice" ${st==='to_invoice'?'selected':''}>Da fatturare</option><option value="invoice_issued" ${st==='invoice_issued'?'selected':''}>Fattura emessa</option><option value="collected" ${st==='collected'?'selected':''}>Incassato</option><option value="excluded" ${st==='excluded'?'selected':''}>Escluso</option></select></div>${spese?'<input type="hidden" name="inps_recharge_enabled" value="false"><input type="hidden" name="inps_recharge_rate" value="0">':`<div class="field"><label>Rivalsa INPS</label><select name="inps_recharge_enabled"><option value="true" ${calc.inpsEnabled?'selected':''}>Sì</option><option value="false" ${!calc.inpsEnabled?'selected':''}>No</option></select></div><div class="field"><label>Percentuale rivalsa INPS</label><input name="inps_recharge_rate" type="number" step="0.01" value="${Number(calc.inpsRate||4)}"></div>`}<div class="field"><label>Numero fattura</label><input name="invoice_number" value="${esc(header.invoice_number||'')}"></div><div class="field"><label>Data fattura</label><input name="invoice_date" type="date" value="${esc(header.invoice_date||'')}"></div><div class="field"><label>Data incasso</label><input name="collection_date" type="date" value="${esc(header.collection_date||'')}"></div><div class="field"><label>Importo incassato</label><input name="collected_amount" type="number" step="0.01" value="${Number(header.collected_amount||0)}"></div><div class="field"><label>Note</label><textarea name="notes">${esc(header.notes||'')}</textarea></div><div class="actions"><button class="primary">Salva stato fattura</button>${header.id?`<button type="button" class="secondary danger" onclick="eliminaFattura('${header.id}')">Elimina fattura</button>`:''}<button type="button" class="secondary" onclick="go('billing')">Indietro</button></div></form>`)}
+async function saveBillingHeader(ev){ev.preventDefault();const f=Object.fromEntries(new FormData(ev.target));const clientId=state.edit;const tipo=state.editType==='expenses'?'expenses':'work';const group=billingGroupsByClient().find(g=>g.client_id===clientId&&g.kind===tipo);const {year,month}=periodParts();const tempCalc=billingCalc(group,{inps_recharge_enabled:f.inps_recharge_enabled==='true',inps_recharge_rate:Number(f.inps_recharge_rate||4)});const payload={year,month,client_id:clientId,total_amount:Number(tempCalc.subtotal||0),services_amount:tempCalc.services,expenses_amount:tempCalc.expenses,manual_amount:tempCalc.manual,taxable_base_amount:tempCalc.taxableBase,inps_recharge_enabled:tempCalc.inpsEnabled,inps_recharge_rate:tempCalc.inpsRate,inps_recharge_amount:tempCalc.inpsAmount,stamp_duty_enabled:tempCalc.stampEnabled,stamp_duty_amount:tempCalc.stampAmount,invoice_total_amount:tempCalc.total,status:f.status,invoice_number:norm(f.invoice_number)||null,invoice_date:f.invoice_date||null,collection_date:f.collection_date||null,collected_amount:Number(f.collected_amount||0)||null,notes:f.notes||null};
+  // La fattura delle spese ha una scheda sua: senza la colonna che la
+  // distingue finirebbe sopra quella del lavoro, quindi non si salva.
+  if(tipo==='expenses'){if(!(await haTipoFattura()))return setMsg('Per salvare la fattura delle spese manca un pezzo nel database: lancia la migrazione '+MIGRAZIONE_DI.invoice_kind+'.',12000);payload.invoice_kind='expenses'}
+  const existing=headerForClient(clientId,tipo);let error;if(existing){({error}=await updateResilient('billing_headers',payload,existing.id));}else{({error}=await insertResilient('billing_headers',payload));}if(error)return setMsg(motivoLeggibile(error),7000);await reload();state.view='billingDetail';state.edit=clientId;state.editType=tipo;render()}
+// La colonna invoice_kind c'e'? Si chiede al database una volta sola.
+let _haTipoFattura=null;
+async function haTipoFattura(){
+  if(_haTipoFattura!==null)return _haTipoFattura;
+  if((data.billingHeaders||[]).some(h=>'invoice_kind' in h))return (_haTipoFattura=true);
+  try{const r=await sb.from('billing_headers').select('invoice_kind').limit(1);_haTipoFattura=!r.error}catch(e){_haTipoFattura=false}
+  return _haTipoFattura;
+}
 function copyText(txt){const cleaned=document.createElement('textarea');cleaned.innerHTML=txt;const val=cleaned.value;navigator.clipboard?.writeText(val).then(()=>setMsg('Descrizione copiata.')).catch(()=>prompt('Copia descrizione:',val))}
 
 
@@ -4610,20 +4717,26 @@ function bolliDaEmettere(year=currentYear()){
   const ts=currentTaxSetting(year);const unit=Number(ts.stamp_duty_amount??2)||2;
   const perTrim=[0,0,0,0];let n=0;
   if(!bolloDovuto(bolloModo(ts)))return {n,perTrim,unit};
+  // Due fatture per cliente e mese, il lavoro e le spese: ognuna porta
+  // il suo bollo se supera la soglia. Le spese senza rivalsa.
   const chiuso=new Set(),scheda={};
   data.billingHeaders.filter(h=>Number(h.year)===Number(year)).forEach(h=>{
-    const k=h.client_id+'|'+(Number(h.month||1)-1);scheda[k]=h;
-    if(['invoice_issued','collected','excluded'].includes(h.status))chiuso.add(k)});
-  const base={},libero={};const somma=(c,i,v,senzaRivalsa)=>{const k=c+'|'+i;if(chiuso.has(k))return;const m=senzaRivalsa?libero:base;m[k]=(m[k]||0)+v;if(!(k in base))base[k]=0};
-  rowsForYear(year).forEach(e=>somma(e.client_id,monthIndexFromDate(e.entry_date),dailyAmount(e)));
-  monthlyRowsForYear(year).forEach(e=>somma(e.client_id,Number(e.month||1)-1,Number(e.amount||0)));
-  manualRowsForYear(year).forEach(e=>somma(e.client_id,monthIndexFromDate(e.entry_date),Number(e.amount||0)));
-  // I rimborsi non tassati contano per la soglia, ma senza rivalsa.
-  expenseRowsForYear(year).filter(e=>expType(e)==='invoice').forEach(e=>somma(e.client_id,monthIndexFromDate(e.expense_date),Number(e.amount||0),rimborsoNonTassato(e)));
-  Object.entries(base).forEach(([k,v])=>{
+    const k=h.client_id+'|'+(Number(h.month||1)-1),t=tipoFattura(h);if(t==='work')scheda[k]=h;
+    const chiusa=['invoice_issued','collected','excluded'].includes(h.status);
+    if(chiusa)chiuso.add(k+'|'+t);
+    if(t==='work'&&chiusa&&schedaDelleSpese(schedeDelMese(h.client_id,h.year,h.month))===h)chiuso.add(k+'|expenses')});
+  const lavoro={},spese={};
+  const somma=(m,t,c,i,v)=>{const k=c+'|'+i;if(chiuso.has(k+'|'+t))return;m[k]=(m[k]||0)+v};
+  rowsForYear(year).forEach(e=>somma(lavoro,'work',e.client_id,monthIndexFromDate(e.entry_date),dailyAmount(e)));
+  monthlyRowsForYear(year).forEach(e=>somma(lavoro,'work',e.client_id,Number(e.month||1)-1,Number(e.amount||0)));
+  manualRowsForYear(year).forEach(e=>somma(lavoro,'work',e.client_id,monthIndexFromDate(e.entry_date),Number(e.amount||0)));
+  expenseRowsForYear(year).filter(e=>expType(e)==='invoice').forEach(e=>somma(spese,'expenses',e.client_id,monthIndexFromDate(e.expense_date),Number(e.amount||0)));
+  const conta=k=>{n++;perTrim[Math.min(3,Math.floor(Number(k.split('|')[1])/3))]+=unit};
+  Object.entries(lavoro).forEach(([k,v])=>{
     const h=scheda[k]||{};
     const riv=(h.inps_recharge_enabled??ts.inps_recharge_enabled??true)?Number(h.inps_recharge_rate??ts.inps_recharge_rate??4)/100:0;
-    if(v*(1+riv)+(libero[k]||0)>BOLLO_SOGLIA){n++;perTrim[Math.min(3,Math.floor(Number(k.split('|')[1])/3))]+=unit}});
+    if(v*(1+riv)>BOLLO_SOGLIA)conta(k)});
+  Object.entries(spese).forEach(([k,v])=>{if(v>BOLLO_SOGLIA)conta(k)});
   return {n,perTrim,unit};
 }
 // Il bollo di un anno che non e' ancora cominciato: una fattura al mese
@@ -4656,7 +4769,10 @@ function taxBaseFor(year,mode){const at=annualTotals(year);const ts=currentTaxSe
   // imponibile. I rimborsi non tassati che ci sono dentro escono, e la
   // rivalsa non la portano.
   const rivRate=(ts.inps_recharge_enabled??true)?Number(ts.inps_recharge_rate??4)/100:0;
-  const futuro=(Math.max(0,at.daFatturare-(at.nonTassatiDaFatturare||0))+(at.pianificato||0))*(1+rivRate);
+  // Le spese hanno la loro fattura, senza rivalsa: la porta solo il
+  // lavoro. Quelle non tassate escono del tutto.
+  const speseDF=Math.min(at.daFatturare,at.speseDaFatturare||0);
+  const futuro=(Math.max(0,at.daFatturare-speseDF)+(at.pianificato||0))*(1+rivRate)+Math.max(0,speseDF-(at.nonTassatiDaFatturare||0));
   // Da incassare: le fatture dell'anno emesse e non ancora pagate,
   // senza il bollo e senza i rimborsi non tassati, che non sono ricavo.
   const daIncassare=(data.billingHeaders||[]).filter(h=>Number(h.year)===Number(year)&&h.status==='invoice_issued')
@@ -5221,28 +5337,46 @@ function previsioneTasseCard(){const year=currentYear();const f=forecastCalc(yea
 // della fattura: quello che resta della base sono i compensi.
 function ricaviCompetenza(year,conPianificato){
   const ts=currentTaxSetting(year),cm={};
-  const get=(c,i)=>cm[c+'|'+i]||(cm[c+'|'+i]={lavoro:0,pian:0,rimb:0,fuori:0,base:0,riv:0,emessa:false,esclusa:false,h:null});
+  const get=(c,i)=>cm[c+'|'+i]||(cm[c+'|'+i]={lavoro:0,pian:0,rimb:0,fuori:0,base:0,riv:0,emessa:false,esclusa:false,h:null,
+    baseSpese:0,speseEmesse:false,speseEscluse:false,speseDentro:false});
   rowsForYear(year).forEach(e=>{const x=get(e.client_id,monthIndexFromDate(e.entry_date));if(isPlanned(e))x.pian+=dailyAmount(e);else x.lavoro+=dailyAmount(e)});
   monthlyRowsForYear(year).forEach(e=>{get(e.client_id,Number(e.month||1)-1).lavoro+=Number(e.amount||0)});
   manualRowsForYear(year).forEach(e=>{const x=get(e.client_id,monthIndexFromDate(e.entry_date));const v=Number(e.amount||0);if(isPlanned(e))x.pian+=v;else x.lavoro+=v});
   expenseRowsForYear(year).filter(e=>expType(e)==='invoice').forEach(e=>{const x=get(e.client_id,monthIndexFromDate(e.expense_date));const v=Number(e.amount||0);x.rimb+=v;if(rimborsoNonTassato(e))x.fuori+=v});
+  // La fattura del lavoro e quella delle spese si contano ognuna per
+  // conto suo. Nei mesi fatturati prima della separazione le spese
+  // stanno dentro quella del lavoro (speseDentro), come sempre.
   data.billingHeaders.filter(h=>Number(h.year)===Number(year)).forEach(h=>{
-    const i=Number(h.month||1)-1;if(i<0||i>11)return;const x=get(h.client_id,i);x.h=h;
+    const i=Number(h.month||1)-1;if(i<0||i>11)return;const x=get(h.client_id,i);
+    const riv=Number(h.inps_recharge_amount||0),bollo=Number(h.stamp_duty_amount||0);
+    const base=Number(h.total_amount||0)||Math.max(0,Number(h.invoice_total_amount||0)-riv-bollo);
+    if(tipoFattura(h)==='expenses'){
+      if(['invoice_issued','collected'].includes(h.status)){x.baseSpese+=base;x.speseEmesse=true}
+      else if(h.status==='excluded')x.speseEscluse=true;
+      return;
+    }
+    x.h=h;
+    const dentro=schedaDelleSpese(schedeDelMese(h.client_id,h.year,h.month))===h;
     if(['invoice_issued','collected'].includes(h.status)){
-      const riv=Number(h.inps_recharge_amount||0),bollo=Number(h.stamp_duty_amount||0);
-      x.base+=Number(h.total_amount||0)||Math.max(0,Number(h.invoice_total_amount||0)-riv-bollo);x.riv+=riv;x.emessa=true;
-    }else if(h.status==='excluded')x.esclusa=true;
+      x.base+=base;x.riv+=riv;x.emessa=true;
+      if(dentro)x.speseDentro=true;
+    }else if(h.status==='excluded'){x.esclusa=true;if(dentro)x.speseEscluse=true}
   });
   let compensi=0,rimborsi=0,fuoriReddito=0,rivalsa=0,daFatturare=0,pianificato=0;
   Object.values(cm).forEach(x=>{
-    if(x.esclusa&&!x.emessa)return;
     const h=x.h||{};
     const rate=(h.inps_recharge_enabled??ts.inps_recharge_enabled??true)?Number(h.inps_recharge_rate??ts.inps_recharge_rate??4)/100:0;
-    if(x.emessa){const r=Math.min(x.rimb,x.base);rimborsi+=r;compensi+=x.base-r;rivalsa+=x.riv;fuoriReddito+=Math.min(x.fuori,r);return}
-    // la rivalsa non va sui rimborsi non tassati
-    const conRiv=x.lavoro+x.rimb-x.fuori;
-    compensi+=x.lavoro;rimborsi+=x.rimb;fuoriReddito+=x.fuori;rivalsa+=conRiv*rate;daFatturare+=conRiv*(1+rate)+x.fuori;
-    if(conPianificato){compensi+=x.pian;pianificato+=x.pian;rivalsa+=x.pian*rate}
+    // Prima della separazione: una fattura sola, lavoro e spese insieme.
+    if(x.speseDentro){const r=Math.min(x.rimb,x.base);rimborsi+=r;compensi+=x.base-r;rivalsa+=x.riv;fuoriReddito+=Math.min(x.fuori,r);return}
+    // Il lavoro
+    if(x.emessa){compensi+=x.base;rivalsa+=x.riv}
+    else if(!x.esclusa){
+      compensi+=x.lavoro;rivalsa+=x.lavoro*rate;daFatturare+=x.lavoro*(1+rate);
+      if(conPianificato){compensi+=x.pian;pianificato+=x.pian;rivalsa+=x.pian*rate}
+    }
+    // Le spese: la loro fattura, senza rivalsa
+    if(x.speseEmesse){rimborsi+=x.baseSpese;fuoriReddito+=Math.min(x.fuori,x.baseSpese)}
+    else if(!x.speseEscluse){rimborsi+=x.rimb;fuoriReddito+=x.fuori;daFatturare+=x.rimb}
   });
   return {compensi,rimborsi,fuoriReddito,rivalsa,daFatturare,pianificato};
 }
@@ -7535,12 +7669,12 @@ async function generaRigaFattura(projectId){
   try{
     // Una testata per cliente e mese, come fa gia' il resto dell'app
     const [anno,mese]=s.al.split('-').map(Number);
-    let hdr=(data.billingHeaders||[]).find(h=>h.client_id===cid&&Number(h.year)===anno&&Number(h.month)===mese);
+    let hdr=schedeDelMese(cid,anno,mese).work;
     if(!hdr){
       const r=await insertResilient('billing_headers',{client_id:cid,year:anno,month:mese,status:'draft'});
       if(r.error)throw r.error;
       await reload();
-      hdr=(data.billingHeaders||[]).find(h=>h.client_id===cid&&Number(h.year)===anno&&Number(h.month)===mese);
+      hdr=schedeDelMese(cid,anno,mese).work;
     }
     // La riga punta al progetto, mai alla WBS. Gli snapshot congelano
     // il valore: cambiare poi tariffa o riferimenti non la tocca.
@@ -8004,7 +8138,7 @@ Object.assign(window,{
   taxScheduleItems,
   accantonaAnno,
   riepilogoTasse,
-  bolliDaEmettere,
+  bolliDaEmettere,speseFatturate,schedeDelMese,
   bolloAnnoSimulato,
   cambiaRicaviSimulati,
   leggiFatturaXML,confrontaFattura,clientePerPiva,giorniConsuntivati,

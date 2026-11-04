@@ -168,10 +168,11 @@ console.log('\n=== IL RIMBORSO SEGUE L’ANNO DELL’INCASSO ===');
   await pg.close();
 }
 
-console.log('\n=== LA RIVALSA DEL 4% NON VA SUI RIMBORSI NON TASSATI ===');
+console.log('\n=== LA RIVALSA DEL 4% VA SOLO SUL LAVORO ===');
 {
   // Ottobre, niente fattura: 1.000 di lavoro, 600 di volo con fattura a
-  // me, 100 di km. Rivalsa 4% su 1.100 = 44, non su 1.700.
+  // me, 100 di km. Le spese si fatturano a parte e senza rivalsa
+  // (Giovanni, 04/11/2026): rivalsa 4% sui soli 1.000 = 40.
   const semi=SEMI+`
     S.monthly_compensations=[{id:'m10',year:2026,month:10,client_id:'k2',amount:1000}];
     S.travel_expenses=[
@@ -181,25 +182,28 @@ console.log('\n=== LA RIVALSA DEL 4% NON VA SUI RIMBORSI NON TASSATI ===');
   const pg=await apri(1280,semi);
   await pg.evaluate(()=>window.go('billing'));await pg.waitForTimeout(300);
   await alMese(pg,'Ottobre 2026');
-  const g=await pg.evaluate(()=>{const g=window.billingGroupsByClient().find(x=>x.client_id==='k2');return g&&g.calc});
-  ok(g&&Math.abs(g.inpsAmount-44)<0.01,'in fattura la rivalsa è 44: il 4% di lavoro e km',String(g&&g.inpsAmount));
-  ok(g&&Math.abs(g.total-1744)<0.01,'il totale è 1.744: 1.700 + 44',String(g&&g.total));
+  const gg=await pg.evaluate(()=>{const gs=window.billingGroupsByClient().filter(x=>x.client_id==='k2');
+    const f=k=>{const g=gs.find(x=>x.kind===k);return g&&{inps:g.calc.inpsAmount,total:g.calc.total}};return {w:f('work'),e:f('expenses')}});
+  ok(gg.w&&Math.abs(gg.w.inps-40)<0.01,'nella fattura del lavoro la rivalsa è 40: il 4% del lavoro',JSON.stringify(gg.w));
+  ok(gg.w&&Math.abs(gg.w.total-1040)<0.01,'e il suo totale è 1.040',JSON.stringify(gg.w));
+  ok(gg.e&&Math.abs(gg.e.inps)<0.01,'la fattura delle spese non ha rivalsa',JSON.stringify(gg.e));
+  ok(gg.e&&Math.abs(gg.e.total-700)<0.01,'e il suo totale è 700: volo e km',JSON.stringify(gg.e));
   const t=await testo(pg);
   ok(/Spese da riaddebitare/.test(t),'la pagina del mese dice quanto riaddebitare',t.slice(0,300));
   ok(/Rimborso spese analitico/i.test(t)&&/600,00/.test(t),'con il nome della voce Fiscozen e l’importo: 600',t.slice(0,500));
   ok(/Tassati \(km e da sistemare\)/i.test(t)&&/100,00/.test(t),'e a parte i 100 tassati');
   ok(/Scarica le ricevute del mese/.test(t),'e il link per scaricare le ricevute');
-  // Il dettaglio del cliente: la riga del volo dice di non spuntare il 4%
-  await pg.evaluate(()=>window.openBillingClient('k2'));await pg.waitForTimeout(400);
+  // Il dettaglio della fattura delle spese: la riga del volo dice la voce Fiscozen
+  await pg.evaluate(()=>window.openBillingClient('k2','expenses'));await pg.waitForTimeout(400);
   const d=await testo(pg);
   ok(/Su Fiscozen: Rimborso spese analitico/.test(d),'nel dettaglio la riga del volo dice la voce Fiscozen',d.slice(0,400));
-  ok(/non spuntare «Applica contributo GS INPS 4,00%»/.test(d),'e di non spuntare la rivalsa su quella riga');
-  // Bilancio: da fatturare 1.000×1,04 + 100×1,04 + 600 = 1.744
+  ok(/senza rivalsa/.test(d),'e la fattura delle spese dice che è senza rivalsa');
+  // Bilancio: da fatturare 1.000×1,04 + 100 + 600 = 1.740
   const cd=await pg.evaluate(()=>window.ricaviCompetenza?window.ricaviCompetenza(2026,false):null);
   const mm=await pg.evaluate(()=>window.margineMesi(2026)[9]);
-  ok(Math.abs(mm.daFatturare-1744)<0.01,'la dashboard aspetta da fatturare 1.744 a ottobre',String(mm.daFatturare));
-  ok(cd&&Math.abs(cd.daFatturare-1744)<0.01,'e il Bilancio aspetta da fatturare gli stessi 1.744',String(cd&&cd.daFatturare));
-  ok(cd&&Math.abs(cd.rivalsa-44)<0.01,'con la stessa rivalsa di 44',String(cd&&cd.rivalsa));
+  ok(Math.abs(mm.daFatturare-1740)<0.01,'la dashboard aspetta da fatturare 1.740 a ottobre',String(mm.daFatturare));
+  ok(cd&&Math.abs(cd.daFatturare-1740)<0.01,'e il Bilancio aspetta da fatturare gli stessi 1.740',String(cd&&cd.daFatturare));
+  ok(cd&&Math.abs(cd.rivalsa-40)<0.01,'con la stessa rivalsa di 40',String(cd&&cd.rivalsa));
   // Il limite degli 85.000: il volo non conta
   const at=await pg.evaluate(()=>window.annualTotals(2026));
   ok(Math.abs(at.imponibile-1100)<0.01,'per il limite degli 85.000 contano 1.100, non 1.700',String(at.imponibile));

@@ -63,7 +63,8 @@ const apri=async lingua=>{
   return pg;
 };
 const descrizioni=pg=>pg.evaluate(()=>[...document.querySelectorAll('#app .copybox')].map(x=>x.textContent.trim()));
-const apriFattura=async pg=>{await pg.evaluate(()=>window.openBillingClient('ch'));await pg.waitForTimeout(900)};
+// Lavoro e spese sono due fatture distinte (04/11/2026)
+const apriFattura=async(pg,tipo='work')=>{await pg.evaluate(t=>window.openBillingClient('ch',t),tipo);await pg.waitForTimeout(900)};
 
 console.log('\n=== UN CLIENTE IN INGLESE: LE DESCRIZIONI ESCONO IN INGLESE ===');
 {
@@ -73,15 +74,19 @@ console.log('\n=== UN CLIENTE IN INGLESE: LE DESCRIZIONI ESCONO IN INGLESE ===')
   const lav=d.find(x=>/Consulting/.test(x))||'';
   ok(lav==='Consulting services - End client: Omnichannel - '+MESE_EN+' - Days: 9.50',
      'il lavoro: mese inglese, giornate col punto',lav||d.join(' | '));
-  const hot=d.find(x=>/Accommodation/.test(x))||'';
-  ok(/^Reimbursement of travel expenses · Accommodation · \d\d\/\d\d\/\d{4} · Lugano · Omnichannel · €1,234\.50$/.test(hot),
-     'la spesa in fattura: voce tradotta e importo all’inglese',hot||d.join(' | '));
-  const taxi=d.find(x=>/Taxi/.test(x))||'';
-  ok(/^Reimbursement of travel expenses · Taxi · .* · €38\.00$/.test(taxi),'anche quella a piè di lista',taxi);
-  ok(!d.some(x=>/Consulenza|Giorni|Rimborso spese/.test(x)),'e niente resta in italiano',d.join(' | '));
   const t=await testo(pg);
   ok(/In inglese come dice la scheda del cliente/.test(t),'la pagina dice che sono in inglese, e perché');
-  ok(/Base 6\.?934,50 €/.test(t),'gli importi non cambiano: 5.700 di lavoro + 1.234,50 di albergo',(t.match(/Base [^·]{0,20}/)||[''])[0]);
+  ok(/Base 5\.?700,00 €/.test(t),'gli importi non cambiano: 5.700 di lavoro',(t.match(/Base [^·]{0,20}/)||[''])[0]);
+  await apriFattura(pg,'expenses');
+  const ds=await descrizioni(pg);
+  const hot=ds.find(x=>/Accommodation/.test(x))||'';
+  ok(/^Reimbursement of travel expenses · Accommodation · \d\d\/\d\d\/\d{4} · Lugano · Omnichannel · €1,234\.50$/.test(hot),
+     'la spesa in fattura delle spese: voce tradotta e importo all’inglese',hot||ds.join(' | '));
+  const taxi=ds.find(x=>/Taxi/.test(x))||'';
+  ok(/^Reimbursement of travel expenses · Taxi · .* · €38\.00$/.test(taxi),'anche quella a piè di lista',taxi);
+  ok(![...d,...ds].some(x=>/Consulenza|Giorni|Rimborso spese/.test(x)),'e niente resta in italiano',[...d,...ds].join(' | '));
+  const ts=await testo(pg);
+  ok(/Rimborsi 1\.?234,50 €/.test(ts),'e la fattura delle spese: 1.234,50 di albergo',(ts.match(/Rimborsi [^·]{0,20}/)||[''])[0]);
   await pg.close();
 }
 
@@ -131,7 +136,8 @@ console.log('\n=== IL SERVIZIO DEL CONTRATTO, IL CLIENTE FINALE E IL RIFERIMENTO
   const lav=d.find(x=>/Project Manager/.test(x))||'';
   ok(lav==='SAP and Omnichannel Project Manager - End client: Acme Group - '+MESE_EN+' - Days: 9.50 - Ref. SOA 123',
      'posizione, cliente finale, mese, giornate e riferimento',lav||d.join(' | '));
-  ok(d.some(x=>/^Reimbursement of travel expenses · Accommodation/.test(x)),'le spese restano com’erano');
+  await apriFattura(pg,'expenses');
+  ok((await descrizioni(pg)).some(x=>/^Reimbursement of travel expenses · Accommodation/.test(x)),'le spese restano com’erano');
   const f=await pg.evaluate(x=>window.leggiFatturaXML(x),
     XML.replace('Consulenza - Marzo 2026 | Giorni: 5,5','SAP and Omnichannel Project Manager - End client: Acme Group - March 2026 - Days: 5.5 - Ref. SOA 123'));
   ok(f.righe[1].mese==='2026-03'&&f.righe[1].giorni===5.5,'e la riga si rilegge',f.righe[1].mese+' · '+f.righe[1].giorni);

@@ -67,6 +67,9 @@ const SEMI=`
 `;
 const apri=async(extra='')=>{
   const pg=await b.newPage({viewport:{width:390,height:2600},hasTouch:true});
+  // I dati sono scritti per un oggi fisso, il 20 ottobre 2026: con
+  // l'orologio vero il test scadeva il primo novembre.
+  await pg.clock.setFixedTime(new Date('2026-10-20T10:00:00'));
   pg.on('dialog',d=>d.accept());
   await pg.goto(`http://127.0.0.1:${port}/tests/ui/mock.html`,{waitUntil:'networkidle'});
   await pg.waitForTimeout(800);

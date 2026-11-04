@@ -188,10 +188,12 @@ Regola fattura:
 
 ### `billing_headers`
 
-Testata fattura mensile per cliente.
+Testata fattura mensile per cliente: due per cliente e mese, quella del
+lavoro e quella delle spese (`invoice_kind`).
 
 Campi chiave:
 
+- `invoice_kind` (`work` | `expenses`, di partenza `work`)
 - `year`
 - `month`
 - `client_id`
@@ -213,7 +215,13 @@ Campi chiave:
 
 Regola:
 
-- una fattura per cliente/mese;
+- per cliente/mese una fattura del lavoro e una delle spese: le spese
+  si fatturano sempre a parte (04/11/2026);
+- la rivalsa INPS si sceglie solo sulla fattura del lavoro: quella delle
+  spese non la porta mai; il bollo va su ciascuna sopra 77,47 €;
+- i mesi fatturati prima, con le spese nella fattura del lavoro
+  (`expenses_amount` > 0 e nessuna scheda delle spese), restano chiusi
+  così;
 - importi calcolati da righe timesheet, manuali, mensili e spese;
 - stato fattura/incasso salvato qui.
 

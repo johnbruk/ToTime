@@ -179,6 +179,23 @@ dice cosa non è stato scritto.
 
 La verifica deve dire: `4 su 4`.
 
+## 10. `migrations/2026-11-04_fattura-delle-spese.sql`
+
+Aggiunge alle schede di fatturazione il tipo di fattura
+(`invoice_kind`, `work` o `expenses`, di partenza `work`). Se la tabella
+ha un vincolo «una scheda per cliente e mese», lo rifà con dentro anche
+il tipo, così la fattura delle spese sta accanto a quella del lavoro.
+
+Serve per: fatturare le spese sempre a parte, in una fattura loro senza
+rivalsa. Le schede che ci sono restano del lavoro e i mesi già
+fatturati con le spese dentro restano come sono: nessun importo cambia.
+
+Senza di lei: l'app mostra già le due fatture e fa i conti giusti, ma la
+fattura delle spese non si può salvare (l'app lo dice e nomina questa
+migrazione).
+
+La verifica deve dire: `1 su 1`.
+
 ---
 
 ## Dopo

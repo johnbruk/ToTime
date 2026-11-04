@@ -70,8 +70,10 @@ const apri=async(w=390)=>{
   await pg.waitForTimeout(450);
   return pg;
 };
-const alDettaglio=async pg=>{
-  await pg.evaluate(()=>window.navigateTo('billingDetail',{edit:'k2'}));
+// Le spese si fatturano a parte: il dettaglio e' quello della fattura
+// delle spese.
+const alDettaglio=async(pg,tipo='expenses')=>{
+  await pg.evaluate(t=>window.navigateTo('billingDetail',{edit:'k2',editType:t}),tipo);
   await pg.waitForTimeout(500);
 };
 
@@ -86,8 +88,8 @@ console.log('\n=== IL PIÈ DI LISTA NON SPARISCE PIÙ ===');
   // ...ma NON dentro il totale della fattura: è una partita di giro,
   // e nessun importo di fattura si deve muovere di nascosto.
   const tot=await pg.evaluate(()=>document.querySelector('#app .amount')?.textContent||'');
-  ok(!tot.includes('38'),'ma fuori dal totale della fattura: 500 + 428 + 94,50 = 1.022,50 di base',tot.trim());
-  ok(/1\.022,50|1022,50/.test(t),'il totale di base resta quello di prima',tot.trim());
+  ok(!tot.includes('38'),'ma fuori dal totale della fattura delle spese: 428 + 94,50 = 522,50',tot.trim());
+  ok(/Rimborsi 522,50/.test(t),'il totale delle spese resta quello di prima',tot.trim());
   // e dice quanto c'è da farsi rimborsare a parte
   ok(/da chiedere|a parte|rimborsare/i.test(t),'e dice che va chiesto a parte');
   await pg.close();
@@ -145,6 +147,18 @@ console.log('\n=== NIENTE PIÈ DI LISTA, NIENTE SEZIONE ===');
   const t=await testo(pg);
   ok(!/piè di lista/i.test(t),'senza spese a piè di lista la sezione non compare');
   ok(t.includes('428,00'),'e il resto della fattura è tutto lì');
+  await pg.close();
+}
+
+console.log('\n=== LE SPESE NON STANNO NELLA FATTURA DEL LAVORO ===');
+{
+  const pg=await apri();
+  await alDettaglio(pg,'work');
+  const box=await copybox(pg);
+  ok(box.length===1&&/^Consulenza/.test(box[0]),'nella fattura del lavoro c’è solo il lavoro',box.join(' || '));
+  const t=await testo(pg);
+  ok(/Base 500,00/.test(t),'con la sua base: 500',(t.match(/Base [^·]{0,14}/)||[''])[0]);
+  ok(/fattura delle spese/.test(t),'e un rimando alla fattura delle spese');
   await pg.close();
 }
 
