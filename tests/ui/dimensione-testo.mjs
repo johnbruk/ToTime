@@ -131,7 +131,16 @@ const tagliati=pg=>pg.evaluate(()=>{const out=[];
     if(cs.textOverflow==='ellipsis'&&!/\d/.test(e.textContent))return;
     if(cs.overflowX==='visible'||cs.overflowX==='auto'||cs.overflowX==='scroll')return;
     if(e.clientWidth&&e.scrollWidth>e.clientWidth+1)out.push(e.tagName.toLowerCase()+'.'+String(e.className).split(' ')[0]+' «'+e.textContent.trim().slice(0,24)+'»');
-  });return out});
+  });
+  // un riquadro che nasconde ciò che esce (.list ha overflow:hidden) non
+  // deve avere dentro niente che finisca oltre il suo bordo destro
+  document.querySelectorAll('.app .list,.app .row').forEach(box=>{
+    const cs=getComputedStyle(box);if(cs.overflowX!=='hidden'&&cs.overflow!=='hidden')return;
+    const R=box.getBoundingClientRect().right;
+    box.querySelectorAll('*').forEach(e=>{const r=e.getBoundingClientRect();
+      if(r.width&&r.right>R+1&&getComputedStyle(e).position!=='absolute')out.push('nascosto in '+String(box.className).split(' ')[0]+': '+e.tagName.toLowerCase()+'.'+String(e.className).split(' ')[0]+' «'+e.textContent.trim().slice(0,24)+'»')});
+  });
+  return out});
 const PROVE=[];
 for(const W of [320,360,430,768,1280])for(const sistema of ['1','1.35']){
   for(const scelta of ['piccolo','molto'])PROVE.push([W,sistema,scelta,false]);

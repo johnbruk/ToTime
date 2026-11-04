@@ -1132,8 +1132,9 @@ table.griglia.numeriRiga td.riga .n{font-variant-numeric:tabular-nums}
   .ceTab th{white-space:normal}
   .form{grid-template-columns:minmax(0,1fr)}
   /* righe con titolo e importo: l'importo va sotto al titolo */
-  .row{grid-template-columns:auto minmax(0,1fr)}
-  .row>:nth-child(n+3){grid-column:2;justify-self:start;text-align:left}
+  /* (le righe delle fatture sono già una colonna sola: restano così) */
+  .row:not(.rowFattura){grid-template-columns:auto minmax(0,1fr)}
+  .row:not(.rowFattura)>:nth-child(n+3){grid-column:2;justify-self:start;text-align:left}
   /* conto economico: la voce su una riga, le due cifre sotto */
   .ceTab,.ceTab thead,.ceTab tbody{display:block}
   .ceTab tr{display:flex;flex-wrap:wrap;column-gap:10px;border-bottom:1px solid var(--line)}
