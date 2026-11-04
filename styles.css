@@ -1146,3 +1146,5 @@ table.griglia.numeriRiga td.riga .n{font-variant-numeric:tabular-nums}
    non ci sta in un telefono stretto. Va a capo con il trattino invece di
    uscire dallo schermo; a testo normale non succede mai. */
 .screenTitle,.app h1,.app h2,.card>b{overflow-wrap:break-word;hyphens:auto}
+/* Il contratto letto: etichetta e valore, uno per riga; il valore va a capo */
+.contrattoLetto{display:grid;gap:6px}.contrattoLetto div{display:grid;grid-template-columns:140px 1fr;gap:10px;font-size:.875rem}.contrattoLetto span{color:var(--muted)}.contrattoLetto b{font-weight:600;overflow-wrap:anywhere}.contrattoLetto i{color:var(--muted);font-weight:400}.field input.daContratto{border-color:rgba(124,137,166,.66);background:rgba(124,137,166,.08)}
