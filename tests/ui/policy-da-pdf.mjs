@@ -68,6 +68,8 @@ ok(v('volo')&&v('volo').valuta==='CHF'&&!v('volo').applicabile,'il volo in franc
 ok(!v('km'),'la tariffa al km non è un tetto: non si propone');
 ok(v('park')&&v('park').esclusa,'il parcheggio non rimborsato diventa a carico tuo');
 ok(!v('ped'),'il pedaggio, di cui la policy non parla, resta com’è');
+const ns=await pg.evaluate(()=>window.leggiPolicy(['Hotel no-show fees will not be reimbursed.','Mini-bar is not reimbursed.'],window.__stores.expense_categories));
+ok(!ns.voci.some(x=>x.esclusa),'«le penali di no-show dell’hotel non si rimborsano» non rende l’hotel a tuo carico',JSON.stringify(ns.voci));
 ok(r.scartati.some(s=>/Laundry/.test(s.fonte)),'la lavanderia, voce che non hai, si segnala a parte');
 ok(!r.voci.some(x=>x.cap===400&&x.valuta==='EUR'),'«il volo costa 400 €» non è un limite');
 
@@ -154,6 +156,28 @@ await pg.evaluate(()=>window.apriPolicy('altro'));
 await pg.waitForTimeout(500);
 ok((await campo('cap_hotel')).val==='140'&&(await campo('cap_pasti')).val==='30','e nella policy sono già compilati, da controllare');
 ok(!(await pg.evaluate(()=>window.__stores.clients[1].expense_policy)),'ma nessuno li ha salvati');
+
+console.log('\n=== UNA POLICY SCANSIONATA: SI DICE, NON SI TACE ===');
+// Le policy firmate in DocuSign spesso sono una foto: il testo c'e' solo
+// nell'intestazione aggiunta dopo. Rispondere «nessun limite» farebbe
+// credere che la policy non ne abbia.
+await pg.evaluate(()=>window.apriPolicy('altro'));
+await pg.waitForTimeout(400);
+const pdf3=await pg.evaluate(async()=>{
+  const {PDFDocument,StandardFonts}=window.PDFLib;
+  const doc=await PDFDocument.create();const f=await doc.embedFont(StandardFonts.Helvetica);
+  const p=doc.addPage([595,842]);const t=(x,y,s)=>p.drawText(s,{x,y,size:9,font:f});
+  t(40,800,'Acme Partners SA');t(300,800,'Rue de Test 1, Geneve');t(40,40,'SOA ID: _ ACME_X1');t(500,40,'Page 13');
+  return await doc.saveAsBase64();
+});
+const tmp3=path.join(ROOT,'tests/ui/.policy-scansione.pdf');
+fs.writeFileSync(tmp3,Buffer.from(pdf3,'base64'));
+await pg.setInputFiles('input[type=file][accept*=pdf]',tmp3);
+fs.unlinkSync(tmp3);
+await pg.waitForFunction(()=>/Non riesco a leggere/.test(document.getElementById('policyEsito')?.innerText||''),null,{timeout:15000}).catch(()=>{});
+const sc=await pg.evaluate(()=>document.getElementById('policyEsito').innerText);
+ok(/Non riesco a leggere/.test(sc)&&/scansione/.test(sc),'dice che è una scansione',sc.slice(0,80));
+ok(await pg.evaluate(()=>document.querySelector('details').open),'e apre il riquadro per incollare il testo');
 
 await b.close();srv.close();
 console.log(`\n${pass} OK, ${fail} KO`);

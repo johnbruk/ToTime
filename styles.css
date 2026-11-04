@@ -1160,3 +1160,4 @@ table.griglia.numeriRiga td.riga .n{font-variant-numeric:tabular-nums}
 /* Il contratto letto: etichetta e valore, uno per riga; il valore va a capo */
 .contrattoLetto{display:grid;gap:6px}.contrattoLetto div{display:grid;grid-template-columns:140px 1fr;gap:10px;font-size:.875rem}.contrattoLetto span{color:var(--muted)}.contrattoLetto b{font-weight:600;overflow-wrap:anywhere}.contrattoLetto i{color:var(--muted);font-weight:400}.contrattoLetto .policyFonte{display:block;margin-top:2px;color:var(--muted);font-size:.8125rem;font-style:italic}.field input.daContratto,.field select.daContratto{border-color:rgba(124,137,166,.66);background:rgba(124,137,166,.08)}
 .card input[type=file]{max-width:100%;min-width:0;box-sizing:border-box}
+.avvisoPolicy{padding:10px 12px;border-radius:10px;background:rgba(214,158,46,.12);border:1px solid rgba(214,158,46,.45);font-size:.875rem;line-height:1.45}

@@ -5922,6 +5922,7 @@ const POLICY_GRUPPI=[
 const POLICY_TETTO=/\b(?:max\w*|mass\w*|fino a|up to|not (?:to )?exceed\w*|non (?:deve |può )?super\w*|limit\w*|cap(?:ped)?|tett[oi]|plafond|entro|al più|at most|jusqu['’]à|maximal\w*|ceiling|non oltre)\b/i;
 const POLICY_PER_UNITA=/\b(?:per (?:night|notte|day|giorno|nuit)|a notte|al giorno|par (?:nuit|jour)|per diem|nightly|daily)\b|\/\s?(?:notte|night|giorno|day)\b/i;
 const POLICY_ESCLUSA=/\b(?:not (?:be )?reimburs\w*|non (?:sono |è |viene |vengono )?rimbors\w*|not covered|non coper\w*|à la charge du consultant|a carico del consulente|not eligible|non ammess\w*)\b/i;
+const POLICY_DISTINGUO=/\b(?:fees?|penal\w*|no-show|mini-?bar|extras?|unless|salvo|tranne|except\w*|eccett\w*|upgrades?|first[- ]class|business class|prima classe|alcol\w*|alcohol\w*)\b/i;
 function gruppoDiVoce(cat){const g=POLICY_GRUPPI.find(g=>g.voce.test(String(cat&&cat.name||'')));return g?g.k:null}
 function leggiPolicy(righe,cats){
   // Le frasi: le righe di una tabella sono gia' frasi; un paragrafo va
@@ -5943,7 +5944,9 @@ function leggiPolicy(righe,cats){
       if(v)importi.push({v,i:m.index,valuta:/CHF|Fr/i.test(m[1]||m[4])?'CHF':'EUR'});
     }
     if(!importi.length){
-      if(POLICY_ESCLUSA.test(f))nomi.forEach(n=>{if(!esclusi[n.k])esclusi[n.k]=f});
+      // «non si rimborsano le penali di no-show dell'hotel» esclude le
+      // penali, non l'hotel: con un distinguo la voce resta com'e'
+      if(POLICY_ESCLUSA.test(f)&&!POLICY_DISTINGUO.test(f))nomi.forEach(n=>{if(!esclusi[n.k])esclusi[n.k]=f});
       return;
     }
     if(!POLICY_TETTO.test(f)&&!POLICY_PER_UNITA.test(f)){return}
@@ -5975,7 +5978,11 @@ function leggiPolicy(righe,cats){
   // Quello che la policy dice di voci che l'utente non ha
   const coperti=new Set((cats||[]).map(gruppoDiVoce));
   Object.keys(trovati).filter(k=>!coperti.has(k)).forEach(k=>trovati[k].forEach(t=>scartati.push({fonte:t.fonte,importo:t.cap,valuta:t.valuta})));
-  return {voci,scartati};
+  // Un PDF scansionato ha testo solo nelle parti aggiunte dopo (intestazione,
+  // numero di pagina): se nessuna frase nomina una spesa, la policy e'
+  // un'immagine e va detto, invece di rispondere «nessun limite».
+  const leggibile=frasi.some(f=>POLICY_GRUPPI.some(g=>g.testo.test(f)));
+  return {voci,scartati,leggibile};
 }
 // La proposta compila la pagina della policy, non il database: si
 // tiene finche' non si salva o si cambia cliente.
@@ -6004,14 +6011,19 @@ function esitoPolicyLetta(p){
     return `<div><span>${esc(v.nome)}</span><b style="font-weight:400">${cosa}<span class="policyFonte">«${esc(v.fonti[0])}»</span></b></div>`;
   }).join('');
   const altro=p.scartati.length?`<div class="small" style="margin-top:8px">Nella policy ci sono anche limiti per voci che non hai: ${p.scartati.map(s=>'«'+esc(s.fonte)+'»').join(' · ')}</div>`:'';
-  const nessuno=!p.voci.length?'<div class="small">Non ho trovato limiti per le tue voci di spesa.</div>':'';
+  if(p.leggibile===false)return `<div class="avvisoPolicy"><b>Non riesco a leggere questa policy.</b> Nel PDF c'è testo solo nell'intestazione: il resto è un'immagine, una scansione. Se riesci a copiarne il testo (sull’iPhone, con «Testo live» sulla foto della pagina), incollalo qui sotto in «Oppure incolla il testo». Altrimenti scrivi i limiti a mano nelle voci.</div>`;
+  const nessuno=!p.voci.length?'<div class="small">Non ho trovato limiti in euro per le tue voci di spesa. Se la policy li ha, scrivili a mano nelle voci qui sotto.</div>':'';
   return `<div class="contrattoLetto">${righe}</div>${nessuno}${altro}<div class="small" style="margin-top:8px">${p.voci.some(v=>v.applicabile)?'Ho compilato le voci qui sotto: controllale, cambiale se serve, e premi «Salva». Finché non salvi non cambia niente.':''} Il file non è stato salvato.</div>`;
 }
 function policyLetta(clientId,righe){
   const letta=leggiPolicy(righe,(data.expenseCategories||[]).filter(x=>x.active));
   propostaPolicy(clientId,letta);
-  if(!state.policyProposta)state.policyProposta={clientId,voci:[],scartati:[],vuota:true};
+  if(!state.policyProposta)state.policyProposta={clientId,voci:[],scartati:[],vuota:true,leggibile:letta.leggibile};
   render();
+  // Il risultato sta in cima alla pagina: chi ha appena scelto il file
+  // deve vederlo senza cercarlo
+  const box=document.getElementById('policyEsito');
+  if(box&&box.scrollIntoView)box.scrollIntoView({block:'center',behavior:'smooth'});
 }
 function policyPdfScelto(input,clientId){
   const file=input&&input.files&&input.files[0];
