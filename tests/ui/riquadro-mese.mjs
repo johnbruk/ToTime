@@ -131,10 +131,10 @@ console.log('\n=== GLI EURO HANNO SEMPRE IL PUNTINO DELLE MIGLIAIA ===');
   // italiana non raggruppa le quattro cifre, qui si raggruppa sempre.
   const pg=await apri();
   const r=await leggi(pg);
-  // il testimone: altrove, dove si usa il formato di sempre, le quattro
-  // cifre restano senza puntino — quindi qui il browser fa come il vero
+  // e adesso anche altrove: dal 04/11/2026 ogni importo in euro ha il
+  // puntino, cosi' una pagina non dice «1600,00 €» e l'altra «1.600,00 €»
   const altrove=await testo(pg);
-  ok(/\b1600,00\s?€/.test(altrove),'(testimone: fuori dal riquadro «1600,00 €» resta senza puntino)',
+  ok(/\b1\.600,00\s?€/.test(altrove)&&!/\b1600,00\s?€/.test(altrove),'anche fuori dal riquadro «1.600,00 €», col puntino',
      (altrove.match(/\b1\.?600,00\s?€/)||[''])[0]);
   const senza=(r.testo.match(/\b\d{4,},\d{2}\s?€/g)||[]);
   ok(senza.length===0,'nel riquadro nessun importo di quattro cifre senza puntino',senza.join(' | ')||'nessuno');
