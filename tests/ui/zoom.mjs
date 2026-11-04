@@ -154,7 +154,11 @@ ok(!await pc.evaluate(()=>matchMedia('(pointer: coarse)').matches),'il desktop n
 await pc.evaluate(()=>window.go('dailyForm'));await pc.waitForTimeout(250);
 const d=await pc.evaluate(()=>{const e=document.querySelector('.field input,.field select');
   return e?parseFloat(getComputedStyle(e).fontSize):0});
-ok(d===15,'i campi dei moduli restano a 15px come da progetto',d+'px');
+// Sul computer tutta la grafica cresce con lo schermo (radice 18px a
+// 1280 px e oltre, dimensione-testo.mjs): i campi restano «15px su 16»,
+// in proporzione, senza la spinta a 16px riservata al touch.
+const scala=await pc.evaluate(()=>parseFloat(getComputedStyle(document.documentElement).fontSize)/16);
+ok(Math.abs(d-15*scala)<0.01,'i campi dei moduli restano a 15px (in proporzione allo schermo) come da progetto',d+'px, scala '+scala);
 await pc.evaluate(()=>window.go('griglia'));await pc.waitForTimeout(300);
 await pc.evaluate(()=>{for(let i=0;i<36;i++){
   if(document.querySelector('.month strong')?.textContent.startsWith('Luglio 2026'))break;
@@ -163,7 +167,7 @@ await pc.waitForTimeout(400);
 const dg=await pc.evaluate(()=>{const e=[...document.querySelectorAll('table.griglia td.gg input')]
   .filter(x=>x.offsetParent!==null)[0];
   return e?parseFloat(getComputedStyle(e).fontSize):0});
-ok(dg===13.5,'e le celle della griglia a 13,5px',dg+'px');
+ok(Math.abs(dg-13.5*scala)<0.01,'e le celle della griglia a 13,5px (in proporzione)',dg+'px');
 await pc.close();
 
 await b.close();server.close();

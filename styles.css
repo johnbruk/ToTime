@@ -251,7 +251,7 @@ button,input,select,textarea{font-family:var(--font-body)} button{cursor:pointer
 @media(min-width:560px){.fzCampi{grid-template-columns:1fr 7.5rem 5.5rem;gap:var(--sp-4);align-items:start}}
 @media(min-width:720px){
   .fatTestata{display:grid;grid-template-columns:7.5rem 6rem 7rem 1fr 7.5rem;gap:14px;
-    padding:8px 16px;color:var(--muted);font-size:0.71875rem;font-weight:750;
+    padding:8px var(--sp-4);color:var(--muted);font-size:0.71875rem;font-weight:750;
     text-transform:uppercase;letter-spacing:.03em;
     border:1px solid var(--line);border-bottom:0;background:rgba(124,137,166,.10)}
   .fatTestata span:last-child{text-align:right}
