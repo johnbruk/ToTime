@@ -1,11 +1,10 @@
-// Salvare e passare al giorno dopo.
+// Salvare e passare al giorno dopo (o prima).
 //
-// Compilare una settimana vuol dire ripetere lo stesso consuntivo su
-// cinque giorni. Il punto non e' che il pulsante esista, ma che dopo
-// il salto il modulo sia gia' compilato: se cliente, progetto e
-// commessa vanno riscelti ogni volta, il salto non fa risparmiare
-// niente. E che due passaggi sullo stesso giorno non producano due
-// voci uguali.
+// Il pulsante serve a ripassare i consuntivi gia' inseriti: dopo il
+// salvataggio si apre il giorno CONSUNTIVATO successivo, saltando i
+// giorni vuoti. Non deve mai creare consuntivi nuovi: prima apriva il
+// modulo vuoto del giorno accanto e, salvandolo, nascevano voci che
+// nessuno aveva chiesto.
 import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
 import http from 'node:http'; import fs from 'node:fs'; import path from 'node:path';
 const ROOT=new URL('../..',import.meta.url).pathname.replace(/\/$/,'');
@@ -39,85 +38,62 @@ const campo=n=>pg.evaluate(x=>{const e=document.querySelector(`#app form.form [n
 const vista=()=>pg.evaluate(()=>document.documentElement.getAttribute('data-view'));
 const conta=()=>pg.evaluate(()=>window.__stores.timesheet_entries.length);
 
-console.log('\n=== A. Dal modulo nuovo si prosegue al giorno dopo ===');
+const voci=()=>pg.evaluate(()=>window.__stores.timesheet_entries.map(e=>String(e.entry_date).slice(0,10)).sort());
+const premi=re=>pg.evaluate(r=>[...document.querySelectorAll('#app button')].find(x=>new RegExp(r).test(x.textContent)).click(),re);
+const avviso=()=>pg.evaluate(()=>document.body.innerText);
+
+console.log('\n=== A. Dal modulo nuovo si salta al giorno gia\' consuntivato ===');
 await pg.evaluate(()=>window.go('dailyForm'));await pg.waitForTimeout(450);
-await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
-  const primo=[...f.client_id.options].find(o=>o.value);
-  if(primo&&!f.client_id.value){f.client_id.value=primo.value;window.refreshProjectsForForm(f)}});
-await pg.waitForTimeout(400);
 ok(await pg.$('button:has-text("Salva e vai al giorno dopo")')!==null,'il pulsante c\'è');
-await pg.evaluate(d=>{const f=document.querySelector('#app form.form');f.entry_date.value=d;},g(2));
-// Il cliente non si propone piu', e la cascata si disegna dopo averlo
-// scelto: prima non si sa di chi siano i progetti da mostrare.
-await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
+await pg.evaluate(d=>{const f=document.querySelector('#app form.form');f.entry_date.value=d;
   const primo=[...f.client_id.options].find(o=>o.value);
-  if(primo){f.client_id.value=primo.value;window.refreshProjectsForForm(f)}});
+  if(primo){f.client_id.value=primo.value;window.refreshProjectsForForm(f)}},g(2));
 await pg.waitForTimeout(400);
-// Dei due progetti del cliente uno solo porta a una commessa aperta,
-// quindi si prende da se'. Ma il menu RESTA A SCHERMO: il progetto e'
-// uno dei tre dati da indicare, e vederlo scelto non e' rumore, e'
-// l'informazione. (p2 «Alfa» non ha nessuna commessa e non si offre.)
-ok(await campo('hier_project_id')==='p1',
-   'il progetto si prende da se\': e\' l\'unico che porta a una commessa',await campo('hier_project_id'));
-ok(await pg.evaluate(()=>{const e=document.getElementById('prjField');return !!e&&!e.hidden}),
-   'ma si vede lo stesso: e\' uno dei tre dati da indicare');
-await pg.evaluate(()=>{const f=document.querySelector('#app form.form');f.hours.value='6';f.work_city.value='Milano'});
+ok(await campo('hier_project_id')==='p1','il progetto si prende da se\'',await campo('hier_project_id'));
+await pg.evaluate(()=>{const f=document.querySelector('#app form.form');f.hours.value='6'});
 const prima=await conta();
-await pg.evaluate(()=>[...document.querySelectorAll('#app button')].find(x=>/Salva e vai al giorno dopo/.test(x.textContent)).click());
+await premi('Salva e vai al giorno dopo');
 await pg.waitForTimeout(900);
 ok(await conta()===prima+1,'il consuntivo è stato salvato',(await conta())+' voci');
-ok(await vista()==='dailyForm','e si è aperto il modulo del giorno dopo',await vista());
-ok(await campo('entry_date')===g(3),'con la data avanzata di un giorno',await campo('entry_date'));
-ok(await campo('client_id')==='c1','il cliente è già quello di prima',await campo('client_id'));
-ok(await campo('hier_project_id')==='p1','e il progetto pure',await campo('hier_project_id'));
-ok(await campo('engagement_id')==='e1','e la commessa',await campo('engagement_id'));
-ok(await campo('hours')==='6','anche le ore, che di solito si ripetono',await campo('hours'));
-ok(await campo('work_city')==='Milano','e il luogo',await campo('work_city'));
-
-console.log('\n=== B. Tre giorni di fila senza riscegliere niente ===');
-for(const giorno of [4,5]){
-  await pg.evaluate(()=>[...document.querySelectorAll('#app button')].find(x=>/Salva e vai al giorno dopo/.test(x.textContent)).click());
-  await pg.waitForTimeout(900);
-  ok(await campo('entry_date')===g(giorno),'si arriva al '+g(giorno),await campo('entry_date'));
-}
-const voci=await pg.evaluate(()=>window.__stores.timesheet_entries.map(e=>e.entry_date).sort());
-ok(voci.filter(d=>[g(2),g(3),g(4)].includes(d)).length===3,'e i tre giorni sono tutti registrati',voci.join(' '));
-
-console.log('\n=== C. Se il giorno accanto e\' gia\' consuntivato, lo si apre ===');
-await pg.evaluate(()=>window.go('dailyForm'));await pg.waitForTimeout(450);
-await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
-  const primo=[...f.client_id.options].find(o=>o.value);
-  if(primo&&!f.client_id.value){f.client_id.value=primo.value;window.refreshProjectsForForm(f)}});
-await pg.waitForTimeout(400);
-await pg.evaluate(d=>{document.querySelector('#app form.form').entry_date.value=d},g(8));
-// anche qui il progetto si prende da se'
-ok(await campo('hier_project_id')==='p1','il progetto si prende da se\' anche al secondo giro',await campo('hier_project_id'));
-const prima2=await conta();
-await pg.evaluate(()=>[...document.querySelectorAll('#app button')].find(x=>/Salva e vai al giorno dopo/.test(x.textContent)).click());
-await pg.waitForTimeout(900);
-ok(await vista()==='dailyEdit','il 9 era già consuntivato: si apre in modifica invece di duplicare',await vista());
+ok(await vista()==='dailyEdit','si apre in modifica il giorno consuntivato dopo',await vista());
+ok(await campo('entry_date')===g(9),'saltando i giorni vuoti dal 3 all\'8',await campo('entry_date'));
 ok(await campo('hours')==='3','con le ore che c\'erano già',await campo('hours'));
-ok(await conta()===prima2+1,'e non è nata una seconda voce sullo stesso giorno',(await conta())+' voci');
+const tutti=await voci();
+ok(![3,4,5,6,7,8].some(n=>tutti.includes(g(n))),'e nei giorni saltati non è nato niente',tutti.join(' '));
 
-console.log('\n=== D. Si torna anche indietro ===');
-ok(await pg.$('button:has-text("Salva e vai al giorno prima")')!==null,'dal modulo di modifica si va anche al giorno prima');
-await pg.evaluate(()=>[...document.querySelectorAll('#app button')].find(x=>/giorno prima/.test(x.textContent)).click());
+console.log('\n=== B. Dopo l\'ultimo consuntivo non si crea niente ===');
+const prima2=await conta();
+await premi('Salva e vai al giorno dopo');
 await pg.waitForTimeout(900);
-ok(await campo('entry_date')===g(8),'e si arriva al giorno prima',await campo('entry_date'));
+ok(await conta()===prima2,'nessuna voce nuova',(await conta())+' voci');
+ok(await vista()==='timesheet','si torna all\'elenco',await vista());
+ok(/Non ci sono altri consuntivi dopo il/.test(await avviso()),'e lo si dice');
 
-console.log('\n=== La riga si porta dietro se stessa, cliente compreso ===');
-// Il difetto segnalato: scegliendo un cliente diverso dal primo e
-// premendo «Salva e vai al giorno dopo», il modulo nuovo tornava sul
-// primo cliente dell'elenco. Il cliente giusto veniva calcolato — il
-// blocco delle commesse sotto era il suo — ma le <option> uscivano
-// senza «selected», e il browser sceglie da se': la prima.
+console.log('\n=== C. Si torna anche indietro, sempre sui giorni consuntivati ===');
+const v9=await pg.evaluate(()=>window.__stores.timesheet_entries.find(e=>e.id==='v9').id);
+await pg.evaluate(id=>window.navigateTo('dailyEdit',{edit:id}),v9);await pg.waitForTimeout(500);
+ok(await pg.$('button:has-text("Salva e vai al giorno prima")')!==null,'dal modulo di modifica si va anche al giorno prima');
+const prima3=await conta();
+await premi('giorno prima');
+await pg.waitForTimeout(900);
+ok(await vista()==='dailyEdit','si apre in modifica',await vista());
+ok(await campo('entry_date')===g(2),'il giorno consuntivato prima, non l\'8 vuoto',await campo('entry_date'));
+ok(await campo('hours')==='6','con le sue ore',await campo('hours'));
+ok(await conta()===prima3,'e senza voci nuove',(await conta())+' voci');
+
+console.log('\n=== D. Prima del primo consuntivo ci si ferma ===');
+await premi('giorno prima');
+await pg.waitForTimeout(900);
+ok(await vista()==='timesheet','si torna all\'elenco',await vista());
+ok(/Non ci sono altri consuntivi prima del/.test(await avviso()),'e lo si dice');
+ok(await conta()===prima3,'sempre senza voci nuove',(await conta())+' voci');
+
+console.log('\n=== E. Il cliente salvato è quello scelto ===');
+// Il difetto di allora: scegliendo un cliente diverso dal primo, le
+// <option> uscivano senza «selected» e il browser prendeva la prima.
 await pg.evaluate(()=>window.go('dailyForm'));await pg.waitForTimeout(500);
-const opz=await pg.evaluate(()=>{const s=document.querySelector('#app [name=client_id]');
-  return s?[...s.options].map(o=>o.value):[]});
-// La prima voce adesso e' il segnaposto «scegli il cliente»: i clienti
-// veri cominciano dopo, e qui ne serve uno DIVERSO da quello che si
-// sceglierebbe per primo.
-const reali=opz.filter(Boolean);
+const reali=await pg.evaluate(()=>{const s=document.querySelector('#app [name=client_id]');
+  return s?[...s.options].map(o=>o.value).filter(Boolean):[]});
 ok(reali.length>1,'nel banco di prova ci sono piu\' clienti',reali.join(', '));
 const altro=reali[1];
 await pg.evaluate(v=>{const s=document.querySelector('#app [name=client_id]');
@@ -125,23 +101,14 @@ await pg.evaluate(v=>{const s=document.querySelector('#app [name=client_id]');
 await pg.waitForTimeout(400);
 await pg.evaluate(()=>{const f=document.querySelector('#app form.form');
   f.querySelector('[name=entry_date]').value='2026-07-20';
-  f.querySelector('[name=hours]').value='6';
-  const d=f.querySelector('[name=description]');if(d)d.value='riga di prova';
-});
-await pg.evaluate(()=>{const b=[...document.querySelectorAll('#app button')]
-  .find(x=>/giorno dopo/.test(x.textContent));b&&b.click()});
+  f.querySelector('[name=hours]').value='6';});
+await premi('giorno dopo');
 await pg.waitForTimeout(1500);
-ok(await campo('entry_date')==='2026-07-21','si passa al giorno dopo',await campo('entry_date'));
-const cli=await pg.evaluate(()=>document.querySelector('#app [name=client_id]')?.value);
-ok(cli===altro,'e il cliente resta quello scelto, non il primo dell\'elenco',
-   `atteso ${altro}, trovato ${cli}`);
-ok(await campo('hours')==='6','le ore si riportano',await campo('hours'));
-ok(await campo('description')==='riga di prova','e la descrizione pure',await campo('description'));
-// e quello salvato e' il cliente giusto, non quello mostrato per sbaglio
+ok(await campo('entry_date')===g(2),'si salta al primo giorno consuntivato dopo il 20 luglio',await campo('entry_date'));
+ok(!(await voci()).includes('2026-07-21'),'e il 21 luglio resta vuoto');
 const salvato=await pg.evaluate(()=>(window.__ins||[])
   .filter(x=>x.__table==='timesheet_entries'&&x.entry_date==='2026-07-20').map(x=>x.client_id));
-ok(salvato.includes(altro),'e sul database era finito il cliente giusto fin dall\'inizio',
-   JSON.stringify(salvato));
+ok(salvato.includes(altro),'sul database è finito il cliente scelto',JSON.stringify(salvato));
 
 ok(errs.length===0,'nessun errore JS',errs.slice(0,2).join(' | ')||'nessuno');
 await pg.close();await b.close();srv.close();
