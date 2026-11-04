@@ -27,8 +27,12 @@ const i0=src.indexOf('const map={home');
 const VISTE=src.slice(i0+11,src.indexOf('};',i0)).split(',').map(x=>x.split(':')[0].trim()).filter(Boolean);
 const URL_=`http://127.0.0.1:${port}/tests/ui/mock.html`;
 
-async function apri(opts,scelta){
+// Su GitHub e su certi dispositivi i caratteri sono più larghi che qui:
+// con «largo» si forza DejaVu Sans, che occupa più spazio, per vedere
+// prima quello che uscirebbe dallo schermo solo altrove.
+async function apri(opts,scelta,largo){
   const ctx=await b.newContext(opts);
+  if(largo)await ctx.addInitScript(()=>document.addEventListener('DOMContentLoaded',()=>{const st=document.createElement('style');st.textContent='*{font-family:"DejaVu Sans",sans-serif!important}';document.head.appendChild(st)}));
   if(scelta)await ctx.addInitScript(v=>{try{localStorage.setItem('totime-testo',v)}catch(e){}},scelta);
   const pg=await ctx.newPage();const errs=[];pg.on('pageerror',e=>errs.push(e.message));
   await pg.goto(URL_,{waitUntil:'networkidle'});await pg.waitForTimeout(600);
@@ -63,6 +67,10 @@ for(const [W,atteso,nome] of [[320,16,'telefono piccolo'],[390,16,'telefono'],[4
     const r=await radice(pg);
     ok(Math.abs(r-16*f)<0.05,`iPhone con testo al ${nome}: anche l’app (${(16*f).toFixed(1)}px)`,String(r));
   }
+  // Le misure «per l'accessibilità» di iOS arrivano a 53px: il fattore si
+  // ferma a 1,5 (e in basso a 0,8), altrimenti le cifre non stanno più.
+  const lim=await pg.evaluate(()=>[window.limitaFattoreTesto(53/17),window.limitaFattoreTesto(10/17),window.limitaFattoreTesto(14/17)]);
+  ok(lim[0]===1.5&&lim[1]===0.8&&lim[2]===0.824,'iPhone con le misure enormi (53px) si ferma a 1,5; in basso a 0,8',JSON.stringify(lim));
   await pg.evaluate(()=>document.documentElement.style.setProperty('--testo-sistema','0.824'));
   await pg.evaluate(()=>window.go('dailyForm'));await pg.waitForTimeout(150);
   const minimo=await pg.evaluate(()=>Math.min(...[...document.querySelectorAll('input,select,textarea')].filter(e=>e.getBoundingClientRect().width&&!['checkbox','radio','file'].includes(e.type)).map(e=>parseFloat(getComputedStyle(e).fontSize))));
@@ -108,9 +116,10 @@ console.log('\n=== B. Scelta in Aspetto ===');
   await ctx.close();
 }
 
-// Le prove di «Testo su misura» (4/11/2026): ogni vista a 360, 430, 768
-// e 1280 px, testo del dispositivo al 100% e al 135%, scelta dell'app su
-// Piccolo e su Molto grande.
+// Le prove di «Testo su misura» (versione 3, 4/11/2026): ogni vista a
+// 320, 360, 430, 768 e 1280 px, testo del dispositivo al 100% e al 135%,
+// scelta dell'app su Piccolo e su Molto grande; Molto grande anche con un
+// carattere più largo.
 //  - la pagina non scorre mai di lato;
 //  - nessun testo tagliato a metà (i puntini «…» vanno bene);
 //  - sul telefono, anche con «Piccolo», nessun campo sotto i 16px.
@@ -123,11 +132,16 @@ const tagliati=pg=>pg.evaluate(()=>{const out=[];
     if(cs.overflowX==='visible'||cs.overflowX==='auto'||cs.overflowX==='scroll')return;
     if(e.clientWidth&&e.scrollWidth>e.clientWidth+1)out.push(e.tagName.toLowerCase()+'.'+String(e.className).split(' ')[0]+' «'+e.textContent.trim().slice(0,24)+'»');
   });return out});
-for(const W of [360,430,768,1280]){
+const PROVE=[];
+for(const W of [320,360,430,768,1280])for(const sistema of ['1','1.35']){
+  for(const scelta of ['piccolo','molto'])PROVE.push([W,sistema,scelta,false]);
+  PROVE.push([W,sistema,'molto',true]);
+}
+for(const [W,sistema,scelta,largo] of PROVE){
   const tocco=W<=768;
-  for(const sistema of ['1','1.35']){
-    for(const scelta of ['piccolo','molto']){
-      const {ctx,pg,errs}=await apri({viewport:{width:W,height:800},hasTouch:tocco},scelta);
+  {
+    {
+      const {ctx,pg,errs}=await apri({viewport:{width:W,height:800},hasTouch:tocco},scelta,largo);
       await pg.evaluate(f=>document.documentElement.style.setProperty('--testo-sistema',f),sistema);
       const fuori=[],tronchi=[],piccoli=[];
       for(const v of VISTE){
@@ -138,7 +152,7 @@ for(const W of [360,430,768,1280]){
         for(const t of await tagliati(pg))tronchi.push(`${v}: ${t}`);
         if(tocco){const m=await pg.evaluate(()=>[...document.querySelectorAll('input,select,textarea')].filter(e=>e.getBoundingClientRect().width&&!['checkbox','radio','file'].includes(e.type)).map(e=>parseFloat(getComputedStyle(e).fontSize)));if(m.some(x=>x<16))piccoli.push(v)}
       }
-      const nome=`${W}px · dispositivo ${Math.round(sistema*100)}% · ${scelta==='molto'?'Molto grande':'Piccolo'}`;
+      const nome=`${W}px · dispositivo ${Math.round(sistema*100)}% · ${scelta==='molto'?'Molto grande':'Piccolo'}${largo?' · carattere largo':''}`;
       ok(!fuori.length,`${nome}: nessuna delle ${VISTE.length} viste scorre di lato`,fuori.join(', '));
       ok(!tronchi.length,`${nome}: nessun testo tagliato`,[...new Set(tronchi)].slice(0,8).join(' | '));
       if(tocco)ok(!piccoli.length,`${nome}: campi almeno 16px (niente zoom di iPhone)`,piccoli.join(', '));

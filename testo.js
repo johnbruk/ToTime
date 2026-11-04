@@ -1,6 +1,6 @@
 // Dimensione del testo: sta in <head>, prima del CSS, così la pagina
 // compare già con la misura giusta. Stesse regole di Debt Escape
-// («Testo su misura», 4/11/2026).
+// («Testo su misura», versione 3 del 4/11/2026).
 //
 // Tutte le scritte sono in rem e partono dalla radice, che è il prodotto
 // di due fattori (styles.css, regola html):
@@ -16,6 +16,11 @@
 //                   «molto» ×1,25.
 (function () {
   var radice = document.documentElement;
+  // Le misure «per l'accessibilità» di iOS arrivano a 53px (3 volte il
+  // normale): oltre 1,5 le cifre grandi non stanno più nello schermo di un
+  // telefono. Chi ha bisogno di più ha lo zoom e «Molto grande»
+  // (1,5 × 1,25 = quasi il doppio). Sotto 0,8 il testo diventa illeggibile.
+  function limita(f) { return Math.round(Math.min(1.5, Math.max(0.8, f)) * 1000) / 1000; }
   function fattoreSistema() {
     try {
       if (!(window.CSS && CSS.supports && CSS.supports("font", "-apple-system-body") && CSS.supports("-webkit-touch-callout", "none"))) return 1;
@@ -24,7 +29,7 @@
       radice.appendChild(s);
       var px = parseFloat(getComputedStyle(s).fontSize);
       radice.removeChild(s);
-      return px > 8 && px < 70 ? Math.round(px / 17 * 1000) / 1000 : 1;
+      return px > 0 ? limita(px / 17) : 1;
     } catch (e) { return 1; }
   }
   function applica() {
@@ -38,4 +43,5 @@
   // Se si cambia la dimensione nel telefono con l'app aperta, al ritorno si adegua.
   document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") applica(); });
   window.applicaDimensioneTesto = applica;
+  window.limitaFattoreTesto = limita; // per i test
 })();
